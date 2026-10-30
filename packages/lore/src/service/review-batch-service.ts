@@ -27,6 +27,9 @@
  *   - A current review is re-made when its facts fingerprint changed (suite result ids, deciding attestation ids,
  *     cited-rule states, prompt version, clearing result), never because main's HEAD alone moved (AC-AF-6).
  *   - The landing never waits for a review: {@link ReviewTriggerService.start} only reads state and spawns.
+ *   - Each plan is assessed through the ONE close function when {@link BatchRunPorts.closeFlow} is wired (BR-1507, AC-DCS2-11): the batch
+ *     keeps the store lease and the once-per-batch suite (BR-1379), the close function holds the plan's own lease and runs verify, rule
+ *     apply, the anchor check and the P0 UAT gate before the runner's review, filing and gated archive.
  * Side-effect class: IO through injected ports (services never import each other; the CLI adapter binds the real ones).
  *
  * Reference: GitHub merge queue (one batched check run for many queued items).
@@ -163,6 +166,13 @@ export interface BatchRunPorts {
   readonly recordError: (error: BatchErrorRecord) => Promise<Result<void, LoreError>>;
   readonly filing: IssueFilingService | undefined;
   readonly now: () => string;
+  /**
+   * The ONE close function (`PlanCloseService.close`, BR-1507) around one plan's assess: it refuses a plan with an open task, holds the
+   * plan's own lease, runs verify, rule apply, the anchor check and the P0 UAT gate, then calls `assess` — the runner's own review,
+   * filing and gated archive of that plan — and returns its row (or a row saying why the plan stayed open or was left to another close).
+   * Optional (absent = the runner assesses and archives directly, as a bare construction does).
+   */
+  readonly closeFlow?: (ref: string, assess: () => Promise<BatchPlanRow>) => Promise<BatchPlanRow>;
 }
 
 /** One errored attempt, as stored in the audit row. */
@@ -304,7 +314,8 @@ export class ReviewBatchRunner {
         rows.push({ plan: ref, outcome: "error", reviewed: false, failed: [], issues: [], detail: messageOf(leaseLostError()) });
         continue;
       }
-      rows.push(await this.runPlan(ref, ports, measureOnce));
+      const assess = (): Promise<BatchPlanRow> => this.runPlan(ref, ports, measureOnce);
+      rows.push(ports.closeFlow === undefined ? await assess() : await ports.closeFlow(ref, assess));
     }
     return { state: "ran", tookOver, suiteRuns, rows };
   }

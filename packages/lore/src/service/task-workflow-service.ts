@@ -601,6 +601,25 @@ export interface DoneOpts {
    * guard-lore-done-and-a D2). Absent = unknown: never the owner of anything.
    */
   callerSession?: string;
+  /**
+   * `true` = this archive does not start the automatic plan close even when it leaves the plan with no open task: the caller (a landing,
+   * `lore integrate` / `lore land`) starts the review batch itself as its LAST step, after the rebuild and the schema migration, so the
+   * batch runs main's binary over the migrated corpus (BR-1379). Absent = the archive that completes a plan starts the close.
+   */
+  deferPlanClose?: boolean;
+}
+
+/**
+ * The trigger of the automatic plan close (AC-DCS2-11): what `TaskWorkflowService.done` calls once, after the archive that left a plan with
+ * no non-terminal task. It starts the detached review batch through the existing starter and returns at once; it never waits for verify,
+ * apply or assess, and never fails the archive (a start that could not happen is a line, not an error).
+ */
+export interface PlanCloseTrigger {
+  /**
+   * @param planSlug - the plan every task of which is now archived or deprecated
+   * @returns the one line the caller prints about what the trigger did; `undefined` when it has nothing to say
+   */
+  afterLastArchive(planSlug: string): Promise<string | undefined>;
 }
 
 /**
@@ -782,6 +801,11 @@ export interface DoneResult {
    * task-plan-membership-is-extra-plan-id-but-the-last-task.
    */
   plan_membership_disagreement?: PlanMembershipDisagreement;
+  /**
+   * The line the plan-close trigger reported (AC-DCS2-11): present ONLY when this archive left its plan with no non-terminal task and the
+   * caller wired a {@link PlanCloseTrigger}. The batch it started runs detached; the archive never waited for it.
+   */
+  plan_close_start?: string;
   /**
    * Issue #106 / BR-961 — one outcome per worktree this task's claims recorded, from the cleanup
    * pass that runs AFTER a real archive walk (absent on the idempotent no-op branch). Never an
@@ -2710,6 +2734,17 @@ export class TaskWorkflowService {
   }
 
   private archiveIssueClosePort: ArchiveIssueClosePort | undefined;
+
+  /**
+   * Hands the workflow service the trigger of the automatic plan close (AC-DCS2-11): after the archive of the LAST non-terminal task of a
+   * plan it is called once, never waited on for a review, and starts the detached review batch. Set by the command that owns the process
+   * facts a detached spawn needs (the verified caller, the binary); an unwired service (every bare construction, every read) starts none.
+   */
+  setPlanCloseTrigger(port: PlanCloseTrigger): void {
+    this.planCloseTrigger = port;
+  }
+
+  private planCloseTrigger: PlanCloseTrigger | undefined;
 
   /**
    * Wires the decide() seam of `done --override-attestation(-cite)` (AC-AU-7). Set by the composition root;
@@ -5300,10 +5335,19 @@ export class TaskWorkflowService {
     const issueClose =
       this.archiveIssueClosePort === undefined ? undefined : await this.archiveIssueClosePort.onArchived(task, opts.by);
 
+    // reason: AC-DCS2-11 — the archive that leaves a plan with no non-terminal task is the one that starts the plan's close, after the
+    // transaction of the archive and the cleanup above. The trigger only starts a detached batch and returns; a non-last archive
+    // (`planFact` undefined or a membership disagreement) starts nothing.
+    const planCloseStart =
+      this.planCloseTrigger !== undefined && opts.deferPlanClose !== true && (planFact?.kind === "fully_terminal" || planFact?.kind === "fully_terminal_with_empty_phases")
+        ? await this.planCloseTrigger.afterLastArchive(planFact.plan_slug)
+        : undefined;
+
     return ok({
       task,
       already_done: false,
       transitions,
+      ...(planCloseStart !== undefined ? { plan_close_start: planCloseStart } : {}),
       worktree_outcomes: worktreeOutcomes,
       ...(commitRangeNote(task.extra) !== undefined ? { commit_range_note: commitRangeNote(task.extra) as string } : {}),
       ...(removed.length > 0 ? { removed_oracles: removed } : {}),

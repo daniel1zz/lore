@@ -2,6 +2,10 @@
  * lore plan — plan-level writers.
  *
  * Subcommands:
+ *   close <plan>
+ *       Close a plan whose tasks are all archived or deprecated (AC-DCS2-12): the ONE close function (`PlanCloseService`) that the
+ *       automatic trigger and the review batch also run. Exit 0 closed, 4 refused (`plan-open-tasks`, a step, or a gate dimension that
+ *       keeps the plan open), 75 `plan-close-busy`.
  *   integration-branch <plan> <branch>
  *       Declare the feature branch the plan lands through (`extra.integration_branch`): a `blocks` edge is
  *       READY-met when the blocker landed there, while `lore done` still requires main.
@@ -49,6 +53,29 @@ export default defineLoreCommand({
     description: "Plan-level writers (integration branch)",
   },
   subCommands: {
+    close: defineLoreCommand({
+      meta: {
+        name: "close",
+        description:
+          "Close a plan whose tasks are all archived or deprecated: verify, rule apply of every linked spec, anchor check, P0 UAT gate, assess (exit 4 = refused or a gate keeps it open, 75 = another close holds the plan)",
+      },
+      args: {
+        plan: { type: "positional" as const, description: "Plan document ID or slug", required: true },
+        json: { type: "boolean" as const, description: "Output result as JSON" },
+      },
+      async run(context): Promise<number> {
+        const { args } = context;
+        const inv = invocationOf(context);
+        const { loadLoreApp } = await import("../loader.js");
+        const { runPlanClose } = await import("../plan-close-run.js");
+        const { app, dbPath, config } = loadLoreApp({ inv });
+        try {
+          return await runPlanClose({ inv, app, dbPath, config, planRef: args.plan as string, json: args.json === true });
+        } finally {
+          app.close();
+        }
+      },
+    }),
     "integration-branch": defineLoreCommand({
       meta: {
         name: "integration-branch",

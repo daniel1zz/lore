@@ -17,6 +17,7 @@ import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { printLine } from "../output.js";
+import { buildPlanCloseTrigger } from "../review-batch-wiring.js";
 
 export default defineLoreCommand({
   meta: {
@@ -31,13 +32,24 @@ export default defineLoreCommand({
   async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
-    const { app } = loadLoreApp({ inv });
+    const { app, dbPath } = loadLoreApp({ inv });
     try {
       const verifiedIdentity = await app.verifiedInvocationIdentity?.();
       if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
         printLine(inv.io.stderr, formatErrorFor(inv, verifiedIdentity.error)); // CLI surface
         exitCli(exitCode(verifiedIdentity.error));
       }
+      // reason: AC-DCS2-11 — the finish of a check or corpus task archives it, and the archive of the last task of a plan starts the plan's close
+      const trigger = buildPlanCloseTrigger({
+        app,
+        dbPath,
+        execPath: inv.execPath,
+        isCompiled: inv.isCompiled,
+        env: inv.env,
+        actor: resolveActor(inv),
+        caller: { claimedRun: inv.identity.harnessRun, verified: verifiedIdentity ?? { ok: true, value: undefined } },
+      });
+      if (trigger !== undefined) app.taskWorkflowService.setPlanCloseTrigger(trigger);
       if (app.taskFinishService === undefined) {
         printLine(inv.io.stderr, "Error: lore finish is not available in this composition"); // CLI surface
         return 1;
@@ -66,6 +78,8 @@ export default defineLoreCommand({
         if (outcome.added_oracles.length > 0) printLine(inv.io.stdout, `Added to the contract by the write set: ${outcome.added_oracles.join(", ")}`);
       }
       printLine(inv.io.stdout, `Next: ${outcome.next_step}`);
+      // reason: stderr, so the stdout of a finish keeps its shape
+      if (outcome.plan_close_start !== undefined) printLine(inv.io.stderr, outcome.plan_close_start); // CLI surface
     } finally {
       app.close();
     }

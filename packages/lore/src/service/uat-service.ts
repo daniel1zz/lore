@@ -43,8 +43,11 @@
 
 import {
   err,
+  isAcSuperseded,
   ok,
+  specAcceptanceCriteriaSchema,
   uatVerdictSchema,
+  type UatAcceptedCriterion,
   type CreateDocInput,
   type DocRecord,
   type LinkRecord,
@@ -153,13 +156,20 @@ export class UatService {
     }
     const planId = target.id;
 
+    // reason: AC-DCS2-18 — every accepted criterion must name an existing human-mode criterion BEFORE anything is created, so a
+    // verdict that could never be counted is refused with nothing stored; `spec` is stored as the spec's slug, the one spelling the
+    // landing measure compares.
+    const accepted = await this.resolveAcceptedCriteria(verdict.accepted_criteria ?? []);
+    if (!accepted.ok) return accepted;
+    const stored: UatVerdict = verdict.accepted_criteria === undefined ? verdict : { ...verdict, accepted_criteria: accepted.value };
+
     const input: CreateDocInput = {
       type: "knowledge",
       title: `UAT — ${planIdOrSlug}`,
       // BR-570: the verdict is filed under the plan it judges (its parent), as well as informs-linked to it below.
       parent_id: planId,
-      content: renderUatContent(verdict),
-      extra: { sub_type: "uat", uat: verdict },
+      content: renderUatContent(stored),
+      extra: { sub_type: "uat", uat: stored },
     };
     const createResult = await this.deps.createUatDoc(input);
     if (!createResult.ok) return createResult;
@@ -190,4 +200,42 @@ export class UatService {
 
     return ok({ doc });
   }
+
+  /**
+   * Resolves each `{spec, ac}` pair a verdict accepts: the spec must resolve to a spec, declare the criterion, the criterion must be
+   * human-mode and not superseded (a script or ai criterion is proven by a runner or a judge, never by a person's verdict).
+   *
+   * @returns the pairs with `spec` rewritten to the spec's slug; the first pair that cannot be counted is refused, naming it
+   */
+  private async resolveAcceptedCriteria(pairs: readonly UatAcceptedCriterion[]): Promise<Result<UatAcceptedCriterion[], LoreError>> {
+    const resolved: UatAcceptedCriterion[] = [];
+    for (const pair of pairs) {
+      const spec = await this.deps.resolveTarget(pair.spec);
+      if (!spec.ok) {
+        return err(acceptedCriterionRefusal(pair, `its spec "${pair.spec}" does not resolve: ${spec.error.code}`));
+      }
+      if (spec.value.type !== "spec") {
+        return err(acceptedCriterionRefusal(pair, `"${pair.spec}" is a ${spec.value.type}, not a spec`));
+      }
+      const declared = specAcceptanceCriteriaSchema.safeParse(spec.value.extra["acceptance_criteria"]);
+      const criterion = declared.success ? declared.data.find((candidate) => candidate.id === pair.ac) : undefined;
+      if (criterion === undefined) return err(acceptedCriterionRefusal(pair, `${spec.value.slug} declares no criterion ${pair.ac}`));
+      if (isAcSuperseded(criterion)) return err(acceptedCriterionRefusal(pair, `${pair.ac} of ${spec.value.slug} is superseded and counts for nothing`));
+      if (criterion.verify.mode !== "human") {
+        return err(acceptedCriterionRefusal(pair, `${pair.ac} of ${spec.value.slug} is ${criterion.verify.mode}-mode: only a human-mode criterion is accepted by a verdict`));
+      }
+      resolved.push({ ...pair, spec: spec.value.slug });
+    }
+    return ok(resolved);
+  }
+}
+
+function acceptedCriterionRefusal(pair: UatAcceptedCriterion, why: string): LoreError {
+  return {
+    code: "VALIDATION_ERROR",
+    field: "accepted_criteria",
+    message: `Cannot record the UAT verdict: accepted criterion ${pair.ac} (spec ${pair.spec}) cannot be counted: ${why}. Nothing was recorded.`,
+    value: pair.ac,
+    rule: "BR-1210",
+  };
 }

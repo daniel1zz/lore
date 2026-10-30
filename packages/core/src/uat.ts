@@ -13,7 +13,8 @@
  * Public surface:
  *   - UAT_VERDICTS / UatVerdictDecision — the three top-level run outcomes
  *   - UAT_TIERS / UatTier — P0/P1/P2 priority tiers
- *   - uatTierResultSchema / uatVerdictSchema + UatVerdict — the typed extra.uat payload
+ *   - uatTierResultSchema / uatAcceptedCriterionSchema / uatVerdictSchema + UatVerdict — the typed extra.uat payload
+ *     (`accepted_criteria`: the human-mode criteria a verdict accepts, AC-DCS2-18)
  *   - isP0Accepted(uat) — the pure gate predicate (P0 acceptance, all four conditions)
  *
  * Invariants:
@@ -56,6 +57,20 @@ export const uatTierResultSchema = z.object({
 export type UatTierResult = z.infer<typeof uatTierResultSchema>;
 
 /**
+ * One human-mode criterion a verdict accepts (AC-DCS2-18): the spec that declares it, its id, and what the person observed.
+ * `lore rule apply` and plan close count a human-mode criterion citing a changed rule as met only through the newest accepting
+ * verdict of the plan that owns it listing this pair. `UatService.record` stores `spec` as the spec's slug.
+ */
+export const uatAcceptedCriterionSchema = z.object({
+  spec: z.string().min(1),
+  ac: z.string().min(1),
+  observation: z.string().trim().min(1),
+});
+
+/** Derived TypeScript type for one accepted criterion of a verdict. */
+export type UatAcceptedCriterion = z.infer<typeof uatAcceptedCriterionSchema>;
+
+/**
  * The typed `extra.uat` payload — a machine-readable UAT verdict. Written EXCLUSIVELY by
  * `lore uat record` (via `CorpusService.createUatDoc`'s writer-identity guard, mirroring
  * the `handoff` sub_type precedent); direct `lore create knowledge --sub-type uat` is
@@ -88,6 +103,11 @@ export const uatVerdictSchema = z.object({
   /** Slug/id of the plan (or spec) this run accepted — informational; the corpus `informs`
    *  link is the authoritative binding. */
   plan_ref: z.string().optional(),
+  /**
+   * The human-mode criteria this verdict accepts, one entry per criterion with what was observed (AC-DCS2-18). Optional: a verdict
+   * without it accepts the plan's P0 journeys (`isP0Accepted`) but no criterion that cites a changed rule.
+   */
+  accepted_criteria: z.array(uatAcceptedCriterionSchema).optional(),
   /** Run provenance. `degraded: true` marks a self-verified run (independence not achievable). */
   run_meta: z.object({
     at: z.string(),

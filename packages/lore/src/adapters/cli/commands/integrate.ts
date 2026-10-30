@@ -368,6 +368,9 @@ export async function runIntegrate(opts: IntegrateRunOptions): Promise<number> {
           harnessRun: identity?.value?.harnessRun ?? null,
           source: app.callerSurface,
           ...(callerSession !== undefined ? { callerSession } : {}),
+          // reason: AC-DCS2-11 — the landing starts the review batch itself as its last step (BR-1379), after the rebuild and the schema
+          // migration; an archive inside the done walk must not start it earlier
+          deferPlanClose: true,
         };
         const completions: TaskCompletion[] = [];
         for (const task of tasks) {
