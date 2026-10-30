@@ -109,11 +109,14 @@ describe("AC-DR-7 file premises", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ decision: "spec-x@2", part: "premise 1", kind: "wrong-when-written" });
     expect(findings[0]?.fact).toContain("180000");
+    // #500: the finding carries its source as a structured address, so root-cause cites never read the fact text
+    expect(findings[0]?.source).toEqual({ kind: "file", path: "registry.ts", lines: [59, 59], sha: shaA });
   });
 
   it("AC-DR-7 a path that did not exist at its commit is wrong-when-written", async () => {
     const findings = await recheck(decisionOf([filePremise(quoteOf("nope.ts", 1, "x"))]));
     expect(findings.map((f) => f.kind)).toEqual(["wrong-when-written"]);
+    expect(findings[0]?.source).toMatchObject({ kind: "file", path: "nope.ts" });
   });
 
   it("AC-DR-7 a quote that still holds on main is no finding", async () => {
@@ -191,6 +194,7 @@ describe("AC-DR-7 command premises", () => {
     const runner: CommandRunnerPort = { run: async () => ok({ exitCode: 0, output: "LIMIT = 500000" }) };
     const stale = await recheck(decisionOf([cmdPremise("grep -n LIMIT registry.ts", "180000")]), runner);
     expect(stale.map((f) => f.kind)).toEqual(["stale-since"]);
+    expect(stale[0]?.source).toEqual({ kind: "cmd", command: "grep -n LIMIT registry.ts" });
     expect(await recheck(decisionOf([cmdPremise("grep -n LIMIT registry.ts", "500000")]), runner)).toEqual([]);
   });
 

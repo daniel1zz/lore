@@ -47,6 +47,7 @@ import {
   parseDecisionSource,
   specRuleChangesSchema,
   type DecisionFinding,
+  type DecisionFindingSource,
   type DecisionGate,
   type DecisionRecord,
   type DecisionScore,
@@ -59,6 +60,7 @@ import {
   type VersionRecord,
 } from "@lore/core";
 import { judgedDecisionsAnswerSchema, type JudgedDecisionInput } from "../ai/milestone-review-template.js";
+import { splitFileLines, splitQuote } from "./decision-quote.js";
 import { approvedRulesOf } from "./baseline-items.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import type { GitPort } from "./rule-state-service.js";
@@ -186,7 +188,6 @@ function containsRun(haystack: readonly string[], needle: readonly string[]): bo
   return false;
 }
 
-const linesOf = (text: string): string[] => text.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n");
 
 interface FileSource {
   readonly path: string;
@@ -194,32 +195,49 @@ interface FileSource {
   readonly sha: string;
 }
 
-/** Check one pinned file source; `quote` absent = derive it from the pinned commit (gate / score evidence). */
-function checkFileSource(git: GitPort, source: FileSource, quote: string | undefined): { kind: string; fact: string } | undefined {
+/** One check's outcome: the finding kind and fact, plus the structured source it is about (#500). */
+interface SourceFinding {
+  readonly kind: string;
+  readonly fact: string;
+  readonly source?: DecisionFindingSource;
+}
+
+/** Check one pinned file source; `quote` absent = derive it from the pinned commit (gate / score evidence). Every finding names the file span as its structured source. */
+function checkFileSource(git: GitPort, source: FileSource, quote: string | undefined): SourceFinding | undefined {
+  const found = checkFileSourceFact(git, source, quote);
+  return found === undefined ? undefined : { ...found, source: { kind: "file", path: source.path, lines: [source.lines[0], source.lines[1]], sha: source.sha } };
+}
+
+function checkFileSourceFact(git: GitPort, source: FileSource, quote: string | undefined): { kind: string; fact: string } | undefined {
   const at = `${source.path}:${source.lines[0]}-${source.lines[1]}@${source.sha}`;
   const written = git.showFile(source.sha, source.path);
   if (!written.ok) return { kind: "unverifiable", fact: `git could not answer for ${at}: ${describeError(written.error)}` };
   if (written.value.state === "unreachable") return { kind: "unverifiable", fact: `commit ${source.sha} is not reachable, so ${at} cannot be read` };
   if (written.value.state === "path-absent") return { kind: "wrong-when-written", fact: `${source.path} does not exist at ${source.sha}` };
-  const atCommit = linesOf(written.value.content);
+  const atCommit = splitFileLines(written.value.content);
   if (source.lines[1] > atCommit.length) {
     return { kind: "wrong-when-written", fact: `${source.path} has ${atCommit.length} lines at ${source.sha}, the premise cites ${source.lines[0]}-${source.lines[1]}` };
   }
   const actual = atCommit.slice(source.lines[0] - 1, source.lines[1]);
-  const quoted = quote === undefined ? actual : linesOf(quote);
+  const quoted = quote === undefined ? actual : splitQuote(quote);
   if (quote !== undefined && actual.join("\n") !== quoted.join("\n")) {
     return { kind: "wrong-when-written", fact: `${at} read "${actual.join(" / ")}" when written, the premise quotes "${quoted.join(" / ")}"` };
   }
   const now = git.showFile("HEAD", source.path);
   if (!now.ok) return { kind: "unverifiable", fact: `git could not answer for ${source.path} on main: ${describeError(now.error)}` };
   if (now.value.state !== "present") return { kind: "stale-since", fact: `${source.path} no longer exists on main` };
-  if (!containsRun(linesOf(now.value.content), quoted)) {
+  if (!containsRun(splitFileLines(now.value.content), quoted)) {
     return { kind: "stale-since", fact: `the quoted lines of ${at} (${quoted.join(" / ")}) are no longer in ${source.path} on main` };
   }
   return undefined;
 }
 
-async function checkCommandSource(
+async function checkCommandSource(runner: CommandRunnerPort, command: string, expect: string): Promise<SourceFinding | undefined> {
+  const found = await checkCommandSourceFact(runner, command, expect);
+  return found === undefined ? undefined : { ...found, source: { kind: "cmd", command } };
+}
+
+async function checkCommandSourceFact(
   runner: CommandRunnerPort,
   command: string,
   expect: string,
@@ -239,7 +257,7 @@ async function checkCommandSource(
 async function checkEvidence(
   deps: DecisionRecheckDeps,
   part: Pick<DecisionGate | DecisionScore, "evidence" | "evidence_source">,
-): Promise<{ kind: string; fact: string } | undefined> {
+): Promise<SourceFinding | undefined> {
   if (part.evidence_source !== undefined) return checkFileSource(deps.git, part.evidence_source, part.evidence_source.quote);
   const evidence = part.evidence;
   const parsed = parseDecisionSource(evidence.trim());
@@ -260,7 +278,7 @@ async function checkEvidence(
  */
 export async function recheckDecision(deps: DecisionRecheckDeps, decision: Pick<SelectedDecision, "address" | "record">): Promise<DecisionFinding[]> {
   const findings: DecisionFinding[] = [];
-  const add = (part: string, found: { kind: string; fact: string } | undefined): void => {
+  const add = (part: string, found: SourceFinding | undefined): void => {
     if (found !== undefined) findings.push({ decision: decision.address, part, ...found });
   };
   for (const [i, premise] of decision.record.premises.entries()) {
