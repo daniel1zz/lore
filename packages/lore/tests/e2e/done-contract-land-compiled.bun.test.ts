@@ -163,17 +163,18 @@ interface Finished {
 async function codeTask(
   plan: string,
   label: string,
-  opts: { from?: string; finish?: boolean; work?: Readonly<Record<string, string>>; anchors?: readonly string[] } = {},
+  opts: { from?: string; finish?: boolean; work?: Readonly<Record<string, string>>; anchors?: readonly string[]; session?: string } = {},
 ): Promise<Finished> {
+  const session = opts.session ?? OWNER;
   const anchors = opts.anchors ?? [`tests/${label}.test.ts`];
   const slug = await fixture.createTask({ plan, kind: "code", title: `Land ${label}`, anchors, acScope: ["AC-FX-1"] });
   await fixture.mustRun(["approve", slug, "--red-waiver", "the red run is not the subject of this test"]);
   const tree = addWorktree(label, opts.from ?? "main");
-  const claimed = await loreIn(fixture.dir, ["claim", slug, "--worktree", tree.branch]);
+  const claimed = await loreIn(fixture.dir, ["claim", slug, "--worktree", tree.branch], session);
   expect(claimed.exitCode, claimed.text).toBe(0);
   const tip = commitIn(tree, opts.work ?? { [anchors[0] as string]: `// ${label}\n`, [`src/${label}.ts`]: `export const ${label} = 1;\n` });
   if (opts.finish !== false) {
-    const finished = await loreIn(tree.path, ["finish", slug]);
+    const finished = await loreIn(tree.path, ["finish", slug], session);
     expect(finished.exitCode, finished.text).toBe(0);
   }
   return { slug, tree, tip };
@@ -662,6 +663,22 @@ describe("AC-DCS2-19: land integrates the branch once no open code task of the p
 // ───────────────────────────── AC-DCS1-18 (folded case) ─────────────────────────────
 
 describe("AC-DCS1-18: a finished claim stops counting in overlap once its commit is folded into the base", () => {
+  it("AC-DCS1-18: lore run end keeps a finished claim open (landing it later still works) and releases the unfinished clean claim of the same run", async () => {
+    const session = "dcs2-land-runend";
+    const plan = await fixture.createPlan("Land run end plan");
+    const finished = await codeTask(plan, "end-a", { session });
+    const control = await codeTask(plan, "end-b", { session, finish: false });
+    const ended = await loreIn(fixture.dir, ["run", "end", `cc:${session}`, "--reason", "agent stopped"], session);
+    expect(ended.exitCode, ended.text).toBe(0);
+    const claimOf = async (slug: string): Promise<{ finished_commit?: string } | undefined> => (await fixture.readTask(slug)).extra["claim"] as { finished_commit?: string } | undefined;
+    expect((await claimOf(finished.slug))?.finished_commit, "the finished claim stays open").toBe(finished.tip);
+    expect(await claimOf(control.slug), "the unfinished clean claim of the same run is released").toBeUndefined();
+    // the finished hand-over is what `lore land` closes, by another run, after the holder's run ended
+    const landed = await land(finished.slug, "dcs2-land-closer");
+    expect(landed.exitCode, landed.text).toBe(0);
+    expect(await statusOf(finished.slug)).toBe("archived");
+  });
+
   it("AC-DCS1-18: an unfolded finished claim blocks an overlapping claim (exit 4); once lore land folded it, the same claim exits 0", async () => {
     const branch = "integration/p18";
     const plan = await planWithBranch("Land overlap plan", branch);
