@@ -24,8 +24,14 @@
  *   - Gates (`correctness_vs_acs`, `regression`, `security`): a gate that failed or is not-measured is filed like any
  *     failure but the plan stays open (`kept-open`, exit 0, status unchanged) unless the plan accepted that gate with a
  *     decision (`gate_accepted` known defect, BR-1500); `na` never blocks. Non-gate failures still close as known defects.
- *   - A current review is re-made when its facts fingerprint changed (suite result ids, deciding attestation ids,
- *     cited-rule states, prompt version, clearing result), never because main's HEAD alone moved (AC-AF-6).
+ *   - The batch measures nothing per landing (spec D1, BR-1379): it runs no suite and attests no criterion at a landing commit.
+ *     A current review is re-made only when (a) the plan's own state changed (its own task landed), (b) a gate that keeps the
+ *     plan open is `not-measured` on regression (the suite could not complete: the next batch retries), or (c) a landing on
+ *     main since the review's assessed commit changed a file its failing facts name (`failing_fact_files`); an unrelated
+ *     landing triggers nothing, and a hand `lore assess` always reviews.
+ *   - Re-judging a `not-measured` regression is retried only when a retry can change it (the suite or a single-file run could not
+ *     complete); a task with no landing record or an unmappable landing waits for the plan's own landing, a landing touching its
+ *     failing facts, or a manual `lore assess`.
  *   - The landing never waits for a review: {@link ReviewTriggerService.start} only reads state and spawns.
  *   - Each plan is assessed through the ONE close function when {@link BatchRunPorts.closeFlow} is wired (BR-1507, AC-DCS2-11): the batch
  *     keeps the store lease and the once-per-batch suite (BR-1379), the close function holds the plan's own lease and runs verify, rule
@@ -37,7 +43,7 @@
  */
 
 import { acceptedGatesOf } from "./gate-acceptance-service.js";
-import { blockingGates, filableDimensions, milestoneReviewSchema, ok, type DocRecord, type LoreError, type MilestoneReview, type PlanBundle, type Result } from "@lore/core";
+import { blockingGates, err, filableDimensions, milestoneReviewSchema, ok, regressionRetryCanChange, type DocRecord, type LoreError, type MilestoneReview, type PlanBundle, type Result } from "@lore/core";
 import { readStoredPlanProgress } from "../store/plan-progress.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, selectLatestMilestoneReview, type PlanRetirementState } from "./milestone-review.js";
 import type { MilestoneReviewResult } from "./milestone-review-service.js";
@@ -148,16 +154,10 @@ export interface BatchRunPorts {
   /** Measures the batch's one full-suite run. */
   readonly measureSuite: (planRefs: readonly string[]) => Promise<SuiteRun | undefined>;
   /**
-   * Attests the plan's landed script criteria at their landing commits before the plan is judged (BR-1498): a criterion
-   * verified only in the task worktree is otherwise not-measured. Optional (absent = no attestation step); an `err`
-   * is an errored attempt (audit row), never a skipped step.
+   * The files changed on main since `commit` (the review's assessed commit). The batch re-reviews a kept-open plan when one
+   * of them is a file its failing facts name. Optional: absent, no landing can trigger a re-review (nothing is guessed).
    */
-  readonly attestLanded?: (planRef: string) => Promise<Result<unknown, LoreError>>;
-  /**
-   * The facts fingerprint a review of the plan made now would carry (AC-AF-6), measured after `attestLanded`. Optional
-   * (absent = a current review is compared on the plan-state fingerprint alone); an `err` is an errored attempt.
-   */
-  readonly factsFingerprint?: (planRef: string) => Promise<Result<string, LoreError>>;
+  readonly changedFilesSince?: (commit: string) => Promise<Result<readonly string[], LoreError>>;
   /** Judges one plan and stores the review. */
   readonly reviewPlan: (planRef: string, suite: SuiteRun | undefined) => Promise<Result<MilestoneReviewResult, LoreError>>;
   /** Archives the plan through the gated close (coverage reads the plan's known defects, each issue by number). */
@@ -320,6 +320,33 @@ export class ReviewBatchRunner {
     return { state: "ran", tookOver, suiteRuns, rows };
   }
 
+  /**
+   * Whether a landing since the stored review re-opens it (a plan kept open by a gate the plan did not accept).
+   *
+   * @returns `true` when (b) regression is not-measured (the suite could not complete: the next batch retries) or (c) a file
+   *   changed on main since the review's assessed commit is named by its failing facts; `false` otherwise (an unrelated
+   *   landing, a clean review, an accepted gate). A review that predates `assessed_commit` is re-made once.
+   */
+  private async landingReopensReview(
+    planSlug: string,
+    review: MilestoneReview,
+    plan: DocRecord,
+    latest: { readonly doc: DocRecord; readonly review: MilestoneReview },
+    ports: BatchRunPorts,
+  ): Promise<Result<boolean, LoreError>> {
+    const accepted = acceptedGatesOf(plan, latest);
+    const blockers = blockingGates(review.dimensions).filter((gate) => !accepted.includes(gate));
+    if (blockers.length === 0) return ok(false);
+    if (review.dimensions.regression.verdict === "not-measured") return ok(regressionRetryCanChange(review.regression_causes));
+    const named = review.failing_fact_files ?? [];
+    if (named.length === 0 || ports.changedFilesSince === undefined) return ok(false);
+    if (review.assessed_commit === undefined) return ok(true);
+    const changed = await ports.changedFilesSince(review.assessed_commit);
+    if (!changed.ok) return err({ code: "STORE_ERROR", message: `plan ${planSlug}: could not read the files changed since ${review.assessed_commit}: ${messageOf(changed.error)}` });
+    const touched = new Set(changed.value);
+    return ok(named.some((file) => touched.has(file)));
+  }
+
   private async runPlan(ref: string, ports: BatchRunPorts, measureOnce: () => Promise<SuiteRun | undefined>): Promise<BatchPlanRow> {
     const first = await this.deps.getPlanBundle(ref);
     if (!first.ok) return { plan: ref, outcome: "error", reviewed: false, failed: [], issues: [], detail: messageOf(first.error) };
@@ -359,22 +386,14 @@ export class ReviewBatchRunner {
       if (!coverage.ok) return fail("review", fingerprint, coverage.error, false);
       coverFixed = coverage.value.fixed.length > 0 && !closedCoverAlreadyReviewed(docs.value, fingerprint);
     }
-    // reason: AC-AF-6 — the plan-state fingerprint cannot see suite results, attestations or cited-rule states, so a current
-    // review is also compared on its facts fingerprint. The facts are measured AFTER the landing step stored this
-    // landing's suite result and attested its criteria, so the ids hashed are the ones a review made now would read.
+    // reason: spec D1 / BR-1379 — the batch measures nothing per landing. A current review is re-made only on the three
+    // triggers named in the module header; the decision reads the stored review, so it costs no suite run and no checkout.
     const planStateChanged = latest === undefined || latest.review.fingerprint !== fingerprint || coverFixed;
-    if (planStateChanged || ports.factsFingerprint !== undefined) {
-      // reason: BR-1498 — landed criteria are attested at their landing commit BEFORE the judgment reads attestation.
-      if (ports.attestLanded !== undefined) {
-        const attested = await ports.attestLanded(ref);
-        if (!attested.ok) return fail("review", fingerprint, attested.error, false);
-      }
-    }
     let factsChanged = false;
-    if (!planStateChanged && latest !== undefined && ports.factsFingerprint !== undefined) {
-      const current = await ports.factsFingerprint(ref);
-      if (!current.ok) return fail("review", fingerprint, current.error, false);
-      factsChanged = latest.review.facts_fingerprint !== current.value;
+    if (!planStateChanged && latest !== undefined) {
+      const due = await this.landingReopensReview(planSlug, latest.review, bundle.plan, latest, ports);
+      if (!due.ok) return fail("review", fingerprint, due.error, false);
+      factsChanged = due.value;
     }
     if (planStateChanged || factsChanged) {
       const suite = await measureOnce();

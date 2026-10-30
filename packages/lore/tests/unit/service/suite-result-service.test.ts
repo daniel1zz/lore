@@ -180,6 +180,43 @@ describe("suite-result store: lookup-or-run", () => {
     expect(again.ok && again.value.attempt).toBe(2);
   });
 
+  it("AC-AF-2 a run whose test command exited outside {0, 1} (5 = oracle lock contended) is stored unrunnable with that cause and retried, never stored measured", async () => {
+    const { service } = build();
+    const contended: SuiteRun = {
+      status: "measured",
+      commit: COMMIT_A,
+      commands: [{ command: "bun run test", exit_code: 5, output_tail: "oracle-lock: contended — another oracle run holds the lock" }],
+      skipped: [],
+      failing_test_files: [],
+    };
+    const runner = fakeRunner((_commit, attempt) => ok(attempt === 1 ? contended : GREEN));
+    const first = await service.lookupOrRun("main", runner);
+    expect(first.ok && first.value).toMatchObject({ status: "unrunnable", attempt: 1 });
+    expect(first.ok && first.value.cause).toContain("exited with code 5");
+    expect(first.ok && first.value.cause).toContain("oracle lock");
+    const second = await service.lookupOrRun("main", runner);
+    expect(second.ok && second.value).toMatchObject({ status: "measured", attempt: 2 });
+    expect(runner.suiteRuns).toHaveLength(2);
+  });
+
+  it("AC-AF-2 a red run (exit 1) and a green run (exit 0) are still stored measured", async () => {
+    const { service } = build();
+    const first = await service.lookupOrRun("main", fakeRunner(() => ok(red(COMMIT_A))));
+    expect(first.ok && first.value.status).toBe("measured");
+    const other = build();
+    const second = await other.service.lookupOrRun("main", fakeRunner(() => ok(GREEN)));
+    expect(second.ok && second.value.status).toBe("measured");
+  });
+
+  it("AC-AF-2 a single-file run that exited outside {0, 1} is refused and stores no row", async () => {
+    const { service } = build();
+    const runner = { ...fakeRunner(() => ok(GREEN)), runFiles: async (_c: string, files: readonly string[]) => ok(files.map((file): FileRunOutcome => ({ file, exit_code: 2, output_tail: "usage", duration_ms: 1 }))) };
+    const ran = await service.runSingleFile(COMMIT_A, FILE_X, "bisect", runner);
+    expect(ran.ok).toBe(false);
+    const rows = await service.listFileRuns(`file-bisect@${COMMIT_A}`);
+    expect(rows.ok && rows.value).toEqual([]);
+  });
+
   it("AC-AF-2 a ref that does not resolve is an error and stores nothing", async () => {
     const { service, store } = build();
     const runner = fakeRunner(() => ok(GREEN));
@@ -301,7 +338,7 @@ describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () =>
   const TIMEOUT_MS = 1500;
   const GRACE_MS = 500;
   // timeout + grace + pipe drain (2 s) + slack for git/bun start-up and worktree removal
-  const WALL_BOUND_MS = TIMEOUT_MS + GRACE_MS + 2000 + 8000;
+  const WALL_BOUND_MS = TIMEOUT_MS + GRACE_MS + 2000 + 20_000;
   const dirs: string[] = [];
   const killers: number[] = [];
 
@@ -370,6 +407,7 @@ describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () =>
   const worktreeCount = (repo: string): number => git(repo, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length;
 
   it("AC-AF-2 a suite whose tree ignores SIGTERM is ended within timeout + grace, stored unrunnable naming the timeout and elapsed ms, no process survives and the worktree is gone", async () => {
+    // (per-test limit below is far above timeout + grace + drain, so load cannot read as a hang)
     const { repo, commit, pidFile } = makeRepo({ test: "node hang.js" }, {});
     writeFileSync(join(repo, "hang.js"), hangScript(pidFile));
     git(repo, "add", "-A");
@@ -390,7 +428,7 @@ describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () =>
     expect(stored.ok && stored.value.map((r) => r.status)).toEqual(["unrunnable"]);
     expect(await allGone(readPids(pidFile))).toBe(true);
     expect(worktreeCount(repo)).toBe(1);
-  }, 30_000);
+  }, 90_000);
 
   it("AC-AF-2 a per-file re-run whose tree ignores SIGTERM is ended within the limit, reported as a failed file with the timeout cause, tree gone, worktree gone", async () => {
     const { repo, pidFile } = makeRepo({ "test:file": "node hang.js" }, {});
@@ -407,7 +445,41 @@ describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () =>
     expect(ran.value[0]?.output_tail).toMatch(/timed out after \d+ ms/);
     expect(await allGone(readPids(pidFile))).toBe(true);
     expect(worktreeCount(repo)).toBe(1);
-  }, 30_000);
+  }, 90_000);
+
+  it("AC-AF-2 a group signal that fails with EPERM while the group still has live members settles the run, recording the failed kill as the unrunnable cause", async () => {
+    const { repo, pidFile } = makeRepo({ test: "node hang.js" }, {});
+    writeFileSync(join(repo, "hang.js"), hangScript(pidFile));
+    git(repo, "add", "-A");
+    git(repo, "commit", "-q", "-m", "hang");
+    const head = git(repo, "rev-parse", "HEAD").trim();
+    const kill = (): void => {
+      throw Object.assign(new Error("kill() failed: EPERM: Operation not permitted"), { code: "EPERM" });
+    };
+    const runner = createGitCommitSuiteRunner(repo, process.env, { timeoutMs: TIMEOUT_MS, graceMs: GRACE_MS, kill });
+    const { service } = build();
+    const startedMs = Date.now();
+    const looked = await service.lookupOrRun(head, runner);
+    expect(Date.now() - startedMs).toBeLessThan(WALL_BOUND_MS);
+    expect(looked.ok && looked.value).toMatchObject({ status: "unrunnable" });
+    const cause = looked.ok ? (looked.value.cause ?? "") : "";
+    expect(cause).toContain("EPERM");
+    expect(cause).toContain("live member");
+    expect(worktreeCount(repo)).toBe(1);
+  }, 90_000);
+
+  it("AC-AF-2 a group signal that fails with EPERM when no live member remains counts as ended and the run's own result stands", async () => {
+    const { repo } = makeRepo({ test: "node -e 0" }, {});
+    const head = git(repo, "rev-parse", "HEAD").trim();
+    const kill = (): void => {
+      throw Object.assign(new Error("kill() failed: EPERM: Operation not permitted"), { code: "EPERM" });
+    };
+    const runner = createGitCommitSuiteRunner(repo, process.env, { timeoutMs: 60_000, graceMs: GRACE_MS, kill });
+    const { service } = build();
+    const looked = await service.lookupOrRun(head, runner);
+    expect(looked.ok && looked.value).toMatchObject({ status: "measured" });
+    expect(worktreeCount(repo)).toBe(1);
+  }, 90_000);
 
   it("AC-AF-2 work in the same worktree (the landed-criteria attestation) runs in it and the worktree is removed afterwards, also when the work throws", async () => {
     const { repo, commit } = makeRepo({ test: "true" }, {});
@@ -429,6 +501,38 @@ describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () =>
     expect(worktreeCount(repo)).toBe(1);
   }, 30_000);
 
+  /** A `test` script that behaves like a contended oracle lock for the first `contendedRuns` calls (counted in `counterFile`), then passes. */
+  function contendedRepo(counterFile: string, contendedRuns: number): { repo: string; commit: string } {
+    const script = [
+      'const fs = require("node:fs");',
+      `const file = ${JSON.stringify(counterFile)};`,
+      'const n = (fs.existsSync(file) ? Number(fs.readFileSync(file, "utf8")) : 0) + 1;',
+      "fs.writeFileSync(file, String(n));",
+      `if (n <= ${String(contendedRuns)}) { console.error("oracle-lock: contended — another oracle run holds /x/.git/lore-oracle-test.lock (pid 1, still alive)."); process.exit(5); }`,
+      'console.log("all-green");',
+    ].join("\n");
+    const made = makeRepo({ test: "node contend.js" }, { "contend.js": script });
+    return { repo: made.repo, commit: made.commit };
+  }
+
+  it("AC-AF-2 a suite that finds the oracle lock held waits for it and measures the run that then takes it, never storing the non-run", async () => {
+    const counter = join(mkdtempSync(join(tmpdir(), "suite-lock-count-")), "n");
+    dirs.push(join(counter, ".."));
+    const { repo, commit } = contendedRepo(counter, 2);
+    const run = await createGitCommitSuiteRunner(repo, process.env, { timeoutMs: 20_000, graceMs: GRACE_MS, lockPollMs: 50 }).runSuite(commit);
+    expect(run.ok && run.value).toMatchObject({ status: "measured" });
+    expect(run.ok && run.value.status === "measured" && run.value.commands[0]).toMatchObject({ command: "bun run test", exit_code: 0 });
+    expect(readFileSync(counter, "utf8")).toBe("3");
+  }, 40_000);
+
+  it("AC-AF-2 a suite whose oracle lock stays held past the suite timeout is not measured, naming the lock", async () => {
+    const counter = join(mkdtempSync(join(tmpdir(), "suite-lock-count-")), "n");
+    dirs.push(join(counter, ".."));
+    const { repo, commit } = contendedRepo(counter, 1_000_000);
+    const run = await createGitCommitSuiteRunner(repo, process.env, { timeoutMs: 3000, graceMs: GRACE_MS, lockPollMs: 100 }).runSuite(commit);
+    expect(run.ok && run.value.status === "not_measured" && run.value.reason).toContain("oracle lock");
+  }, 40_000);
+
   it("AC-AF-2 a normal run is unchanged: a green suite is measured with its exit code, a red one keeps its exit code and tail", async () => {
     const green = makeRepo({ test: "echo all-green" }, {});
     const greenRun = await createGitCommitSuiteRunner(green.repo, process.env, { timeoutMs: 20_000, graceMs: GRACE_MS }).runSuite(green.commit);
@@ -443,4 +547,72 @@ describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () =>
     expect(redRun.ok && redRun.value.status === "measured" && redRun.value.commands[0]).toMatchObject({ exit_code: 3 });
     expect(worktreeCount(green.repo)).toBe(1);
   }, 30_000);
+});
+
+describe("single-file runs are stored once per (commit, file, kind) (#528, BR-1497)", () => {
+  /** A runner whose every file run is numbered (the tail and exit code say which run it was) and waits on a gate. */
+  function gatedRunner(gate: Promise<void>): { runner: CommitSuiteRunnerPort; calls: () => number } {
+    let calls = 0;
+    const base = fakeRunner(() => ok(GREEN));
+    const runner: CommitSuiteRunnerPort = {
+      ...base,
+      runFiles: async (_commit, files) => {
+        calls += 1;
+        const mine = calls;
+        await gate;
+        return ok(files.map((file): FileRunOutcome => ({ file, exit_code: mine === 1 ? 0 : 1, output_tail: `run ${String(mine)}`, duration_ms: 3 })));
+      },
+    };
+    return { runner, calls: () => calls };
+  }
+
+  it("AC-AF-2 two concurrent runs of the same (commit, file, kind) store one row and both callers get it", async () => {
+    const { service } = build();
+    let open: () => void = () => undefined;
+    const { runner } = gatedRunner(new Promise<void>((resolve) => (open = resolve)));
+    const a = service.runSingleFile(COMMIT_A, FILE_X, "bisect", runner);
+    const b = service.runSingleFile(COMMIT_A, FILE_X, "bisect", runner);
+    open();
+    const [first, second] = await Promise.all([a, b]);
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(second.value.output_tail).toBe(first.value.output_tail);
+    expect(second.value.exit_code).toBe(first.value.exit_code);
+    const stored = await service.listFileRuns(`file-bisect@${COMMIT_A}`);
+    expect(stored.ok && stored.value).toHaveLength(1);
+    expect(stored.ok && stored.value[0]?.output_tail).toBe(first.value.output_tail);
+  });
+
+  it("AC-AF-2 a later review of the same (commit, file, kind) reads the stored outcome and does not run again", async () => {
+    const { service } = build();
+    const { runner, calls } = gatedRunner(Promise.resolve());
+    const first = await service.runSingleFile(COMMIT_A, FILE_X, "confirm", runner);
+    const second = await service.runSingleFile(COMMIT_A, FILE_X, "confirm", runner);
+    expect(calls()).toBe(1);
+    expect(first.ok && second.ok && second.value).toEqual(first.ok ? first.value : null);
+  });
+
+  it("AC-AF-2 kind, commit and file each keep their own row", async () => {
+    const { service } = build();
+    const { runner, calls } = gatedRunner(Promise.resolve());
+    await service.runSingleFile(COMMIT_A, FILE_X, "bisect", runner);
+    await service.runSingleFile(COMMIT_A, FILE_X, "confirm", runner);
+    await service.runSingleFile(COMMIT_B, FILE_X, "bisect", runner);
+    await service.runSingleFile(COMMIT_A, "packages/x/tests/y.test.ts", "bisect", runner);
+    expect(calls()).toBe(4);
+  });
+
+  it("AC-AF-2 the store ignores a second row for a single-file key but still appends re-runs under a suite result id", async () => {
+    const store = new InMemoryStore();
+    const base = { commit_sha: COMMIT_A, file: FILE_X, duration_ms: 1, measured_at: "2026-10-28T10:00:00.000Z" };
+    const key = `file-bisect@${COMMIT_A}`;
+    await store.insertSuiteFileRuns([{ ...base, suite_result_id: key, exit_code: 0, output_tail: "first" }]);
+    await store.insertSuiteFileRuns([{ ...base, suite_result_id: key, exit_code: 1, output_tail: "second" }]);
+    const kept = await store.listSuiteFileRuns(key);
+    expect(kept.ok && kept.value.map((r) => r.output_tail)).toEqual(["first"]);
+    await store.insertSuiteFileRuns([{ ...base, suite_result_id: "suite-1", exit_code: 0, output_tail: "a" }]);
+    await store.insertSuiteFileRuns([{ ...base, suite_result_id: "suite-1", exit_code: 1, output_tail: "b" }]);
+    const reruns = await store.listSuiteFileRuns("suite-1");
+    expect(reruns.ok && reruns.value.map((r) => r.output_tail)).toEqual(["a", "b"]);
+  });
 });

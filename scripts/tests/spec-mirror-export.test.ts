@@ -276,11 +276,12 @@ function mirrorFixture(): MirrorFixture {
   const root = mkdtempSync(join(tmpdir(), "lore-mirror-export-"));
   assertInsideTmp(root);
   loreIn(root, ["init", "--author", "mirror-export-test"]);
-  createDoc(root, ["prd", "--title", "Fixture Prd", "--content", "p"]);
+  // knowledge / adr / plan are refused without a parent (spec-documents-that-need-a-parent...): the fixture prd is theirs.
+  const prdSlug = createDoc(root, ["prd", "--title", "Fixture Prd", "--content", "p"]);
   const specSlug = createDoc(root, ["spec", "--title", "Fixture Spec", "--content", SPEC_SKELETON]);
-  createDoc(root, ["adr", "--title", "Fixture Adr", "--decision-status", "accepted", "--content", "d"]);
-  createDoc(root, ["knowledge", "--sub-type", "reference", "--title", "Fixture Kn", "--content", "k"]);
-  const planSlug = createDoc(root, ["plan", "--title", "Fixture Plan", "--content", "pl"]);
+  createDoc(root, ["adr", "--parent", prdSlug, "--title", "Fixture Adr", "--decision-status", "accepted", "--content", "d"]);
+  createDoc(root, ["knowledge", "--parent", prdSlug, "--sub-type", "reference", "--title", "Fixture Kn", "--content", "k"]);
+  const planSlug = createDoc(root, ["plan", "--parent", prdSlug, "--title", "Fixture Plan", "--content", "pl"]);
   loreIn(root, ["link", planSlug, specSlug, "--json"]);
   createDoc(root, ["task", "--title", "Fixture Task", "--plan-id", planSlug, "--content", "t"]);
 

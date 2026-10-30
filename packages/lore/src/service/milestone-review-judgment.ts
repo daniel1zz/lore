@@ -199,15 +199,17 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
   const t: CallTally = { calls: 0, duration_ms: 0 };
   const hasDiff = input.diffText !== undefined && input.diffText.length > 0;
   const chunking = hasDiff ? chunkDiffByFile(input.diffText as string, input.maxDiffChars) : undefined;
-  const unseen = chunking?.unseen ?? [];
-  const oneCall = chunking === undefined || (chunking.chunks.length === 1 && unseen.length === 0);
+  // reason: BR-1508 — a landing that could not be mapped to main puts its files in no call; they join the files too large
+  // for a call, so the same gates refuse to pass over them.
+  const unseen = [...new Set([...(chunking?.unseen ?? []), ...(input.base.facts?.not_seen_files ?? [])])];
+  const oneCall = chunking === undefined || (chunking.chunks.length === 1 && chunking.unseen.length === 0);
 
   const dimensions = {} as Record<JudgedDimension, DimensionJudgment>;
   let criteria: readonly AiCriterionAnswer[] = [];
   let findings: readonly DecisionFinding[] = [];
 
   if (oneCall) {
-    const prompt = buildMilestoneReviewPrompt({ ...input.base, mode: "full", ...(hasDiff ? { diffText: input.diffText as string } : {}), recordedDecisions: input.recorded });
+    const prompt = buildMilestoneReviewPrompt({ ...input.base, mode: "full", ...(hasDiff ? { diffText: input.diffText as string } : {}), unseenFiles: unseen, recordedDecisions: input.recorded });
     const answered = await judgeCall(input, t, "full", prompt);
     if (!answered.ok) return answered;
     for (const d of askedDimensionsOf("full")) dimensions[d] = answered.value.dimensions[d] as DimensionJudgment;

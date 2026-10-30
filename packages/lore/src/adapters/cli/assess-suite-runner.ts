@@ -13,8 +13,19 @@
  *   - The suite commands run with the harness/session variables removed (`suiteChildEnv`), like a clean shell.
  *   - Every command runs in its OWN process group; a timeout ends the whole group (SIGTERM, then SIGKILL after a grace), so
  *     the run returns within timeout + grace and no process of the tree survives. A timed-out suite is `not_measured` with
- *     "timed out after N ms" (stored `unrunnable`, retried by a later batch, BR-1497); a timed-out per-file re-run is a failed file.
+ *     "timed out after N ms" (stored `unrunnable`, retried by a later batch, BR-1497); a timed-out per-file re-run is a failed file with `incomplete` set.
+ *   - A failed group signal never escapes a timer callback (it would leave the promise unsettled): EPERM is followed by a
+ *     liveness probe (macOS returns EPERM for a group holding only unreaped zombies); no live member = ended, otherwise the
+ *     failure is recorded in the result (`killFailure`), the run is `not_measured` / a failed file with that cause.
  *   - The throwaway worktree is removed on every exit path; a failed removal is returned as an error, never ignored.
+ *   - A run that was killed leaves its worktree behind; every run first removes the registered `lore-assess-suite-*` worktrees
+ *     whose directory is gone or whose owner pid (recorded in the directory name) is not alive, and never one a live process
+ *     owns (`assess-stale-worktrees.ts`). A per-file re-run that times out or leaves its process group running is a
+ *     failed file whose outcome carries `incomplete` (single-file bisection refuses it, BR-1496).
+ *   - `bun run test` takes the checkout's oracle lock (keyed by the git common dir, shared by every worktree including this
+ *     throwaway one). A run that finds it held exits 5 without running a test: the runner waits for the lock (poll
+ *     `lockPollMs`, bounded by the suite timeout) and retries; if it is still held at the limit the run is `not_measured`
+ *     naming the lock. It never runs without the lock and never reports the non-run as a result.
  *   - A run that cannot be set up (no `main`, no git, install failure) is `not_measured` with the reason, never a pass.
  *   - Failing test files carry their direct relative imports as read at the measured commit, so attribution to a plan
  *     needs no second checkout.
@@ -24,8 +35,8 @@
  * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D, AC-LG-12, BR-1372)
  */
 
-import { spawn as spawnChild } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync, spawn as spawnChild } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, normalize } from "node:path";
 import { err, ok, type LoreError, type Result } from "@lore/core";
@@ -37,6 +48,7 @@ import {
   type SuiteRunnerPort,
 } from "../../service/milestone-review-inputs.js";
 import { loreErrorText, type CommitSuiteRunnerPort, type FileRunOutcome } from "../../service/suite-result-service.js";
+import { assessWorktreeDirPrefix, pruneStaleAssessWorktrees, type StaleWorktreePorts } from "./assess-stale-worktrees.js";
 
 /** The plan-close chain script (`bun run check:plan-close`). */
 export const PLAN_CLOSE_SCRIPT = "check:plan-close";
@@ -59,6 +71,18 @@ export interface ProcessLimits {
   readonly timeoutMs: number;
   /** Time between SIGTERM and SIGKILL of the process group. */
   readonly graceMs: number;
+  /** The group-signal primitive (`process.kill(-pid, signal)`); injectable so tests can make it fail. */
+  readonly kill?: (pid: number, signal: NodeJS.Signals) => void;
+  /** How long to wait between attempts to take a contended oracle lock (default {@link LOCK_POLL_MS}); injectable so tests need not sleep. */
+  readonly lockPollMs?: number;
+}
+
+/** Between two attempts to take the checkout's oracle lock held by another run. */
+const LOCK_POLL_MS = 5 * 1000;
+
+/** `scripts/oracle-lock.ts` exits 5 and prints this when a live run holds the lock: no test ran. */
+function isLockContended(ran: { readonly status: number; readonly output: string; readonly timeout?: unknown }): boolean {
+  return ran.status === 5 && ran.timeout === undefined && /oracle-lock: contended/.test(ran.output);
 }
 
 const DEFAULT_LIMITS: ProcessLimits = { timeoutMs: SUITE_TIMEOUT_MS, graceMs: KILL_GRACE_MS };
@@ -68,15 +92,54 @@ interface Spawned {
   readonly output: string;
   /** Set when the limit ended the command's process group; `status` is then 1 and `output` ends with the timeout cause. */
   readonly timeout?: { readonly limitMs: number; readonly elapsedMs: number };
+  /** Set when a group signal failed and live members remain (or could not be ruled out); `output` ends with it. */
+  readonly killFailure?: string;
 }
 
-/** Sends `signal` to the whole process group led by `pid`; an already-empty group is fine, anything else is not. */
-function signalGroup(pid: number, signal: NodeJS.Signals): void {
+const defaultKill = (pid: number, signal: NodeJS.Signals): void => {
+  process.kill(-pid, signal);
+};
+
+/**
+ * Whether the process group `pgid` still has a member that is not a zombie. `ps -ax -o pid=,pgid=,stat=` is used
+ * because it behaves the same on macOS and Linux (`ps -g` means something else on macOS) and shows the Z state;
+ * `kill(-pgid, 0)` cannot tell, it answers EPERM on macOS for a group of zombies only.
+ *
+ * @returns the live member count, or an error text when the process table cannot be read
+ */
+function countLiveGroupMembers(pgid: number): { readonly live: number } | { readonly error: string } {
   try {
-    process.kill(-pid, signal);
+    const table = execFileSync("ps", ["-ax", "-o", "pid=,pgid=,stat="], { encoding: "utf8" });
+    let live = 0;
+    for (const line of table.split("\n")) {
+      const [, group, state] = line.trim().split(/\s+/);
+      if (group === String(pgid) && state !== undefined && !state.startsWith("Z")) live += 1;
+    }
+    return { live };
   } catch (cause) {
-    // reason: ESRCH means every member already left, which is the goal; any other failure must surface.
-    if ((cause as NodeJS.ErrnoException).code !== "ESRCH") throw cause;
+    return { error: cause instanceof Error ? cause.message : String(cause) };
+  }
+}
+
+/**
+ * Sends `signal` to the whole process group led by `pid`. NEVER throws (it runs inside timer callbacks, where a throw
+ * would leave the spawn promise unsettled, A10). ESRCH = group already empty. EPERM = on macOS the group holds only
+ * zombies, or the signal is genuinely refused: probed with {@link countLiveGroupMembers}; none live counts as ended.
+ *
+ * @returns `undefined` when the group is ended or was signalled, else the failure text to record
+ */
+function signalGroup(pid: number, signal: NodeJS.Signals, kill: (pid: number, signal: NodeJS.Signals) => void): string | undefined {
+  try {
+    kill(pid, signal);
+    return undefined;
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") return undefined;
+    const text = `${signal} to process group ${pid} failed: ${code ?? (cause instanceof Error ? cause.message : String(cause))}`;
+    if (code !== "EPERM") return text;
+    const members = countLiveGroupMembers(pid);
+    if ("error" in members) return `${text}; liveness probe failed: ${members.error}`;
+    return members.live === 0 ? undefined : `${text}; ${members.live} live member(s) remain`;
   }
 }
 
@@ -93,6 +156,12 @@ function spawn(command: string, args: readonly string[], cwd: string, env: NodeJ
     let output = "";
     let timeout: Spawned["timeout"];
     let settled = false;
+    const kill = limits.kill ?? defaultKill;
+    const killFailures: string[] = [];
+    const signal = (target: number, name: NodeJS.Signals): void => {
+      const failure = signalGroup(target, name, kill);
+      if (failure !== undefined) killFailures.push(failure);
+    };
     const timers: NodeJS.Timeout[] = [];
     const collect = (chunk: Buffer): void => {
       output += chunk.toString("utf8");
@@ -107,18 +176,22 @@ function spawn(command: string, args: readonly string[], cwd: string, env: NodeJ
       child.stdout?.destroy();
       child.stderr?.destroy();
       // reason: stragglers of a finished command (grandchildren) must not outlive it; the group is the command's tree.
-      if (child.pid !== undefined) signalGroup(child.pid, "SIGKILL");
+      if (child.pid !== undefined) signal(child.pid, "SIGKILL");
+      const killFailure = killFailures.length === 0 ? undefined : killFailures.join("; ");
+      const killNote = killFailure === undefined ? "" : `\nprocess group could not be ended: ${killFailure}`;
       if (timeout !== undefined) {
+        const ended = killFailure === undefined ? "its process group was ended" : "its process group could not be ended";
         resolve({
           status: 1,
-          output: `${output}\ncommand \`${command} ${args.join(" ")}\` timed out after ${timeout.elapsedMs} ms (limit ${timeout.limitMs} ms); its process group was ended`,
+          output: `${output}\ncommand \`${command} ${args.join(" ")}\` timed out after ${timeout.elapsedMs} ms (limit ${timeout.limitMs} ms); ${ended}${killNote}`,
           timeout,
+          ...(killFailure === undefined ? {} : { killFailure }),
         });
       } else if (status === null) {
         // reason: a spawn that never started (ENOENT) or was killed has status null; it is a failure with its own message.
-        resolve({ status: 1, output: `${output}\n${failure ?? "terminated by signal"}` });
+        resolve({ status: 1, output: `${output}\n${failure ?? "terminated by signal"}${killNote}`, ...(killFailure === undefined ? {} : { killFailure }) });
       } else {
-        resolve({ status, output });
+        resolve({ status: killFailure === undefined ? status : 1, output: `${output}${killNote}`, ...(killFailure === undefined ? {} : { killFailure }) });
       }
     };
     child.on("error", (error) => finish(null, error.message));
@@ -132,8 +205,8 @@ function spawn(command: string, args: readonly string[], cwd: string, env: NodeJ
     timers.push(
       setTimeout(() => {
         timeout = { limitMs: limits.timeoutMs, elapsedMs: Date.now() - startedMs };
-        signalGroup(pid, "SIGTERM");
-        timers.push(setTimeout(() => signalGroup(pid, "SIGKILL"), limits.graceMs));
+        signal(pid, "SIGTERM");
+        timers.push(setTimeout(() => signal(pid, "SIGKILL"), limits.graceMs));
         timers.push(setTimeout(() => finish(null, undefined), limits.graceMs + PIPE_DRAIN_MS));
       }, limits.timeoutMs),
     );
@@ -220,6 +293,40 @@ export function createGitSuiteRunner(
 /** The script a single test file is re-run with (`bun run test:file <file>`); a project without it cannot re-run files. */
 export const FILE_TEST_SCRIPT = "test:file";
 
+/** The real git / filesystem / process effects of the stale-worktree pruner for the repository at `repo`. */
+function realStaleWorktreePorts(repo: string, env: NodeJS.ProcessEnv): StaleWorktreePorts {
+  return {
+    listRegisteredWorktrees: async () => {
+      const listed = await spawn("git", ["worktree", "list", "--porcelain"], repo, env);
+      if (listed.status !== 0) return err({ code: "STORE_ERROR", message: `could not list worktrees: ${listed.output.trim()}` });
+      return ok(listed.output.split("\n").filter((line) => line.startsWith("worktree ")).map((line) => line.slice("worktree ".length).trim()));
+    },
+    directoryExists: (path) => existsSync(path),
+    directoryAgeMs: (path) => {
+      try {
+        return Date.now() - statSync(path).mtimeMs;
+      } catch {
+        // reason: an unreadable age is reported as unknown; the pruner keeps such a worktree (it never guesses a live run dead).
+        return undefined;
+      }
+    },
+    isProcessAlive: (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (cause) {
+        // reason: EPERM means the process exists but belongs to another user: alive. Only ESRCH proves it is gone.
+        return (cause as NodeJS.ErrnoException).code === "EPERM";
+      }
+    },
+    removeDirectory: (path) => rmSync(path, { recursive: true, force: true }),
+    pruneRegistrations: async () => {
+      const pruned = await spawn("git", ["worktree", "prune"], repo, env);
+      return pruned.status === 0 ? ok(undefined) : err({ code: "STORE_ERROR", message: `could not prune stale worktrees: ${pruned.output.trim()}` });
+    },
+  };
+}
+
 /**
  * Runs `work` in a throwaway detached worktree of `commit`, removed afterwards whatever happens. The ONE worktree
  * mechanic shared by the suite runs and the post-landing attestation (BR-1498).
@@ -239,7 +346,10 @@ export async function runInThrowawayWorktree<T>(
   const top = await spawn("git", ["rev-parse", "--show-toplevel"], cwd, env);
   if (top.status !== 0) return err({ code: "STORE_ERROR", message: `not inside a git checkout: ${top.output.trim()}` });
   const repo = top.output.trim();
-  const scratch = mkdtempSync(join(tmpdir(), "lore-assess-suite-"));
+  const pruned = await pruneStaleAssessWorktrees(realStaleWorktreePorts(repo, env));
+  if (!pruned.ok) return pruned;
+  // reason: the owner pid is in the directory name so ownership is recorded atomically with creation (assess-stale-worktrees.ts).
+  const scratch = mkdtempSync(join(tmpdir(), assessWorktreeDirPrefix(process.pid)));
   let outcome: Result<T, LoreError>;
   try {
     const added = await spawn("git", ["worktree", "add", "--detach", scratch, commit], repo, env);
@@ -258,8 +368,8 @@ export async function runInThrowawayWorktree<T>(
   } catch (cause) {
     return err({ code: "STORE_ERROR", message: `could not remove the throwaway worktree ${scratch}: ${cause instanceof Error ? cause.message : String(cause)}` });
   }
-  const pruned = await spawn("git", ["worktree", "prune"], repo, env);
-  if (pruned.status !== 0) return err({ code: "STORE_ERROR", message: `could not prune the throwaway worktree ${scratch}: ${pruned.output.trim()}` });
+  const prunedOwn = await spawn("git", ["worktree", "prune"], repo, env);
+  if (prunedOwn.status !== 0) return err({ code: "STORE_ERROR", message: `could not prune the throwaway worktree ${scratch}: ${prunedOwn.output.trim()}` });
   return outcome;
 }
 
@@ -331,7 +441,10 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv, 
         for (const file of files) {
           const startedMs = Date.now();
           const ran = await spawn("bun", ["run", FILE_TEST_SCRIPT, file], root, childEnv, limits);
-          outcomes.push({ file, exit_code: ran.status, output_tail: tail(ran.output), duration_ms: Date.now() - startedMs });
+          // reason: a run the timeout ended (or whose tree could not be ended) is a failed file for a re-run (AC-AF-2) but did not
+          // COMPLETE: `incomplete` lets a caller that must not read it as red (single-file bisection, BR-1496) refuse it.
+          const incomplete = ran.killFailure ?? (ran.timeout !== undefined ? `timed out after ${String(ran.timeout.elapsedMs)} ms` : undefined);
+          outcomes.push({ file, exit_code: ran.status, output_tail: tail(ran.output), duration_ms: Date.now() - startedMs, ...(incomplete !== undefined ? { incomplete } : {}) });
         }
         return outcomes;
       }),
@@ -376,8 +489,27 @@ async function measure(root: string, commit: string, env: NodeJS.ProcessEnv, lim
       skipped.push({ command, reason: `package.json defines no "${script}" script` });
       continue;
     }
-    const ran = await spawn("bun", ["run", script], root, env, limits);
+    let ran = await spawn("bun", ["run", script], root, env, limits);
+    if (script === FULL_TEST_SCRIPT) {
+      // reason: `bun run test` takes the oracle lock of the CHECKOUT (keyed by the git common dir, shared by every worktree incl. this
+      // throwaway one, on purpose: AC-OX-4). Another run holding it makes ours exit 5 without running a test. We WAIT for the lock,
+      // bounded by the suite timeout, rather than run without it (the lock also guards fixed paths no worktree isolates) and never
+      // record the non-run as a result.
+      const deadline = Date.now() + limits.timeoutMs;
+      const pollMs = limits.lockPollMs ?? LOCK_POLL_MS;
+      while (isLockContended(ran) && Date.now() + pollMs < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+        ran = await spawn("bun", ["run", script], root, env, limits);
+      }
+      if (isLockContended(ran)) {
+        return { status: "not_measured", reason: `\`${command}\` could not take the oracle lock before the ${limits.timeoutMs} ms limit: ${tail(ran.output).trim().split("\n").at(-1) ?? "held by another run"}` };
+      }
+    }
     // reason: a run the timeout ended is incomplete, not red: stored `unrunnable` with this cause and retried by a later batch (BR-1497).
+    if (ran.killFailure !== undefined) {
+      // reason: a tree that could not be ended leaves stragglers that corrupt the measurement; incomplete, not red (A10).
+      return { status: "not_measured", reason: `\`${command}\` left its process group running: ${ran.killFailure}` };
+    }
     if (ran.timeout !== undefined) {
       return { status: "not_measured", reason: `\`${command}\` timed out after ${ran.timeout.elapsedMs} ms (limit ${ran.timeout.limitMs} ms); its process group was ended` };
     }

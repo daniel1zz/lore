@@ -5257,7 +5257,9 @@ export class TaskWorkflowService {
     // worktree this reads). One git call (`rev-parse HEAD`); the base comes from the claim audit row.
     const measuredLanding = landing.verdict?.state === "landed" ? landing.verdict : undefined;
     // reason: commitless work has no commit range to record; nothing is written for it (and so nothing for a rival closer to race).
-    if (measuredLanding?.kind !== "no-change") {
+    // reason: the stored landing (measured from its own range at integrate) outranks the re-measured verdict, which reads the current claim.
+    const kind = readMeasuredLanding(task.extra)?.kind ?? measuredLanding?.kind;
+    if (kind !== "no-change") {
       const rangeRecorded = await this.recordCommitRange(task, nowIso, opts.by);
       if (!rangeRecorded.ok) return rangeRecorded;
       task = rangeRecorded.value;
@@ -5401,7 +5403,8 @@ export class TaskWorkflowService {
 
   /**
    * The `base_sha` of the most recent claim of a task that named `branch` (as its `branch` or its `worktree`), from
-   * the claim audit rows (they survive release); `undefined` when no such claim recorded one.
+   * the claim audit rows (they survive release); `undefined` when no such claim recorded one. Only the fallback for a landing
+   * with no merge to measure ({@link recordLanding}).
    */
   private static claimBaseFor(auditRows: readonly AuditEntry[], branch: string): string | undefined {
     const named = auditRows
@@ -5486,35 +5489,42 @@ export class TaskWorkflowService {
         slugs.push(task.slug);
         continue;
       }
-      // reason: BR-1336 — a branch found already on main has no merge to measure; the range starts at this task's own
-      // claim base (the audit row survives release). A claim that recorded none is a failure naming the task, never a guess.
+      // reason: BR-1336/BR-1372 — a branch found already on main has no merge of this call to measure; the range starts where
+      // main stood before the merge that brought the branch head onto it ({@link LandingGitFacts.landingStartOf}), a fact of
+      // history that no claim or re-claim can move. Never the claim's base_sha (a re-claim at the branch head made it the tip).
+      // A branch that reached main without a merge has no such start: a failure naming the task, never a guess.
       let mainBefore = landing.main_before;
       if (baseFromClaim === true) {
-        const claimBase = TaskWorkflowService.claimBaseFor(rows, landing.branch);
-        if (claimBase === undefined) {
+        const start = this.landingFacts().landingStartOf(landing.landing_commit);
+        // reason: AC-DCS2-1 — a branch that reached main WITHOUT a merge (fast-forward) has no merge to mark its start, so the range
+        // starts where the task's claim recorded it (the audit row survives release), as before the history fact existed. That
+        // fallback is only for this case: a branch with a merge always uses the history fact. A task with no recorded start at all
+        // is a failure naming the task and both reasons, never a guess.
+        const claimStart = start.ok
+          ? undefined
+          : TaskWorkflowService.claimBaseFor(rows, landing.branch) ??
+            (isTaskOfIntegrationBranch(task, integrationBranches, landing.branch) ? TaskWorkflowService.newestClaimStart(rows) : undefined);
+        if (!start.ok && claimStart === undefined) {
           firstFailure ??= {
             code: "VALIDATION_ERROR",
-            field: "claim.base_sha",
-            message: `${task.slug}: no claim of this task recorded a base_sha for ${landing.branch}, so its landing range has no start`,
+            field: "extra.landing.main_before",
+            message: `${task.slug}: the landing range of ${landing.branch} has no measurable start (${start.reason}; no claim of this task recorded a start commit for it either)`,
             value: task.slug,
           };
           continue;
         }
-        mainBefore = claimBase;
+        mainBefore = start.ok ? start.value : (claimStart as string);
       }
       // reason: the landing carries what the one predicate measures (kind, start, tip) — `kind` comes from {@link landingOf}
       // over this branch's facts and nowhere else, so integrate, `lore done`, get and the reviews read one answer. A task whose
       // start was never recorded, or whose branch landingOf cannot call landed, is a failure naming the task (nothing guessed).
-      // reason: AC-DCS2-1 — a task that reaches the landing only through the plan's integration branch was claimed on its OWN branch, so
-      // no claim row names the landed branch: its work starts where its newest claim started (the row survives release).
-      const startHead =
-        readClaimRecord(task)?.start_head ??
-        TaskWorkflowService.claimBaseFor(rows, landing.branch) ??
-        (isTaskOfIntegrationBranch(task, integrationBranches, landing.branch) ? TaskWorkflowService.newestClaimStart(rows) : undefined);
-      const verdict: LandingVerdict =
-        startHead === undefined
-          ? { state: "unmeasurable", reason: `no claim of this task recorded a start commit for ${landing.branch}` }
-          : landingOf({ start_head: startHead, branches: [landing.branch], worktrees: [], end_tip: landing.branch_head }, this.landingFacts());
+      // reason: BR-1372/BR-1496 — the predicate is fed the LANDING's own range start (main_before), never the claim's current
+      // start_head: a task re-claimed on its own branch head before integrate carries start_head == tip, and reading that made
+      // real landings `no-change`. `kind` is still produced only by {@link landingOf}; its start is a fact of the landing.
+      const verdict: LandingVerdict = landingOf(
+        { start_head: mainBefore, branches: [landing.branch], worktrees: [], end_tip: landing.branch_head },
+        this.landingFacts(),
+      );
       if (verdict.state !== "landed") {
         firstFailure ??= {
           code: "VALIDATION_ERROR",
@@ -5643,10 +5653,11 @@ export class TaskWorkflowService {
     verdict: Extract<LandingVerdict, { state: "landed" }>,
     nowIso: string,
   ): Record<string, unknown> | undefined {
-    const stored = readMeasuredLanding(task.extra);
-    if (stored !== undefined && stored.kind === verdict.kind && stored.start_head === verdict.start_head && stored.tip === verdict.tip) {
-      return undefined;
-    }
+    // reason: BR-1336/BR-1372 — a landing `lore integrate` recorded is immutable: a later claim/release/done re-measures the
+    // work from the CURRENT claim (a re-claim's start_head, another task's landing as the tip) and would overwrite the
+    // integrate-time facts with that. A stored measured landing is therefore never rewritten; `done` only completes a record
+    // that lacks them.
+    if (readMeasuredLanding(task.extra) !== undefined) return undefined;
     const existing = task.extra["landing"];
     const base = typeof existing === "object" && existing !== null ? (existing as Record<string, unknown>) : {};
     return {

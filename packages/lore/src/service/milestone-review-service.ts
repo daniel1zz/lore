@@ -59,7 +59,8 @@ import {
   type CitedRuleStateRow,
   type MainRedLedgerPort,
 } from "./milestone-review.js";
-import { applyDecisionFindings, rerunCitingCriteria, type CriterionRerunPort } from "./decision-recheck.js";
+import { withDecisionFindingCites } from "./decision-finding-cites.js";
+import { applyDecisionFindings,rerunCitingCriteria, type CriterionRerunPort } from "./decision-recheck.js";
 import {
   applySnapshotRule,
   renderSuiteSection,
@@ -111,7 +112,7 @@ export interface MilestoneReviewOptions {
   readonly diffSource: string;
   /** Per-call budget for diff text; a larger diff is judged in file chunks (BR-1499), never cut. */
   readonly maxDiffChars: number;
-  /** Measured facts for the facts table and the facts dimensions (attestation, regression per landing, scope, AI-mode criteria). */
+  /** Measured facts for the facts table and the facts dimensions (attestation, regression at head, scope, AI-mode criteria). */
   readonly facts?: MilestoneFacts;
   /** The batch's one full-suite run (`lore assess` measures it once); absent = none supplied for this review. */
   readonly suite?: SuiteRun;
@@ -177,12 +178,11 @@ export function selectPlanMilestoneDecisions(
 /** The facts fingerprint of one review: what its verdict read beyond the plan's own state (AC-AF-6). */
 function factsFingerprintOf(facts: MilestoneFacts | undefined, cited: readonly CitedRuleStateRow[]): string {
   return milestoneFactsFingerprint({
-    landingResultIds: facts?.landing_result_ids ?? [],
-    attestationIds: facts?.attestation_ids ?? [],
+    ...(facts?.head_suite_result_id !== undefined ? { headSuiteResultId: facts.head_suite_result_id } : {}),
+    singleFileRunIds: facts?.single_file_run_ids ?? [],
+    criteriaAttestationIds: facts?.criteria_attestation_ids ?? [],
     citedRules: cited.map((r) => ({ rule_id: r.rule_id, state: r.state })),
     promptVersion: MILESTONE_REVIEW_PROMPT_VERSION,
-    regressionUncleared: (facts?.regression_files?.length ?? 0) > 0,
-    ...(facts?.clearing_result_id !== undefined ? { clearingResultId: facts.clearing_result_id } : {}),
   });
 }
 
@@ -353,7 +353,7 @@ export class MilestoneReviewService {
       recorded: judgedInputs,
     });
     if (!judged.ok) return judged;
-    // reason: measured inputs are applied AFTER the judge so it cannot waive them (Part D): regression is the per-landing
+    // reason: measured inputs are applied AFTER the judge so it cannot waive them (Part D): regression is the at-head
     // fact; snapshot_accuracy fails only on a contradicted cited rule.
     const decisionFindingsResult = this.deps.recheckDecisions !== undefined ? await this.deps.recheckDecisions(bundle) : ok<DecisionFinding[]>([]);
     if (!decisionFindingsResult.ok) return decisionFindingsResult;
@@ -365,13 +365,18 @@ export class MilestoneReviewService {
     // reason: a wrong-when-written decision premise fails snapshot_accuracy AFTER the cited-rule rule so neither the judge
     // nor that rule can turn it back into a pass or an n/a (spec D5).
     // reason: the facts dimensions come from measured facts alone (spec D6, judgment layer): the judge was never asked
-    // for them and an answer on one is stripped. Regression comes from the per-landing rows (BR-1496); with none supplied
+    // for them and an answer on one is stripped. Regression comes from the at-head rows (BR-1496); with none supplied
     // it is not-measured, never a pass inferred from the HEAD suite (no second attribution path).
     const factDims = factsDimensions(opts.facts, judged.value.record.ai_criteria);
-    const dimensions = applyDecisionFindings(
-      applySnapshotRule(
-        applyDeterministicDimensionRules(mergeDimensions(judged.value.dimensions, factDims)),
-        citedRulesResult.value,
+    // reason: the wrong-when-written finding is deterministic, so it carries its own cites (decision, part, premise
+    // source) and --file-issues can fingerprint it (#500); a judge-text failure keeps none and stays refused.
+    const dimensions = withDecisionFindingCites(
+      applyDecisionFindings(
+        applySnapshotRule(
+          applyDeterministicDimensionRules(mergeDimensions(judged.value.dimensions, factDims)),
+          citedRulesResult.value,
+        ),
+        decisionFindings,
       ),
       decisionFindings,
     );
@@ -391,6 +396,10 @@ export class MilestoneReviewService {
       ...(retiredResult.value.length > 0 ? { retired_acs: retiredResult.value } : {}),
       fingerprint: planStateFingerprint(bundle.plan, bundle.tasks, bundle.spec),
       ...(causes !== undefined ? { causes } : {}),
+      ...(opts.facts?.assessed_commit !== undefined ? { assessed_commit: opts.facts.assessed_commit } : {}),
+      ...(opts.facts?.criteria_run !== undefined ? { criteria_run: opts.facts.criteria_run } : {}),
+      ...(opts.facts?.failing_fact_files !== undefined && opts.facts.failing_fact_files.length > 0 ? { failing_fact_files: [...new Set(opts.facts.failing_fact_files)].sort() } : {}),
+      ...(opts.facts?.regression_causes !== undefined && opts.facts.regression_causes.length > 0 ? { regression_causes: [...new Set(opts.facts.regression_causes)].sort() } : {}),
       overall: overallMilestoneVerdict(dimensions),
       dimensions,
       decisions,

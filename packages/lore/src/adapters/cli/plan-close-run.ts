@@ -77,7 +77,7 @@ export async function runPlanClose(input: PlanCloseRunInput): Promise<number> {
   }
   const wiring = createAssessWiring({ app, inv, actor, reviewService });
   const filing = createAssessFiling({ app, inv, actor, upstream: classification.kind === "unconfigured" ? undefined : classification.cfg });
-  const closeService = buildPlanCloseService({ app, inv, dbPath: input.dbPath, actor, verify: wiring.attestLanded });
+  const closeService = buildPlanCloseService({ app, inv, dbPath: input.dbPath, actor });
   if (!closeService.ok) {
     inv.io.stderr.write(`${formatErrorFor(inv, closeService.error)}\n`);
     return exitCode(closeService.error);

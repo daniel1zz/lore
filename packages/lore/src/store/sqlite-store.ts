@@ -197,6 +197,8 @@ import { applyMigration040 } from "./migrations/migration-040.js";
 import { MIGRATION_041_ADD_COLUMNS, MIGRATION_041_SQL } from "./migrations/migration-041.js";
 import { MIGRATION_042_ADD_COLUMNS, MIGRATION_042_SQL } from "./migrations/migration-042.js";
 import { MIGRATION_043_SQL } from "./migrations/migration-043.js";
+import { MIGRATION_044_SQL } from "./migrations/migration-044.js";
+import { MIGRATION_045_SQL } from "./migrations/migration-045.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey, DecisionVersionQuery } from "./store-interface.js";
@@ -1070,6 +1072,34 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("ROLLBACK;");
         } catch {
           // reason: same as migration-042 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 44 && 44 <= ceiling) {
+      // reason: migration-044 marks stored suite results whose command exited outside {0,1} `unrunnable` (BR-1497) in ONE BEGIN/COMMIT; a failure rolls back and leaves schema 43.
+      try {
+        this.db.exec(MIGRATION_044_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-043 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 45 && 45 <= ceiling) {
+      // reason: migration-045 adds the partial unique index over single-file run keys (#528) in ONE BEGIN/COMMIT; a failure rolls back and leaves schema 44.
+      try {
+        this.db.exec(MIGRATION_045_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-044 — safe to ignore, the failure below is what to report.
         }
         throw error;
       }
@@ -3949,7 +3979,8 @@ export class SQLiteStore implements StoreInterface {
       this.db.transaction(() => {
         for (const row of rows) {
           this.db.run(
-            "INSERT INTO suite_file_runs (suite_result_id, commit_sha, file, exit_code, output_tail, duration_ms, measured_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            // reason: OR IGNORE honours migration-045's partial unique index: a second single-file run of one (key, file) is dropped, first wins (#528); re-run rows under a suite id never conflict.
+            "INSERT OR IGNORE INTO suite_file_runs (suite_result_id, commit_sha, file, exit_code, output_tail, duration_ms, measured_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             [row.suite_result_id, row.commit_sha, row.file, row.exit_code, row.output_tail, row.duration_ms, row.measured_at],
           );
         }

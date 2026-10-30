@@ -398,7 +398,7 @@ async function runBatchClose(input: BatchCloseInput): Promise<number> {
     inv.io.stderr.write("Error: this composition has no lease store, so the review batch cannot run.\n");
     return 1;
   }
-  const closeService = buildPlanCloseService({ app, inv, dbPath: input.dbPath, actor, verify: input.wiring.attestLanded });
+  const closeService = buildPlanCloseService({ app, inv, dbPath: input.dbPath, actor });
   if (!closeService.ok) {
     inv.io.stderr.write(formatErrorFor(inv, closeService.error) + "\n");
     return exitCode(closeService.error);

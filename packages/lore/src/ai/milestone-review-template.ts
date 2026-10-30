@@ -215,7 +215,7 @@ function renderFacts(input: MilestoneReviewPromptInput): string {
 
 function renderUnseen(unseen: readonly string[] | undefined): string {
   if (unseen === undefined || unseen.length === 0) return "";
-  return `\nFiles NOT shown to any call (too large for one call; they are not reviewed): ${unseen.join(", ")}.`;
+  return `\nFiles NOT shown to any call (too large for one call, or their landing could not be mapped to main; they are not reviewed): ${unseen.join(", ")}.`;
 }
 
 function renderDiffSection(input: MilestoneReviewPromptInput): string {
@@ -319,7 +319,7 @@ export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): s
     "# Recorded decisions (judge each; answer in `decisions`)",
     renderRecordedDecisions(input),
     "",
-    "# Landed diff",
+    "# Final state of each changed file (net diff across the plan's landings)",
     renderDiffSection(input),
   ].join("\n");
 }

@@ -15,7 +15,7 @@
  * a scan that finds no example at all fails (an empty scan proves nothing).
  * Side effects: the CLI reads files under the root; the scan functions are pure.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,6 +41,7 @@ const CREATE_COMMAND = /lore create (?:knowledge|adr|plan)\b/g;
 const REFUSAL_WORDS = /\b(?:rejects?|refus\w*)\b/i;
 const ADHOC_SPEC_STATEMENT = /--adhoc\b[^\n]*--spec\b/;
 const SOURCE_PREFIX = "packages/lore/src/";
+const ROOT_MEMORY_FILE = "CLAUDE.md";
 
 interface LogicalLine {
   readonly line: number;
@@ -107,7 +108,7 @@ function walk(dir: string, out: string[]): void {
   }
 }
 
-/** Reads assets/** and packages/lore/src/** under `root`, paths relative to it. */
+/** Reads assets/**, packages/lore/src/** and the root CLAUDE.md under `root`, paths relative to it. */
 export function collectGuidanceFiles(root: string): GuidanceFile[] {
   const paths: string[] = [];
   for (const sub of ["assets", "packages/lore/src"]) {
@@ -117,6 +118,7 @@ export function collectGuidanceFiles(root: string): GuidanceFile[] {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
+  if (existsSync(join(root, ROOT_MEMORY_FILE))) paths.push(join(root, ROOT_MEMORY_FILE));
   return paths.map((p) => ({ path: relative(root, p), text: readFileSync(p, "utf8") }));
 }
 

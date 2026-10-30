@@ -149,7 +149,7 @@ describe("a no-change landing adds no commit range to a review's input", () => {
   const landed = (kind: "no-change" | "commits", commit: string): Pick<DocRecord, "extra"> => ({
     extra: {
       landing: {
-        branch: "b", branch_head: `${commit}-head`, main_before: `${commit}-before`, main_after: commit, landing_commit: commit,
+        branch: "b", branch_head: `${commit}-head`, main_before: kind === "no-change" ? commit : `${commit}-before`, main_after: commit, landing_commit: commit,
         recorded_at: "2026-10-26T00:00:00.000Z", kind, start_head: "s", tip: "t", integration_head: "i", measured_at: "2026-10-26T00:00:00.000Z",
       },
     },
@@ -159,5 +159,11 @@ describe("a no-change landing adds no commit range to a review's input", () => {
     expect(latestLandingCommit([landed("commits", "c1")])).toBe("c1");
     expect(latestLandingCommit([landed("no-change", "n1")])).toBe("none");
     expect(latestLandingCommit([landed("no-change", "n1"), landed("commits", "c1")])).toBe("c1");
+  });
+
+  it("REGRESSION: a landing labelled no-change whose main_before..landing_commit is a real range still counts (the label is never trusted)", () => {
+    const mislabelled = landed("commits", "m1");
+    const landing = mislabelled.extra["landing"] as Record<string, unknown>;
+    expect(latestLandingCommit([{ extra: { landing: { ...landing, kind: "no-change" } } }])).toBe("m1");
   });
 });

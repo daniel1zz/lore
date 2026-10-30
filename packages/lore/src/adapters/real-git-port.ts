@@ -975,6 +975,30 @@ export function createGitFacts(cwd: string): LandingGitFacts {
       if (top.status !== 0) return { ok: true, value: false };
       return { ok: true, value: realOrResolved(top.stdout.trim()) === realOrResolved(where.value) };
     },
+    landingStartOf: (commit) => {
+      const branch = integrationBranch();
+      if (!branch.ok) return branch;
+      const known = revParse(commit);
+      if (!known.ok) return known;
+      // reason: a branch whose head reached main through ANOTHER branch's merge is not on main's first-parent chain, so the
+      // chain is not walked with `--ancestry-path` alone. The start is the OLDEST first-parent commit of main that contains
+      // `commit` (the descendants set, without `--first-parent`, intersected with the first-parent list).
+      const chain = factsGit(cwd, ["rev-list", "--first-parent", "--reverse", `${known.value}..${branch.value}`]);
+      if (chain.status !== 0) return fail("rev-list --first-parent", chain);
+      const descendants = factsGit(cwd, ["rev-list", "--ancestry-path", `${known.value}..${branch.value}`]);
+      if (descendants.status !== 0) return fail("rev-list --ancestry-path", descendants);
+      const containing = new Set(descendants.stdout.split("\n").filter((line) => line !== ""));
+      const merge = chain.stdout.split("\n").find((line) => line !== "" && containing.has(line));
+      if (merge === undefined) return { ok: false, reason: `commit ${known.value.slice(0, 12)} is not below the head of ${branch.value}` };
+      const parents = factsGit(cwd, ["rev-list", "--parents", "-n", "1", merge]).stdout.trim().split(" ");
+      const firstParent = parents[1];
+      // reason: a fast-forward landing leaves `commit` itself on the first-parent history; the oldest commit after it then has
+      // `commit` as its only parent, where the NEXT work began, not this branch's start. Only a merge marks the start.
+      if (firstParent === undefined || firstParent === known.value || parents.length < 3) {
+        return { ok: false, reason: `commit ${known.value.slice(0, 12)} reached ${branch.value} without a merge, so no merge marks where the work began` };
+      }
+      return { ok: true, value: firstParent };
+    },
     pathExistsInIntegration: (path) => {
       const branch = integrationBranch();
       if (!branch.ok) return branch;

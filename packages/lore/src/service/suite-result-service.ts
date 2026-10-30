@@ -4,12 +4,16 @@
  * Purpose: make "what did the suite say at commit X" a stored fact: the first lookup of a commit runs the suite once and
  *   stores it, every later lookup reads the store and runs nothing; the main red/green state the review records is
  *   derived from the same rows, so there is no second record of one run.
- * Public surface: SuiteResultService, CommitSuiteRunnerPort, FileRunOutcome, suiteRunOfResult, deriveMainCheckedRows.
+ * Public surface: SuiteResultService, CommitSuiteRunnerPort, FileRunOutcome, SingleFileRunKind, singleFileRunKey, suiteRunOfResult,
+ *   deriveMainCheckedRows.
  * Invariants:
  *   - A commit has at most one `measured` result. A run that could not complete (the runner reports not-measured or
  *     fails) is stored as `unrunnable` with its cause and attempt number, and the NEXT lookup runs again as a new
  *     result (new id, `attempt + 1`); an `unrunnable` result is never returned as a cached answer.
  *   - Stored rows are never edited. Per-file re-runs (`rerunFiles`) are separate rows attached to a result id.
+ *   - A single-file run (`runSingleFile`, regression at the assessed commit) is stored keyed by (commit, file): its
+ *     `suite_result_id` column holds {@link singleFileRunKey} (`file-<kind>@<commit>`), not a suite result id, so a commit
+ *     that never had a full suite can still carry file runs and a later review reads them back (BR-1496).
  *   - Nothing here reads or writes the audit chain: main-red / main-red-green records stay audit rows (BR-1412), the
  *     "main was checked at <commit>" fact is {@link deriveMainCheckedRows} over the stored results.
  * Side-effect class: stateful (store writes, runner IO through the injected port).
@@ -28,6 +32,8 @@ export interface FileRunOutcome {
   readonly exit_code: number;
   readonly output_tail: string;
   readonly duration_ms: number;
+  /** Set when the run did not complete (timeout, process tree not ended): `exit_code` is then a failure, not a test result. */
+  readonly incomplete?: string;
 }
 
 /** What the service needs from a git-backed runner: resolve a ref, run the suite at a commit, re-run named files at a commit. */
@@ -53,6 +59,8 @@ export interface LookupWithWorkOutcome {
   readonly result: SuiteResultRecord;
   /** Set when the work could not be run at all (no worktree); absent when it ran, whatever the work itself reported. */
   readonly workError?: LoreError;
+  /** Where the work ran: the suite's own worktree (`suite`, a fresh run) or a worktree made for it alone (`own`, a stored hit). Absent when it did not run. */
+  readonly workIn?: "suite" | "own";
 }
 
 /** The slice of the store this service uses. */
@@ -108,6 +116,33 @@ export function deriveMainCheckedRows(results: readonly SuiteResultRecord[]): Ma
   return rows;
 }
 
+/** Why a single file was run at a commit: a bisection probe, or the confirmation of one end of a transition (spec D6). */
+export type SingleFileRunKind = "bisect" | "confirm";
+
+/**
+ * The value stored in `suite_file_runs.suite_result_id` for a single-file run at `commit`.
+ * reason: the table has no foreign key and no (commit, file) column pair of its own; keying by this string avoids a
+ * migration and makes "what did this file do at this commit" one indexed read (`listFileRuns`).
+ */
+export function singleFileRunKey(kind: SingleFileRunKind, commit: string): string {
+  return `file-${kind}@${commit}`;
+}
+
+/**
+ * Whether a command's exit code is a TEST RESULT: 0 = everything passed, 1 = some test failed. Any other code (5 = the
+ * oracle lock of the checkout was held by another run, 2/4 = usage or environment errors, 127 = not found) means the tests
+ * did not run, so the run says nothing about any file and is never stored as a measurement (BR-1497).
+ */
+export function isTestResultExit(exitCode: number): boolean {
+  return exitCode === 0 || exitCode === 1;
+}
+
+/** Why a command that exited outside {0, 1} produced no measurement; names the oracle lock when its output says so. */
+export function nonRunCause(command: string, exitCode: number, outputTail: string): string {
+  const contended = /oracle-lock: contended/.test(outputTail) ? " (the oracle lock of the checkout was held by another run)" : "";
+  return `\`${command}\` exited with code ${String(exitCode)}${contended}, which is not a test result (0 = pass, 1 = failures): the tests did not run`;
+}
+
 /** Readable text of any LoreError (not every member carries a `message`). */
 export function loreErrorText(error: LoreError): string {
   return "message" in error && typeof error.message === "string" ? error.message : error.code;
@@ -144,7 +179,8 @@ export class SuiteResultService {
     const durationMs = Math.max(0, Math.round(this.deps.clockMs() - startedMs));
     const base = { id: this.deps.newId(), commit_sha: commit, tree_sha: tree, attempt, duration_ms: durationMs, measured_at: this.deps.now() };
     let record: SuiteResultRecord;
-    if (ran.ok && ran.value.status === "measured") {
+    const nonRun = ran.ok && ran.value.status === "measured" ? ran.value.commands.find((c) => !isTestResultExit(c.exit_code)) : undefined;
+    if (ran.ok && ran.value.status === "measured" && nonRun === undefined) {
       record = {
         ...base,
         status: "measured",
@@ -156,7 +192,8 @@ export class SuiteResultService {
     } else {
       // reason: an incomplete run is a stored fact with its cause, not a missing row, so the attempt count survives and
       // the review can say "unrunnable (attempt 2): <cause>" instead of silently treating it as green (BR-1497).
-      const cause = ran.ok ? (ran.value.status === "not_measured" ? ran.value.reason : "the suite run did not complete") : loreErrorText(ran.error);
+      // reason: a command that exited outside {0, 1} never ran the tests; stored `measured` it read as "every file passed" (exit 5 = oracle lock contended).
+      const cause = nonRun !== undefined ? nonRunCause(nonRun.command, nonRun.exit_code, nonRun.output_tail) : ran.ok ? (ran.value.status === "not_measured" ? ran.value.reason : "the suite run did not complete") : loreErrorText(ran.error);
       record = { ...base, status: "unrunnable", cause, commands: [], skipped: [], failing_test_files: [] };
     }
     const inserted = await this.deps.store.insertSuiteResult(record);
@@ -188,7 +225,7 @@ export class SuiteResultService {
     });
     if (!looked.ok) return looked;
     const result = looked.value;
-    if (workRan) return ok({ result });
+    if (workRan) return ok({ result, workIn: "suite" });
     if (result.status !== "measured") {
       return ok({ result, workError: { code: "STORE_ERROR", message: `the suite could not run at ${result.commit_sha}, so there is no worktree to work in: ${result.cause ?? "unrunnable"}` } });
     }
@@ -196,7 +233,7 @@ export class SuiteResultService {
       return err({ code: "VALIDATION_ERROR", field: "runner.withWorktree", message: "the suite result of this commit is stored and the runner cannot open a worktree for the extra work", rule: "BR-1497" });
     }
     const ran = await runner.withWorktree(result.commit_sha, (root) => work(root, result.commit_sha));
-    return ran.ok ? ok({ result }) : ok({ result, workError: ran.error });
+    return ran.ok ? ok({ result, workIn: "own" }) : ok({ result, workError: ran.error });
   }
 
   /**
@@ -238,12 +275,66 @@ export class SuiteResultService {
     return ok(rows);
   }
 
+  /**
+   * Runs ONE test file at `commit` and stores the outcome keyed by (commit, file, kind), once: when a row for that key and
+   * file is already stored it is returned and nothing runs; when a concurrent review stored one while this run was in
+   * flight, the store keeps the first row (migration-045) and that row is returned, not this run's result (#528, BR-1497).
+   *
+   * @param commit - the commit to run at (a full sha)
+   * @param file - repo-relative test file
+   * @param kind - `bisect` probe or `confirm` run; they are stored apart so a confirmation is always an independent run
+   * @param runner - runs the file at the commit
+   * @returns the first stored row; `err` when the runner fails, reports no outcome or an incomplete one (not stored), or the store fails
+   */
+  async runSingleFile(commit: string, file: string, kind: SingleFileRunKind, runner: CommitSuiteRunnerPort): Promise<Result<SuiteFileRunRecord, LoreError>> {
+    const key = singleFileRunKey(kind, commit);
+    const existing = await this.firstStoredFileRun(key, file);
+    if (!existing.ok || existing.value !== null) return existing.ok ? ok(existing.value as SuiteFileRunRecord) : existing;
+    const ran = await runner.runFiles(commit, [file]);
+    if (!ran.ok) return ran;
+    const outcome = ran.value.find((o) => o.file === file);
+    if (outcome === undefined) {
+      return err({ code: "STORE_ERROR", message: `the runner reported no outcome for ${file} at ${commit}` });
+    }
+    // reason: a timed-out run says nothing about the file; storing it as a red row would charge a plan for a hang (BR-1496).
+    if (outcome.incomplete !== undefined) {
+      return err({ code: "STORE_ERROR", message: `${file} did not complete at ${commit}: ${outcome.incomplete}` });
+    }
+    // reason: an exit outside {0, 1} (usage error, lock contention) is no test result; stored, it would read as red.
+    if (!isTestResultExit(outcome.exit_code)) {
+      return err({ code: "STORE_ERROR", message: `${file} did not run at ${commit}: ${nonRunCause("bun run test:file", outcome.exit_code, outcome.output_tail)}` });
+    }
+    const row: SuiteFileRunRecord = {
+      suite_result_id: key,
+      commit_sha: commit,
+      file,
+      exit_code: outcome.exit_code,
+      output_tail: outcome.output_tail,
+      duration_ms: outcome.duration_ms,
+      measured_at: this.deps.now(),
+    };
+    const inserted = await this.deps.store.insertSuiteFileRuns([row]);
+    if (!inserted.ok) return inserted;
+    // reason: the insert is ignored when a concurrent review stored this (key, file) first; read back the winner so every review sees one outcome.
+    const stored = await this.firstStoredFileRun(key, file);
+    if (!stored.ok) return stored;
+    if (stored.value === null) return err({ code: "STORE_ERROR", message: `the single-file run of ${file} at ${commit} was not found after it was stored` });
+    return ok(stored.value);
+  }
+
+  /** The earliest stored row of `file` under `key`, or null when none is stored. */
+  private async firstStoredFileRun(key: string, file: string): Promise<Result<SuiteFileRunRecord | null, LoreError>> {
+    const rows = await this.deps.store.listSuiteFileRuns(key);
+    if (!rows.ok) return rows;
+    return ok(rows.value.find((r) => r.file === file) ?? null);
+  }
+
   /** The per-file re-runs stored for a result, in the order they ran. */
   listFileRuns(suiteResultId: string): Promise<Result<SuiteFileRunRecord[], LoreError>> {
     return this.deps.store.listSuiteFileRuns(suiteResultId);
   }
 
-  /** Every stored suite result, oldest first (the clearing lookup of regression-per-landing reads it). */
+  /** Every stored suite result, oldest first (regression at the assessed commit reads the known state of each commit from it). */
   listResults(): Promise<Result<SuiteResultRecord[], LoreError>> {
     return this.deps.store.listSuiteResults();
   }

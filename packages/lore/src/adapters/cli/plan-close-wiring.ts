@@ -43,8 +43,11 @@ export interface PlanCloseWiringInput {
   readonly dbPath: string;
   /** The acting identity of the close's writes. */
   readonly actor: string;
-  /** The verification of the plan's landed criteria (the batch's `attestLanded`); `undefined` = nothing to verify with in this composition. */
-  readonly verify: BatchRunPorts["attestLanded"];
+  /**
+   * An extra verification step before the assess; `undefined` = none. The batch no longer attests at each landing (main's BR-1379:
+   * criteria run once at the assessed commit inside the assess), so the callers pass none.
+   */
+  readonly verify?: ((planSlug: string) => Promise<Result<unknown, LoreError>>) | undefined;
 }
 
 /**

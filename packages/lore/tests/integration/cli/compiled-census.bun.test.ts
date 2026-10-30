@@ -126,7 +126,10 @@ describe("compiled dist/lore: lore baseline coverage (specification branch leaf)
     const r = runLore(["baseline", "coverage", leaf], repo);
     expect(r.stderr + r.stdout).not.toContain("typescript-unavailable");
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain(sites[0]!.key);
+    // Any listed site proves the census ran. NOT `sites[0]`: e80f8168 (BR-1495) made `governingSpecMissingError` the
+    // first site and it declares a rule this throwaway corpus does not hold, so the report names it as an
+    // invalid declaration (`file:line declares BR-1495 ...`) instead of printing its key.
+    expect(sites.some((s) => r.stdout.includes(s.key))).toBe(true);
   });
 
   it("the leaf's census counts every reached site (report only, exit 0); declarations are read from the tree by the compiled binary", () => {

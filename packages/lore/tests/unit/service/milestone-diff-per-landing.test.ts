@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { deriveLandingDiffForPlan, type LandingTaskInput } from "../../../src/adapters/cli/assess-commit-derivation.js";
+import { deriveLandingDiffForPlan, describeLandingCount, type LandingTaskInput } from "../../../src/adapters/cli/assess-commit-derivation.js";
 import { touchedFilesOfDiff } from "../../../src/service/milestone-review-inputs.js";
 
 const GIT_ENV = {
@@ -65,8 +65,8 @@ describe("AC-AF-8 review diff per landing", () => {
   it("AC-AF-8: another plan's commits between two landings stay out of the diff", () => {
     const { dir, first, second } = fixture();
     const tasks: LandingTaskInput[] = [
-      { slug: "t1", landing: { ...first, kind: "commits", outside_anchors: ["x.ts"] } },
-      { slug: "t2", landing: { ...second, kind: "commits" } },
+      { slug: "t1", landing: { ...first, outside_anchors: ["x.ts"] } },
+      { slug: "t2", landing: { ...second } },
     ];
     const r = deriveLandingDiffForPlan(dir, tasks, false);
     expect(r.status).toBe("derived");
@@ -81,7 +81,7 @@ describe("AC-AF-8 review diff per landing", () => {
     const r = deriveLandingDiffForPlan(
       dir,
       [
-        { slug: "t1", landing: { ...first, kind: "commits" } },
+        { slug: "t1", landing: { ...first } },
         { slug: "t-unlanded", landing: undefined },
       ],
       false,
@@ -102,9 +102,37 @@ describe("AC-AF-8 review diff per landing", () => {
   it("AC-AF-8: a landing whose commits are missing makes its task unlanded with a warning", () => {
     const { dir } = fixture();
     const bogus = "0123456789abcdef0123456789abcdef01234567";
-    const r = deriveLandingDiffForPlan(dir, [{ slug: "t1", landing: { main_before: bogus, landing_commit: bogus, kind: "commits" } }], false);
+    const bogusBefore = "fedcba9876543210fedcba9876543210fedcba98";
+    const r = deriveLandingDiffForPlan(dir, [{ slug: "t1", landing: { main_before: bogusBefore, landing_commit: bogus } }], false);
     expect(r.unlanded_tasks).toEqual(["t1"]);
     expect(r.warnings.length).toBe(1);
+  });
+
+  it("AC-AF-8: a landing labelled no-change whose main_before..landing_commit is non-empty contributes its files", () => {
+    const { dir, first } = fixture();
+    // the stored record says no-change; the derivation never reads the label, only the range
+    const labelled = { ...first, kind: "no-change" } as LandingTaskInput["landing"];
+    const r = deriveLandingDiffForPlan(dir, [{ slug: "t1", landing: labelled }], false);
+    expect(r.status).toBe("derived");
+    expect([...touchedFilesOfDiff(r.diff_text)]).toEqual(["p-one.txt"]);
+    expect(r.unlanded_tasks).toEqual([]);
+    expect(r.tasks_without_commits).toEqual([]);
+    expect(r.landings.map((l) => l.range_empty)).toEqual([false]);
+  });
+
+  it("AC-AF-8: a landing with main_before == landing_commit contributes nothing and its task is named", () => {
+    const { dir, first } = fixture();
+    const r = deriveLandingDiffForPlan(dir, [{ slug: "t-empty", landing: { main_before: first.main_before, landing_commit: first.main_before } }], false);
+    expect(r.diff_text).toBe("");
+    expect(r.tasks_without_commits).toEqual(["t-empty"]);
+    expect(r.landings.map((l) => l.range_empty)).toEqual([true]);
+  });
+
+  it("AC-AF-8: the diff-source header names landings and says the reviewer sees each file's net final state", () => {
+    const header = describeLandingCount(2, 3);
+    expect(header).toContain("2 landing(s), 3 commit(s)");
+    expect(header).toContain("net diff");
+    expect(header).not.toContain("merged in from main");
   });
 
   it("AC-AF-8: two tasks sharing one landing count its diff once; a no-change landing adds none", () => {
@@ -112,9 +140,9 @@ describe("AC-AF-8 review diff per landing", () => {
     const r = deriveLandingDiffForPlan(
       dir,
       [
-        { slug: "t1", landing: { ...first, kind: "commits" } },
-        { slug: "t2", landing: { ...first, kind: "commits" } },
-        { slug: "t3", landing: { main_before: first.main_before, landing_commit: first.main_before, kind: "no-change" } },
+        { slug: "t1", landing: { ...first } },
+        { slug: "t2", landing: { ...first } },
+        { slug: "t3", landing: { main_before: first.main_before, landing_commit: first.main_before } },
       ],
       false,
     );
