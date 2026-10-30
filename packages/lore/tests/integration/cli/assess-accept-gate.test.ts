@@ -199,7 +199,10 @@ interface World {
 }
 
 /** A plan with one archived task and a stored review whose `verdicts` are failing / not measured / passing. */
-async function worldWith(verdicts: Partial<Record<(typeof MILESTONE_DIMENSIONS)[number], "fail" | "not-measured" | "pass">>): Promise<World> {
+async function worldWith(
+  verdicts: Partial<Record<(typeof MILESTONE_DIMENSIONS)[number], "fail" | "not-measured" | "pass">>,
+  notMeasuredDetail?: { readonly reason: string; readonly cites: readonly string[] },
+): Promise<World> {
   const store = actedStore(new InMemoryStore());
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(undefined));
   const plan = await seed(store, rawDoc("plan", "Gate plan", {}, "approved"));
@@ -209,7 +212,8 @@ async function worldWith(verdicts: Partial<Record<(typeof MILESTONE_DIMENSIONS)[
   const dimensions = Object.fromEntries(
     MILESTONE_DIMENSIONS.map((d) => {
       const verdict = verdicts[d] ?? "pass";
-      return [d, { verdict, reason: `${d} ${verdict}`, reference: "r", ...(verdict === "fail" ? { cites: [`src/${d}.ts`] } : verdict === "not-measured" ? { cites: [`${d}:subject`] } : {}) }];
+      const detail = verdict === "not-measured" && d === "regression" ? notMeasuredDetail : undefined;
+      return [d, { verdict, reason: detail?.reason ?? `${d} ${verdict}`, reference: "r", ...(verdict === "fail" ? { cites: [`src/${d}.ts`] } : verdict === "not-measured" ? { cites: detail !== undefined ? [...detail.cites] : [`${d}:subject`] } : {}) }];
     }),
   ) as MilestoneReview["dimensions"];
   const review: MilestoneReview = {
@@ -335,6 +339,25 @@ describe("AC-AF-7 accepting a gate records the decision and a known defect, and 
     expect((await unmeasured.service().acceptGate(unmeasured.plan.slug, "regression", FULL_DECISION)).ok).toBe(true);
     await unmeasured.runBatch();
     expect(unmeasured.judgments).toBe(1);
+  });
+
+  it("AC-AO-4 NEGATIVE: a not-measured regression caused by an unlanded task is not re-judged by the next batch (a retry cannot change it)", async () => {
+    const w = await worldWith({ regression: "not-measured" }, { reason: "landings not measured: unlanded:t (task t has no landing record, so its changes have no measured diff)", cites: ["unlanded:t"] });
+    expect((await w.runBatch()).outcome).toBe("kept-open");
+    expect((await w.runBatch()).outcome).toBe("kept-open");
+    expect(w.judgments).toBe(0);
+  });
+
+  it("AC-AO-4 NEGATIVE: a not-measured regression caused by an unmappable landing is not re-judged by the next batch", async () => {
+    const w = await worldWith({ regression: "not-measured" }, { reason: "landings not measured: a.test.ts (landing abc is not on main's first-parent history)", cites: ["a.test.ts"] });
+    expect((await w.runBatch()).outcome).toBe("kept-open");
+    expect(w.judgments).toBe(0);
+  });
+
+  it("AC-AO-4 HAPPY: a not-measured regression whose suite could not complete is re-judged by the next batch, together with an unlanded task", async () => {
+    const w = await worldWith({ regression: "not-measured" }, { reason: "landings not measured: abc123 (the suite could not run at abc123: timeout); unlanded:t (no landing)", cites: ["abc123", "unlanded:t"] });
+    expect((await w.runBatch()).outcome).toBe("kept-open");
+    expect(w.judgments).toBe(1);
   });
 
   it("AC-AF-7 HAPPY: a not-measured regression gate is accepted the same way", async () => {
