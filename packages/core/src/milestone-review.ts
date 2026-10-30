@@ -129,6 +129,30 @@ export function judgmentAnswerSchema(dimensions: readonly JudgedDimension[]) {
     });
 }
 
+/**
+ * Why a regression fact row is `not-measured` (written by `regression-at-head.ts`, stored on the review as `regression_causes`).
+ *   - `unrunnable`: a run or read that could not complete (the head suite, a single-file run, the history or stored results); a
+ *     retry can complete it.
+ *   - `unlanded`: a task of the plan has no landing record, so its changes have no measured diff; only the plan's own landing changes that.
+ *   - `unmappable`: a landing (or the history) cannot be placed on main, so a transition cannot be attributed; a retry reads the same git.
+ *   - `flaky-bisection`: the confirmation runs disagree with the bisection; single-file runs are stored per commit and reused, so a retry
+ *     at the same head reads the same stored runs and reaches the same disagreement.
+ */
+export const NOT_MEASURED_CAUSES = ["unrunnable", "unlanded", "unmappable", "flaky-bisection"] as const;
+export type NotMeasuredCause = (typeof NOT_MEASURED_CAUSES)[number];
+
+/**
+ * Whether the next batch re-reviewing a plan kept open by a not-measured regression can change the outcome (spec "Fingerprint":
+ * only "a plan whose gate is not measured because the suite could not complete" is retried).
+ *
+ * @param causes - the stored `regression_causes` of the review (absent: none recorded)
+ * @returns `true` iff some cause is `unrunnable`; every other cause waits for the plan's own landing, a landing touching its
+ *   failing facts, or a manual `lore assess`
+ */
+export function regressionRetryCanChange(causes: readonly NotMeasuredCause[] | undefined): boolean {
+  return causes?.includes("unrunnable") ?? false;
+}
+
 /** One row of the facts table: a criterion's attestation, or one landing's regression. */
 export interface MilestoneFactRow {
   /** Criterion `<spec>:<ac>` or landing commit, whichever the row is about. */
@@ -137,6 +161,8 @@ export interface MilestoneFactRow {
   readonly verdict: "pass" | "fail" | "not-measured" | "na";
   /** What decided it (attestation id, failing files, why not measured). */
   readonly detail: string;
+  /** Why a `not-measured` regression row is not measured (absent on other rows). */
+  readonly cause?: NotMeasuredCause;
 }
 
 /** An AI-mode criterion the judge rules on, with its rubric. */
@@ -288,6 +314,8 @@ export const milestoneReviewSchema = z.object({
   criteria_run: criteriaRunRecordSchema.optional(),
   /** Files named by the failing facts, sorted; absent when nothing failed or the review predates the field. */
   failing_fact_files: z.array(z.string().min(1)).optional(),
+  /** Distinct causes of the not-measured regression rows (see NOT_MEASURED_CAUSES); the batch retries only on `unrunnable`. */
+  regression_causes: z.array(z.enum(NOT_MEASURED_CAUSES)).optional(),
   /** The judgment layer's calls, tokens, time and unseen files; absent on a review stored before it was recorded. */
   judgment: judgmentRecordSchema.optional(),
   prompt_version: z.string().min(1),

@@ -393,6 +393,7 @@ export class MilestoneReviewService {
       ...(opts.facts?.assessed_commit !== undefined ? { assessed_commit: opts.facts.assessed_commit } : {}),
       ...(opts.facts?.criteria_run !== undefined ? { criteria_run: opts.facts.criteria_run } : {}),
       ...(opts.facts?.failing_fact_files !== undefined && opts.facts.failing_fact_files.length > 0 ? { failing_fact_files: [...new Set(opts.facts.failing_fact_files)].sort() } : {}),
+      ...(opts.facts?.regression_causes !== undefined && opts.facts.regression_causes.length > 0 ? { regression_causes: [...new Set(opts.facts.regression_causes)].sort() } : {}),
       overall: overallMilestoneVerdict(dimensions),
       dimensions,
       decisions,
