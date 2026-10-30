@@ -67,6 +67,8 @@ interface JudgeShape {
   /** Stored on the review the judge makes (what a real review records from its facts). */
   readonly assessedCommit?: string;
   readonly failingFactFiles?: readonly string[];
+  /** The structured `regression_causes` stored when regression is not-measured (what regression-at-head.ts reports); absent means `unrunnable`. */
+  readonly regressionCauses?: NonNullable<MilestoneReview["regression_causes"]>;
 }
 
 class World {
@@ -159,6 +161,7 @@ class World {
       dimensions,
       decisions: [],
       ...(regressionFails ? { causes: { regression_files: [RED_FILE], suite_failing_files: [RED_FILE] } } : {}),
+      ...(this.shape.verdicts.regression === "not-measured" ? { regression_causes: [...(this.shape.regressionCauses ?? ["unrunnable" as const])] } : {}),
       ...(this.shape.assessedCommit !== undefined ? { assessed_commit: this.shape.assessedCommit } : {}),
       ...(this.shape.failingFactFiles !== undefined ? { failing_fact_files: [...this.shape.failingFactFiles] } : {}),
       prompt_version: "fixture",
@@ -234,6 +237,35 @@ describe("the post-landing batch measures nothing per landing", () => {
     const next = await batch(world, "next");
     expect(next).toMatchObject({ reviewed: true });
     expect(world.judgeCalls).toBe(2);
+  });
+
+  it("AC-AO-4 a regression not measured because a task has no landing record is not re-judged by the next batch (a retry cannot change it)", async () => {
+    const world = new World();
+    world.shape = { verdicts: { regression: "not-measured" }, assessedCommit: ASSESSED, regressionCauses: ["unlanded"] };
+    expect(await batch(world, "first")).toMatchObject({ outcome: "kept-open", reviewed: true });
+    world.judgeCalls = 0;
+    world.suiteRuns = 0;
+    expect(await batch(world, "next")).toMatchObject({ outcome: "kept-open", reviewed: false });
+    expect(world.judgeCalls).toBe(0);
+    expect(world.suiteRuns).toBe(0);
+  });
+
+  it("AC-AO-4 a regression not measured because a landing is not on main's history is not re-judged by the next batch", async () => {
+    const world = new World();
+    world.shape = { verdicts: { regression: "not-measured" }, assessedCommit: ASSESSED, regressionCauses: ["unmappable"] };
+    await batch(world, "first");
+    world.judgeCalls = 0;
+    expect(await batch(world, "next")).toMatchObject({ reviewed: false });
+    expect(world.judgeCalls).toBe(0);
+  });
+
+  it("AC-AO-4 an unrunnable head suite alongside an unlanded task is still re-judged by the next batch", async () => {
+    const world = new World();
+    world.shape = { verdicts: { regression: "not-measured" }, assessedCommit: ASSESSED, regressionCauses: ["unlanded", "unrunnable"] };
+    await batch(world, "first");
+    world.judgeCalls = 0;
+    expect(await batch(world, "next")).toMatchObject({ reviewed: true });
+    expect(world.judgeCalls).toBe(1);
   });
 
   it("AC-AO-4 a clean review is never re-opened by a landing, even one that changes a named file", async () => {

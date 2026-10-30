@@ -29,6 +29,9 @@
  *     plan open is `not-measured` on regression (the suite could not complete: the next batch retries), or (c) a landing on
  *     main since the review's assessed commit changed a file its failing facts name (`failing_fact_files`); an unrelated
  *     landing triggers nothing, and a hand `lore assess` always reviews.
+ *   - Re-judging a `not-measured` regression is retried only when a retry can change it (the suite or a single-file run could not
+ *     complete); a task with no landing record or an unmappable landing waits for the plan's own landing, a landing touching its
+ *     failing facts, or a manual `lore assess`.
  *   - The landing never waits for a review: {@link ReviewTriggerService.start} only reads state and spawns.
  * Side-effect class: IO through injected ports (services never import each other; the CLI adapter binds the real ones).
  *
@@ -37,7 +40,7 @@
  */
 
 import { acceptedGatesOf } from "./gate-acceptance-service.js";
-import { blockingGates, err, filableDimensions, milestoneReviewSchema, ok, type DocRecord, type LoreError, type MilestoneReview, type PlanBundle, type Result } from "@lore/core";
+import { blockingGates, err, filableDimensions, milestoneReviewSchema, ok, regressionRetryCanChange, type DocRecord, type LoreError, type MilestoneReview, type PlanBundle, type Result } from "@lore/core";
 import { readStoredPlanProgress } from "../store/plan-progress.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, selectLatestMilestoneReview, type PlanRetirementState } from "./milestone-review.js";
 import type { MilestoneReviewResult } from "./milestone-review-service.js";
@@ -323,7 +326,7 @@ export class ReviewBatchRunner {
     const accepted = acceptedGatesOf(plan, latest);
     const blockers = blockingGates(review.dimensions).filter((gate) => !accepted.includes(gate));
     if (blockers.length === 0) return ok(false);
-    if (review.dimensions.regression.verdict === "not-measured") return ok(true);
+    if (review.dimensions.regression.verdict === "not-measured") return ok(regressionRetryCanChange(review.regression_causes));
     const named = review.failing_fact_files ?? [];
     if (named.length === 0 || ports.changedFilesSince === undefined) return ok(false);
     if (review.assessed_commit === undefined) return ok(true);

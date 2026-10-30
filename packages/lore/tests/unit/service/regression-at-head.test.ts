@@ -183,6 +183,7 @@ describe("regression at the assessed commit", () => {
     const r = await measure(f, [landingAt(6)]);
     expect(r.files[0]).toMatchObject({ file: FILE, outcome: "not-measured" });
     expect(JSON.stringify(r.files[0])).toContain("flaky during bisection");
+    expect(r.causes).toEqual(["flaky-bisection"]);
     expect(r.charged).toEqual([]);
     expect(dimensionOf(r.rows).verdict).toBe("not-measured");
   });
@@ -199,7 +200,8 @@ describe("regression at the assessed commit", () => {
   it("AC-AO-1 a single-file run that cannot complete makes regression not-measured, never pass", async () => {
     const f = build({ commits: 10, files: { [FILE]: { redFrom: 6 } }, failRunFiles: true });
     const r = await measure(f, [landingAt(6)]);
-    expect(r.files[0]).toMatchObject({ file: FILE, outcome: "not-measured" });
+    expect(r.files[0]).toMatchObject({ file: FILE, outcome: "not-measured", cause: "unrunnable" });
+    expect(r.causes).toEqual(["unrunnable"]);
     expect(dimensionOf(r.rows).verdict).toBe("not-measured");
   });
 
@@ -220,7 +222,8 @@ describe("regression at the assessed commit", () => {
   it("AC-AO-1 an unrunnable head suite makes regression not-measured and runs no single file", async () => {
     const f = build({ commits: 10, files: { [FILE]: { redFrom: 6 } }, unrunnableHead: true });
     const r = await measure(f, [landingAt(6)]);
-    expect(r.rows[0]).toMatchObject({ verdict: "not-measured" });
+    expect(r.rows[0]).toMatchObject({ verdict: "not-measured", cause: "unrunnable" });
+    expect(r.causes).toEqual(["unrunnable"]);
     expect(f.fileRuns).toEqual([]);
     expect(dimensionOf(r.rows).verdict).toBe("not-measured");
   });
@@ -275,6 +278,7 @@ describe("regression at the assessed commit", () => {
     const f = build({ commits: 6, files: { [FILE]: { redFrom: 2 } } });
     const r = await measure(f, [], ["task-a"]);
     expect(r.files[0]).toEqual({ file: FILE, outcome: "no-landing" });
+    expect(r.causes).toEqual(["unlanded"]);
     expect(f.fileRuns).toEqual([]);
     expect(dimensionOf(r.rows).verdict).toBe("not-measured");
   });
@@ -282,7 +286,8 @@ describe("regression at the assessed commit", () => {
   it("AC-AO-1 a landing with no main commit containing it and no known main_before could be anywhere: a red file's transition is not-measured, never charged or passed", async () => {
     const f = build({ commits: 6, files: { [FILE]: { redFrom: 2 } } });
     const r = await measure(f, [{ landing_commit: sha(200), main_before: sha(199), task_slugs: ["t"] }]);
-    expect(r.files[0]).toMatchObject({ outcome: "not-measured" });
+    expect(r.files[0]).toMatchObject({ outcome: "not-measured", cause: "unmappable" });
+    expect(r.causes).toEqual(["unmappable"]);
     expect(r.charged).toEqual([]);
   });
 
