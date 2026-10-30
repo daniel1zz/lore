@@ -407,7 +407,7 @@ describe("AC-DCS1-23: the apply is all or nothing, one transaction, and converts
           if (prop !== "writeDoc") return Reflect.get(target, prop, target) as unknown;
           return (request: Parameters<CorpusService["writeDoc"]>[0]) => {
             const companions = request.extras?.also_update ?? [];
-            const broken = companions.map((write, index) => (index === companions.length - 1 ? { ...write, opts: { expected_version: write.opts.expected_version + 50 } } : write));
+            const broken = companions.map((write, index) => (index === companions.length - 1 ? { ...write, opts: { expected_version: (write.opts.expected_version ?? 0) + 50 } } : write));
             return target.writeDoc({ ...request, extras: { ...request.extras, also_update: broken } });
           };
         },
