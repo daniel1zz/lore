@@ -155,6 +155,15 @@ export function deriveRunId(harness: string, ids: { sessionId: string; agentId?:
 }
 
 /**
+ * Every environment variable a shipped agent harness uses as its marker, derived from {@link HARNESS_ADAPTERS} so it
+ * cannot drift from {@link hasAgentHarnessMarker}. The test runner strips exactly these (with `LORE_HARNESS_RUN`) at
+ * config load so a test run behaves identically inside an agent session and in CI (#531, regression of #503).
+ */
+export function listAgentHarnessMarkerEnvs(): readonly string[] {
+  return Object.values(HARNESS_ADAPTERS).map((adapter) => adapter.marker.env);
+}
+
+/**
  * Whether `env` carries the marker of any shipped agent harness: the process runs inside an agent, so no human
  * session applies to it (BR-1350). Pure; `env` is the invocation's environment.
  */

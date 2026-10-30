@@ -20,6 +20,7 @@ import { regressionAtHead } from "../../service/regression-at-head.js";
 import { BATCH_ERROR_AUDIT_ACTION, ReviewBatchRunner, type BatchRunPorts } from "../../service/review-batch-service.js";
 import { suiteRunOfResult } from "../../service/suite-result-service.js";
 import { readTaskLanding } from "../../service/task-commit-range.js";
+import { findCorpusOnlyTaskSlugs, noCodeRegressionRow } from "../../service/corpus-only-task.js";
 import { createGithubIssuePort } from "./assess-file-issues.js";
 import { measurePlanCriteriaAtHead, resolveAssessedCommit, type ListDocsPort } from "./assess-attestation-wiring.js";
 import { deriveLandingDiffForPlan, describeLandingCount, type DiffSourceRecord } from "./assess-commit-derivation.js";
@@ -207,9 +208,13 @@ export function createAssessWiring(input: AssessWiringInput): AssessWiring {
     const tasks = bundle.value.tasks.filter((task) => task.status !== "deprecated");
     // reason: #459 — the diff is each landing's own `main_before..landing_commit`; a task without a landing record is
     // named in `unlanded_tasks` (no commit-range fallback).
+    // reason: BR-1509 — a task with no anchors, never claimed on a branch and no landing record changes no code: it is listed as
+    // having no code, never `unlanded`.
+    const corpusOnly = await findCorpusOnlyTaskSlugs(tasks, app.auditService);
+    if (!corpusOnly.ok) return corpusOnly;
     const derivation = deriveLandingDiffForPlan(
       inv.cwd,
-      tasks.map((t) => ({ slug: t.slug, landing: readTaskLanding(t.extra) })),
+      tasks.map((t) => ({ slug: t.slug, landing: readTaskLanding(t.extra), ...(corpusOnly.value.has(t.slug) ? { corpus_only: true } : {}) })),
       tasks.length > 0 && tasks.every((t) => t.status === "archived"),
       { env: inv.env, ref: assessedCommit ?? "main" },
     );
@@ -226,7 +231,12 @@ export function createAssessWiring(input: AssessWiringInput): AssessWiring {
     // stays not-measured, never pass.
     const suiteResults = app.suiteResultService;
     let regressionFacts: Pick<MilestoneFacts, "regression" | "regression_files" | "head_suite_result_id" | "single_file_run_ids" | "assessed_commit" | "failing_fact_files" | "regression_causes"> = {};
-    if (suiteResults !== undefined) {
+    // reason: BR-1509 — when no task changes code, regression is `na` with no suite to run, so it is measured even without the
+    // suite-result store.
+    const noTaskChangesCode = tasks.length > 0 && derivation.no_code_tasks.length === tasks.length;
+    if (noTaskChangesCode) {
+      regressionFacts = { regression: [noCodeRegressionRow(derivation.no_code_tasks)], regression_files: [], regression_causes: [], single_file_run_ids: [], failing_fact_files: [] };
+    } else if (suiteResults !== undefined) {
       const measured = await regressionAtHead(derivation.landings, derivation.unlanded_tasks, {
         suites: suiteResults,
         runner: createGitCommitSuiteRunner(inv.cwd, inv.env),
@@ -282,6 +292,8 @@ export function createAssessWiring(input: AssessWiringInput): AssessWiring {
         l.outside_anchors !== undefined && l.outside_anchors.length > 0 ? [{ landing: l.landing_commit, files: l.outside_anchors }] : [],
       ),
       unlanded_tasks: derivation.unlanded_tasks,
+      no_code_tasks: derivation.no_code_tasks,
+      ...(noTaskChangesCode ? { no_task_changes_code: true } : {}),
       not_seen_files: derivation.not_seen_files,
     };
     return ok({ derivation, diffSource, facts, rerunCriterion });
@@ -362,6 +374,7 @@ export function buildBatchRunPorts(input: BatchRunPortsInput): BatchRunPorts {
     measureSuite: wiring.measureSuite,
     changedFilesSince: wiring.changedFilesSince,
     reviewPlan: wiring.reviewOne,
+    retryPendingIssueWrites: () => app.corpusService.retryPendingKnownDefectIssueWrites(actor),
     closePlan: async (ref) => {
       const closed = await app.corpusService.set(ref, { status: "archived" }, { by: actor });
       return closed.ok ? ok(undefined) : closed;

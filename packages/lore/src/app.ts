@@ -1915,6 +1915,16 @@ function wirePlanCloseIssues(app: App, config: LoreConfig | undefined, ambient: 
   const upstream = resolveFeedbackUpstreamCfg(config);
   if (upstream === undefined || !isGithubUpstreamCfg(upstream)) return;
   const repo = upstream.repo;
+  // reason: BR-1510 — detached known defects are commented and closed through the same `gh` the reader uses.
+  const issueCloser = new GhIssueCloser(new GhRunner({ execFile: createNodeGhExecFile(ambient.cwd), env: ambient.env }));
+  const issueRefOf = (issueNumber: number) => ({ repo, issueNumber });
+  app.corpusService.setKnownDefectIssueWriter({
+    commentIssue: (issue, body) => issueCloser.commentIssue(issueRefOf(issue), body),
+    closeIssue: async (issue) => {
+      const closed = await issueCloser.closeIssue(issueRefOf(issue));
+      return closed.ok ? ok(undefined) : closed;
+    },
+  });
   app.corpusService.setPlanCloseIssuePort({
     listOpenIssues: async () => {
       const runner = new GhRunner({ execFile: createNodeGhExecFile(ambient.cwd), env: ambient.env });

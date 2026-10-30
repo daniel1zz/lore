@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { extractTestFilePaths } from "../check-unclaimed-oracle.js";
 import { collectScriptAcs, evaluateOwnership, extractAcReferences, mainChanged } from "../check-ac-oracle-ownership.js";
 import type { ChangedFile } from "../changed-files.js";
+import { withTestRunEnv } from "../../packages/lore/tests/helpers/test-run-identity";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
@@ -264,12 +265,19 @@ describe("check-ac-oracle-ownership — red-first declarations from the corpus (
 
 // ─── End-to-end: the real script against a throwaway corpus ─────────────────
 
+// Identity (#503/#531): the fixture is an agent-harness child (CLAUDECODE=1 defaults AI assist off) and so must be a KNOWN
+// PARTY: a registered test run exported as LORE_HARNESS_RUN, via the repository's test-identity helper. Never inherited.
+// The helper registers through bun:sqlite, so this file runs on the Bun runtime (`bunx --bun vitest`, how test:vitest runs it).
+function knownPartyEnv(args: readonly string[], cwd: string): Record<string, string | undefined> {
+  return withTestRunEnv(args, { ...process.env, CLAUDECODE: "1" }, cwd);
+}
+
 function lore(args: string[], cwd: string): { status: number; stdout: string; stderr: string } {
   const r = spawnSync("bun", ["run", LORE_ENTRY, ...args], {
     cwd,
     encoding: "utf8",
     maxBuffer: 20 * 1024 * 1024,
-    env: { ...process.env, CLAUDECODE: "1" },
+    env: knownPartyEnv(args, cwd),
   });
   return { status: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
@@ -302,7 +310,7 @@ function runMainAt(dir: string): { status: number; out: string } {
   const driver = `import { main } from ${JSON.stringify(CHECKER)}; process.exit(main(${JSON.stringify(dir)}, ${JSON.stringify(dir)}, ${JSON.stringify(LORE_ENTRY)}));`;
   const driverPath = join(dir, "driver.mts");
   writeFileSync(driverPath, driver, "utf8");
-  const r = spawnSync("bun", [driverPath], { cwd: dir, encoding: "utf8", env: { ...process.env, CLAUDECODE: "1" } });
+  const r = spawnSync("bun", [driverPath], { cwd: dir, encoding: "utf8", env: knownPartyEnv([], dir) });
   return { status: r.status ?? -1, out: `${r.stdout}${r.stderr}` };
 }
 

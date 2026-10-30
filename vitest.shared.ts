@@ -3,6 +3,7 @@ import { rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, URL } from "node:url";
+import { listAgentHarnessMarkerEnvs } from "./packages/core/src/run-identity";
 import { workspaceAliases } from "./workspace-aliases";
 import { resolveMaxWorkers } from "./scripts/test-max-workers";
 import { armSandboxEnv, createRunRoot } from "./scripts/test-isolation-env";
@@ -21,7 +22,12 @@ armSandboxEnv(fileURLToPath(new URL(".", import.meta.url)));
 // setupFiles/globalSetup deletion would not reach them). Both configs import this module, so both runners are covered.
 // Identity in tests comes only from packages/lore/tests/helpers/test-run-identity.ts and scripts/test-known-party-spawn.ts,
 // which set the variable deliberately on the children they start.
+// #531: the agent-harness MARKER (hasAgentHarnessMarker) is part of the same inherited identity: with the run gone but the
+// marker kept, a fixture that spawns `lore` without a test identity is refused ("runs inside an agent harness but carries no
+// attested run"), which CI never sees. Strip every marker on the ONE list core exports, so the two cannot drift. A test that
+// needs the marker (CLAUDECODE=1 defaults AI assist off) must set it itself on the child it spawns.
 delete process.env["LORE_HARNESS_RUN"];
+for (const markerEnv of listAgentHarnessMarkerEnvs()) delete process.env[markerEnv];
 
 /** Env var naming the throwaway HOME of this run (lets a nested run reuse its parent's and the teardown remove it). */
 export const THROWAWAY_HOME_ENV = "LORE_TEST_THROWAWAY_HOME";
