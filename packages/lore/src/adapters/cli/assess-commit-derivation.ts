@@ -1,6 +1,7 @@
 /**
  * Derives a plan's review diff from each landing `lore integrate` recorded (`extra.landing`: `main_before`,
- * `landing_commit`): `git diff main_before landing_commit` per distinct landing (#459). A task with no landing record has no
+ * `landing_commit`): per changed file, the NET diff across the plan's landings (`assess-final-state-diff.ts`, BR-1508).
+ * Commits and tasks are still read per landing (#459). A task with no landing record has no
  * measured diff: it is named in `unlanded_tasks` (and `tasks_not_measured`), never attributed by searching commit messages
  * for its slug (BR-1291, BR-1336), and there is NO commit-range fallback (the old first-parent range derivation admitted
  * another plan's commits, #459, and was removed with the facts-layer work).
@@ -15,6 +16,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { buildFinalStateDiff } from "./assess-final-state-diff.js";
 
 /** Explicit maxBuffer — the 1 MiB spawnSync default silently truncates a growing diff/log payload. */
 const GIT_MAX_BUFFER = 20 * 1024 * 1024;
@@ -54,8 +56,10 @@ export interface CommitDerivationResult {
   attribution: Record<string, TaskAttribution>;
   /** Always `0` here: a landing's range is exact, nothing merged in from main is ever in it. Kept for the stored diff-source line. */
   excluded_merged_commit_count: number;
-  /** Concatenated unified diff across every landing, oldest first. `""` unless status is `"derived"`. */
+  /** The reviewer's diff: one NET diff per changed file (BR-1508). `""` unless status is `"derived"`. */
   diff_text: string;
+  /** Files of landings that could not be mapped to main: shown to no call, so gates over them are not-measured. */
+  not_seen_files: string[];
   warnings: string[];
 }
 
@@ -65,7 +69,7 @@ export interface CommitDerivationResult {
  * never from a commit range, so the wording names landings.
  */
 export function describeLandingCount(landingCount: number, commitCount: number): string {
-  return `${String(landingCount)} landing(s), each main_before..landing_commit (${String(commitCount)} commit(s))`;
+  return `${String(landingCount)} landing(s), ${String(commitCount)} commit(s): each file's net diff from its first landing's main_before to the main commit of its last landing (final state, not intermediate landings)`;
 }
 
 /**
@@ -154,11 +158,13 @@ export interface LandingTaskInput {
  * @param cwd - repository root
  * @param tasks - every task of the plan with its parsed landing
  * @param allTasksArchived - whether every task is archived (zero commits then is `unverifiable_convention_mismatch`)
+ * @param options - `ref`: the ref landings are placed on (default `main`); `env`: environment for git
  */
 export function deriveLandingDiffForPlan(
   cwd: string,
   tasks: readonly LandingTaskInput[],
   allTasksArchived: boolean,
+  options: { readonly env?: NodeJS.ProcessEnv; readonly ref?: string } = {},
 ): LandingDerivationResult {
   const warnings: string[] = [];
   const unlanded: string[] = [];
@@ -167,7 +173,6 @@ export function deriveLandingDiffForPlan(
   const landings = new Map<string, PlanLanding>();
   const landingCommits = new Map<string, string[]>();
   const commitMap = new Map<string, { subject: string; taskSlugs: Set<string> }>();
-  const diffs: string[] = [];
 
   const markUnlanded = (slug: string): void => {
     unlanded.push(slug);
@@ -215,12 +220,6 @@ export function deriveLandingDiffForPlan(
       markUnlanded(task.slug);
       continue;
     }
-    const diff = runGit(cwd, ["diff", l.main_before, l.landing_commit]);
-    if (!diff.ok) {
-      warnings.push(diff.warning);
-      markUnlanded(task.slug);
-      continue;
-    }
     landings.set(l.landing_commit, entry);
     attribution[task.slug] = "recorded_range";
     const shas: string[] = [];
@@ -231,7 +230,6 @@ export function deriveLandingDiffForPlan(
       else commitMap.set(c.sha, { subject: c.subject, taskSlugs: new Set([task.slug]) });
     }
     landingCommits.set(l.landing_commit, shas);
-    diffs.push(diff.stdout);
   }
 
   const base = {
@@ -244,12 +242,24 @@ export function deriveLandingDiffForPlan(
     landings: [...landings.values()],
   };
   if (commitMap.size === 0) {
-    return { ...base, status: allTasksArchived ? "unverifiable_convention_mismatch" : "no_commits_found", commits: [], diff_text: "" };
+    return { ...base, status: allTasksArchived ? "unverifiable_convention_mismatch" : "no_commits_found", commits: [], diff_text: "", not_seen_files: [] };
   }
+  // reason: BR-1508 — the reviewer reads each file's NET diff, not the union of per-landing diffs; one diff path only.
+  const net = buildFinalStateDiff(
+    cwd,
+    options.env ?? process.env,
+    options.ref ?? "main",
+    [...landingCommits.keys()].map((commit) => {
+      const landing = landings.get(commit) as PlanLanding;
+      return { landing_commit: landing.landing_commit, main_before: landing.main_before };
+    }),
+  );
+  warnings.push(...net.warnings);
   return {
     ...base,
     status: "derived",
     commits: [...commitMap.entries()].map(([sha, e]) => ({ sha, subject: e.subject, matched_task_slugs: [...e.taskSlugs].sort() })),
-    diff_text: diffs.join(""),
+    diff_text: net.diff_text,
+    not_seen_files: [...net.not_seen_files],
   };
 }

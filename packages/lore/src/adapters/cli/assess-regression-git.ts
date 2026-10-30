@@ -3,7 +3,7 @@
  *
  * Purpose: give `regressionAtHead` its history and file-existence ports over real git (BR-1496); replaces the clearing
  *   lookup of regression per landing.
- * Public surface: createGitFirstParentHistory, createGitFirstParentCommitContaining, createGitFileExistsAt, createGitChangedFilesSince.
+ * Public surface: createGitFirstParentHistory, findFirstParentCommitContaining, createGitFirstParentCommitContaining, createGitFileExistsAt, createGitChangedFilesSince.
  * Invariants:
  *   - History order is `git rev-list --first-parent --reverse <ref>` (oldest first), never `measured_at`.
  *   - Every git failure is an `err` naming the command's stderr; nothing is read as "empty" or "absent" on failure.
@@ -69,24 +69,35 @@ export function createGitChangedFilesSince(cwd: string, env: NodeJS.ProcessEnv, 
  * landed is not on it, and its landing is the chain commit that merged the other branch.
  *
  * reason: the descendants set (`--ancestry-path`, every parent) intersected with the first-parent list; the same containment
- * `landingStartOf` uses.
+ * `landingStartOf` uses. This is the ONE landing-to-main-commit mapping: regression-at-head reads it through
+ * {@link createGitFirstParentCommitContaining}; the final-state diff (`assess-commit-derivation.ts`) calls it directly.
+ *
+ * @param cwd - any directory inside the checkout
+ * @param env - environment for git
+ * @param commit - the commit to place on `ref`'s first-parent chain
+ * @param ref - the ref whose first-parent chain is searched (`main`)
+ */
+export function findFirstParentCommitContaining(cwd: string, env: NodeJS.ProcessEnv, commit: string, ref: string): Result<string | undefined, LoreError> {
+  const resolved = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${commit}^{commit}`], { cwd, env, encoding: "utf8" });
+  if (resolved.status !== 0) return ok(undefined);
+  const known = resolved.stdout.trim();
+  const below = spawnSync("git", ["merge-base", "--is-ancestor", known, ref], { cwd, env, encoding: "utf8" });
+  if (below.status === 1) return ok(undefined);
+  if (below.status !== 0) return err(gitFailure(`cannot tell whether ${commit} is below ${ref}`, below.stderr));
+  const chain = spawnSync("git", ["rev-list", "--first-parent", "--reverse", `${known}..${ref}`], { cwd, env, encoding: "utf8" });
+  if (chain.status !== 0) return err(gitFailure(`cannot read ${ref}'s first-parent history above ${commit}`, chain.stderr));
+  const descendants = spawnSync("git", ["rev-list", "--ancestry-path", `${known}..${ref}`], { cwd, env, encoding: "utf8" });
+  if (descendants.status !== 0) return err(gitFailure(`cannot read the descendants of ${commit} below ${ref}`, descendants.stderr));
+  const containing = new Set(descendants.stdout.split("\n").filter((line) => line !== ""));
+  return ok(chain.stdout.split("\n").find((line) => line !== "" && containing.has(line)));
+}
+
+/**
+ * Async port form of {@link findFirstParentCommitContaining}.
  *
  * @param cwd - any directory inside the checkout
  * @param env - environment for git
  */
 export function createGitFirstParentCommitContaining(cwd: string, env: NodeJS.ProcessEnv): (commit: string, ref: string) => Promise<Result<string | undefined, LoreError>> {
-  return async (commit, ref) => {
-    const resolved = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${commit}^{commit}`], { cwd, env, encoding: "utf8" });
-    if (resolved.status !== 0) return ok(undefined);
-    const known = resolved.stdout.trim();
-    const below = spawnSync("git", ["merge-base", "--is-ancestor", known, ref], { cwd, env, encoding: "utf8" });
-    if (below.status === 1) return ok(undefined);
-    if (below.status !== 0) return err(gitFailure(`cannot tell whether ${commit} is below ${ref}`, below.stderr));
-    const chain = spawnSync("git", ["rev-list", "--first-parent", "--reverse", `${known}..${ref}`], { cwd, env, encoding: "utf8" });
-    if (chain.status !== 0) return err(gitFailure(`cannot read ${ref}'s first-parent history above ${commit}`, chain.stderr));
-    const descendants = spawnSync("git", ["rev-list", "--ancestry-path", `${known}..${ref}`], { cwd, env, encoding: "utf8" });
-    if (descendants.status !== 0) return err(gitFailure(`cannot read the descendants of ${commit} below ${ref}`, descendants.stderr));
-    const containing = new Set(descendants.stdout.split("\n").filter((line) => line !== ""));
-    return ok(chain.stdout.split("\n").find((line) => line !== "" && containing.has(line)));
-  };
+  return async (commit, ref) => findFirstParentCommitContaining(cwd, env, commit, ref);
 }

@@ -128,9 +128,11 @@ describe("AC-AF-8 review diff per landing", () => {
     expect(r.landings.map((l) => l.range_empty)).toEqual([true]);
   });
 
-  it("AC-AF-8: the diff-source header names landings, not a commit range", () => {
-    expect(describeLandingCount(2, 3)).toBe("2 landing(s), each main_before..landing_commit (3 commit(s))");
-    expect(describeLandingCount(2, 3)).not.toContain("merged in from main");
+  it("AC-AF-8: the diff-source header names landings and says the reviewer sees each file's net final state (AC-FS-1 supersedes the per-landing wording)", () => {
+    const header = describeLandingCount(2, 3);
+    expect(header).toContain("2 landing(s), 3 commit(s)");
+    expect(header).toContain("net diff");
+    expect(header).not.toContain("merged in from main");
   });
 
   it("AC-AF-8: two tasks sharing one landing count its diff once; a no-change landing adds none", () => {

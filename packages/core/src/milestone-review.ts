@@ -175,6 +175,8 @@ export interface MilestoneFacts {
   readonly outside_anchors?: readonly { readonly landing: string; readonly files: readonly string[] }[];
   /** Tasks of the plan with no landing yet. */
   readonly unlanded_tasks?: readonly string[];
+  /** Files of landings that could not be mapped to main (BR-1508): no call shows them, so security and concurrency_safety are not-measured over them. */
+  readonly not_seen_files?: readonly string[];
   /** AI-mode criteria of the plan's task scopes. */
   readonly ai_criteria?: readonly AiCriterionInput[];
   /** The stored suite result id at the assessed commit (BR-1497); the review fingerprint hashes it. Absent when the head suite was not run. */
