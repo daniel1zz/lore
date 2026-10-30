@@ -25,6 +25,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createRealProcessTablePort } from "../../../src/adapters/process-table-port.js";
+import { ensureRequirementsDocSlug } from "../../helpers/parented-create";
 import { registerTestRun } from "../../helpers/test-run-identity";
 
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -162,7 +163,9 @@ function shJob(body: string): { exec: string; args: string[] } {
   return { exec: "sh", args: ["-c", `read go; ${body}`] };
 }
 
-const NOTE_ARGS = ["create", "knowledge", "--title", "Delegated job note", "--sub-type", "reference", "--no-ai", "--content", "written by the job"];
+/** The job's knowledge create; a knowledge needs a parent, so `--parent` is filled in by beforeEach once the corpus exists. */
+let NOTE_ARGS: string[] = [];
+let NOTE_PARENT = "";
 
 function noteVersions(): { harness_run: string | null }[] {
   return withDb((db) => db.query("SELECT harness_run FROM versions WHERE title = 'Delegated job note'").all() as { harness_run: string | null }[]);
@@ -174,6 +177,8 @@ beforeEach(() => {
   const init = lore(["init"], cleanEnv({ LORE_HARNESS_RUN: "cc:dj-init" }));
   if (init.exitCode !== 0) throw new Error(`lore init failed (${init.exitCode}): ${init.stderr}${init.stdout}`);
   registerTestRun(dir, CALLER);
+  NOTE_PARENT = ensureRequirementsDocSlug((a) => lore(a, cleanEnv({ LORE_HARNESS_RUN: CALLER })));
+  NOTE_ARGS = ["create", "knowledge", "--parent", NOTE_PARENT, "--title", "Delegated job note", "--sub-type", "reference", "--no-ai", "--content", "written by the job"];
 });
 
 afterEach(() => {
@@ -320,7 +325,7 @@ describe("AC-DJ-1: a detached lore job writes under a delegated child run", () =
     expect(ended.end_reason).toContain(JOB_NAME);
     expect((runRow(CALLER) as RunRow).ended_at).toBeNull(); // only the child ended, never the caller's run
 
-    const later = lore(["create", "knowledge", "--title", "After the job", "--sub-type", "reference", "--no-ai", "--content", "x"], cleanEnv({ LORE_HARNESS_RUN: run }));
+    const later = lore(["create", "knowledge", "--parent", NOTE_PARENT, "--title", "After the job", "--sub-type", "reference", "--no-ai", "--content", "x"], cleanEnv({ LORE_HARNESS_RUN: run }));
     expect(later.exitCode).toBe(4);
     expect(later.stderr).toContain(`Run ${run} is refused: run ${run} ended at`);
     expect(withDb((db) => db.query("SELECT 1 FROM versions WHERE title = 'After the job'").all())).toHaveLength(0);

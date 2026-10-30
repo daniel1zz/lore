@@ -318,10 +318,10 @@ function seedSixTypeFixture(): Fixture {
 
   const prdId = createDoc(fixture, ["create", "prd", "--title", "Prune Scope Root PRD", "--content", "# Prune Scope Root PRD\n"]);
   createDoc(fixture, ["create", "spec", "--title", "Prune Scope Spec","--kind", "tech", "--content", SPEC_SKELETON]);
-  createDoc(fixture, ["create", "adr", "--title", "Prune Scope Decision One", "--decision-status", "accepted", "--content", "# Prune Scope Decision One\n"]);
-  createDoc(fixture, ["create", "adr", "--title", "Prune Scope Decision Two", "--decision-status", "accepted", "--content", "# Prune Scope Decision Two\n"]);
-  createDoc(fixture, ["create", "knowledge", "--title", "Prune Scope Note One", "--sub-type", "reference", "--content", "# Prune Scope Note One\n"]);
-  createDoc(fixture, ["create", "knowledge", "--title", "Prune Scope Note Two", "--sub-type", "reference", "--content", "# Prune Scope Note Two\n"]);
+  createDoc(fixture, ["create", "adr", "--parent", prdId, "--title", "Prune Scope Decision One", "--decision-status", "accepted", "--content", "# Prune Scope Decision One\n"]);
+  createDoc(fixture, ["create", "adr", "--parent", prdId, "--title", "Prune Scope Decision Two", "--decision-status", "accepted", "--content", "# Prune Scope Decision Two\n"]);
+  createDoc(fixture, ["create", "knowledge", "--parent", prdId, "--title", "Prune Scope Note One", "--sub-type", "reference", "--content", "# Prune Scope Note One\n"]);
+  createDoc(fixture, ["create", "knowledge", "--parent", prdId, "--title", "Prune Scope Note Two", "--sub-type", "reference", "--content", "# Prune Scope Note Two\n"]);
   const planId = createDoc(fixture, ["create", "plan", "--title", "Prune Scope Plan", "--parent", prdId, "--content", "# Prune Scope Plan\n"]);
   createDoc(fixture, ["create", "task", "--title", "Prune Scope Task", "--parent", planId, "--plan-id", planId, "--content", "# Prune Scope Task\n"]);
 

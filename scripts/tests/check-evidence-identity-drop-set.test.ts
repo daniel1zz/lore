@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { ensureRequirementsDocSlugViaEntry } from "../../packages/lore/tests/helpers/parented-create.js";
 import { type CorpusReader, type DropSetRow, evaluateDropSet, readDropSet, runCheck } from "../check-evidence-identity-drop-set.js";
 import { type Dump, diffDumps } from "../generate-evidence-identity-drop-set.js";
 
@@ -238,7 +239,7 @@ describe("check-evidence-identity-drop-set - AC-EI-3 end to end (mkdtemp + lore 
         dir,
       );
       expect(added.status).toBe(0);
-      const plan = (JSON.parse(lore(["create", "plan", "--title", "EI3 plan", "--content", "Goal: fixture.", "--json"], dir).stdout) as { data: { slug: string } }).data.slug;
+      const plan = (JSON.parse(lore(["create", "plan", "--parent", ensureRequirementsDocSlugViaEntry(LORE_ENTRY, dir), "--title", "EI3 plan", "--content", "Goal: fixture.", "--json"], dir).stdout) as { data: { slug: string } }).data.slug;
       const task = (JSON.parse(lore(["create", "task", "--plan-id", plan, "--title", "EI3 owner task", "--content", "Estimate: S\nApproach: fixture.", "--json"], dir).stdout) as { data: { slug: string } }).data.slug;
 
       const file = join(dir, "drop-set.json");

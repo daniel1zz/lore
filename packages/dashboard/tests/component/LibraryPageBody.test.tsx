@@ -195,9 +195,10 @@ describe("LibraryPageBody", () => {
       await waitFor(() => expect(mockedApiList).toHaveBeenCalled());
 
       await user.click(screen.getByRole("button", { name: "New doc" }));
-      // ISSUE-003's new default ("knowledge") needs no parent/extra beyond
-      // its own defaulted sub_type — a title alone is submittable.
+      // ISSUE-003's default ("knowledge") needs its own defaulted sub_type and, since BR-709
+      // (6c45104c), a parent: a title plus a Parent ID is submittable.
       await user.type(screen.getByLabelText(/Title/), "My Note");
+      await user.type(screen.getByLabelText(/Parent ID/), "01HPARENT000000000000000001");
       await user.click(screen.getByRole("button", { name: "Create" }));
 
       await waitFor(() => expect(onDocCreated).toHaveBeenCalledWith(newDoc));
@@ -217,6 +218,7 @@ describe("LibraryPageBody", () => {
 
       await user.click(screen.getByRole("button", { name: "New doc" }));
       await user.type(screen.getByLabelText(/Title/), "My Note");
+      await user.type(screen.getByLabelText(/Parent ID/), "01HPARENT000000000000000001");
       await user.click(screen.getByRole("button", { name: "Create" }));
 
       await waitFor(() => expect(screen.getByText("boom")).toBeInTheDocument());

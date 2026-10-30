@@ -40,7 +40,7 @@ export function createGitHeadCriteriaRunner(
     const rerunner = rerunnerAt(root);
     const outcomes: HeadCriterionOutcome[] = [];
     for (const criterion of criteria) {
-      const result = await rerunner.rerun({ slug: criterion.spec_slug }, criterion.ac_id);
+      const result = await rerunner.rerun({ slug: criterion.doc_slug }, criterion.ac_id);
       outcomes.push(result.ok ? { ...criterion, ran: true } : { ...criterion, ran: false, cause: loreErrorText(result.error) });
     }
     return ok(outcomes);

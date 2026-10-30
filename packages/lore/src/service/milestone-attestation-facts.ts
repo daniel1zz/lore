@@ -45,7 +45,7 @@ export interface CriterionHolder {
 
 /** One live criterion of the plan's task scopes. */
 export interface CriterionScope {
-  readonly spec_slug: string;
+  readonly doc_slug: string;
   readonly ac_id: string;
   readonly mode: "script" | "ai" | "human";
   /** The AI rubric (mode `ai` only). */
@@ -59,7 +59,7 @@ export interface CriterionScope {
 export interface AttestationRow {
   /** `<task-slug>@<recorded_at>`: stable, unique per evidence row. */
   readonly id: string;
-  readonly spec_slug: string;
+  readonly doc_slug: string;
   readonly ac_id: string;
   readonly result: "pass" | "fail";
   readonly head_sha: string;
@@ -118,7 +118,7 @@ export function planCriterionScopes(spec: DocRecord | undefined, tasks: readonly
     }
     if (holders.length === 0) continue;
     scopes.push({
-      spec_slug: spec.slug,
+      doc_slug: spec.slug,
       ac_id: criterion.id,
       mode: criterion.verify.mode,
       ...(criterion.verify.mode === "ai" ? { rubric: criterion.verify.rubric } : {}),
@@ -154,7 +154,7 @@ export function attestationRowsOf(specs: readonly DocRecord[], plans: readonly D
       const specId: string | undefined = lineageSpecId ?? undefined;
       const spec = specId === undefined ? undefined : specsById.get(specId);
       if (spec === undefined) continue;
-      rows.push({ id: `${task.slug}@${entry.recorded_at}`, spec_slug: spec.slug, ac_id: entry.ac_ref, result: entry.result, head_sha: stamp.head_sha, recorded_at: entry.recorded_at });
+      rows.push({ id: `${task.slug}@${entry.recorded_at}`, doc_slug: spec.slug, ac_id: entry.ac_ref, result: entry.result, head_sha: stamp.head_sha, recorded_at: entry.recorded_at });
     }
   }
   return rows;
@@ -162,14 +162,14 @@ export function attestationRowsOf(specs: readonly DocRecord[], plans: readonly D
 
 /** One criterion handed to the runner. */
 export interface HeadCriterionRef {
-  readonly spec_slug: string;
+  readonly doc_slug: string;
   readonly ac_id: string;
 }
 
 /** What the runner did for one criterion: it ran (its attestation is in the corpus) or it could not complete. */
 export type HeadCriterionOutcome =
-  | { readonly spec_slug: string; readonly ac_id: string; readonly ran: true }
-  | { readonly spec_slug: string; readonly ac_id: string; readonly ran: false; readonly cause: string };
+  | { readonly doc_slug: string; readonly ac_id: string; readonly ran: true }
+  | { readonly doc_slug: string; readonly ac_id: string; readonly ran: false; readonly cause: string };
 
 /**
  * Runs criteria once at a commit through `lore verify` (the real one: {@link createGitHeadCriteriaRunner}).
@@ -211,7 +211,7 @@ export async function measureCriteriaAtHead(input: MeasureCriteriaAtHeadInput): 
   const aiCriteria: AiCriterionInput[] = [];
   const scripts: CriterionScope[] = [];
   for (const scope of input.scopes) {
-    if (scope.mode === "ai") aiCriteria.push({ spec: scope.spec_slug, ac: scope.ac_id, rubric: scope.rubric ?? "" });
+    if (scope.mode === "ai") aiCriteria.push({ spec: scope.doc_slug, ac: scope.ac_id, rubric: scope.rubric ?? "" });
     else if (scope.mode === "script") scripts.push(scope);
   }
   if (scripts.length === 0) {
@@ -223,7 +223,7 @@ export async function measureCriteriaAtHead(input: MeasureCriteriaAtHeadInput): 
     return { rows, ai_criteria: aiCriteria, deciding_ids: decidingIds, failing_files: [] };
   }
 
-  const subjectOf = (scope: CriterionScope): string => `${scope.spec_slug}:${scope.ac_id}`;
+  const subjectOf = (scope: CriterionScope): string => `${scope.doc_slug}:${scope.ac_id}`;
   const notMeasuredAll = (cause: string): AttestationFacts => ({
     rows: scripts.map((s) => ({ subject: subjectOf(s), verdict: "not-measured" as const, detail: `not run at ${short(input.headCommit)}: ${cause}` })),
     ai_criteria: aiCriteria,
@@ -234,7 +234,7 @@ export async function measureCriteriaAtHead(input: MeasureCriteriaAtHeadInput): 
   const ran = await input.runner.attestAtHead({
     commit: input.headCommit,
     ...(input.worktreeRoot !== undefined ? { worktreeRoot: input.worktreeRoot } : {}),
-    criteria: scripts.map((s) => ({ spec_slug: s.spec_slug, ac_id: s.ac_id })),
+    criteria: scripts.map((s) => ({ doc_slug: s.doc_slug, ac_id: s.ac_id })),
   });
   if (!ran.ok) return notMeasuredAll(causeOf(ran.error));
   const attested = await input.readRows();
@@ -242,14 +242,14 @@ export async function measureCriteriaAtHead(input: MeasureCriteriaAtHeadInput): 
 
   for (const scope of scripts) {
     const subject = subjectOf(scope);
-    const outcome = ran.value.find((o) => o.spec_slug === scope.spec_slug && o.ac_id === scope.ac_id);
+    const outcome = ran.value.find((o) => o.doc_slug === scope.doc_slug && o.ac_id === scope.ac_id);
     if (outcome === undefined || !outcome.ran) {
       const cause = outcome === undefined ? "the runner reported nothing for it" : outcome.cause;
       rows.push({ subject, verdict: "not-measured", detail: `its run at ${short(input.headCommit)} could not complete: ${cause}` });
       continue;
     }
     const decided = attested.value
-      .filter((a) => a.spec_slug === scope.spec_slug && a.ac_id === scope.ac_id && a.head_sha === input.headCommit)
+      .filter((a) => a.doc_slug === scope.doc_slug && a.ac_id === scope.ac_id && a.head_sha === input.headCommit)
       .reduce<AttestationRow | undefined>((latest, a) => (latest === undefined || a.recorded_at >= latest.recorded_at ? a : latest), undefined);
     if (decided === undefined) {
       rows.push({ subject, verdict: "not-measured", detail: `its run at ${short(input.headCommit)} left no attestation stamped at that commit` });
