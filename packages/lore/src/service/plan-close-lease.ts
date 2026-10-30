@@ -156,7 +156,7 @@ export class PlanCloseLease implements PlanCloseLeasePort {
       mkdirSync(guard);
     } catch (cause) {
       if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
-      if (this.now() - statSync(guard).mtimeMs > ORPHAN_TAKEOVER_MS) rmdirSync(guard); // reason: its taker died inside the takeover
+      this.sweepOrphanTakeover(guard);
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
       return ok(undefined);
     }
@@ -167,6 +167,15 @@ export class PlanCloseLease implements PlanCloseLeasePort {
       return ok(undefined);
     } finally {
       rmdirSync(guard);
+    }
+  }
+
+  /** Removes a takeover directory its taker left behind (it died inside the takeover); one that vanished meanwhile is fine. */
+  private sweepOrphanTakeover(guard: string): void {
+    try {
+      if (this.now() - statSync(guard).mtimeMs > ORPHAN_TAKEOVER_MS) rmdirSync(guard);
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
     }
   }
 

@@ -10,7 +10,7 @@
  *   {@link PLAN_CLOSE_REFUSALS}.
  * Invariants:
  *   - A plan with any task that is not archived or deprecated is refused with `plan-open-tasks`, naming each task and its status; nothing
- *     is written and no lease is taken. A deprecated task is not open.
+ *     is written (the check is made once, under the plan lease, on the plan as it is then). A deprecated task is not open.
  *   - The close is idempotent: a plan that is already archived (also when the first close finished while this one waited for the lease)
  *     answers `already-closed`, never an error and never a second assess.
  *   - A second close of a plan whose lease a live process holds answers `busy` naming the holder, and does nothing.
@@ -116,8 +116,6 @@ class PlanCloseRun {
     if (!first.ok) return first;
     const terminal = this.terminalStatusOf(first.value.plan);
     if (terminal !== undefined) return ok({ state: "already-closed", plan: first.value.plan.slug, status: terminal });
-    const open = openTasksOf(first.value.tasks);
-    if (open.length > 0) return err(openTasks(open));
 
     const plan = first.value.plan;
     const lease = await this.leases.acquire(planLeaseKey(plan));
@@ -141,8 +139,10 @@ class PlanCloseRun {
     const plan = fresh.value.plan;
     const closedMeanwhile = this.terminalStatusOf(plan);
     if (closedMeanwhile !== undefined) return ok({ state: "already-closed", plan: plan.slug, status: closedMeanwhile });
-    const stillOpen = openTasksOf(fresh.value.tasks);
-    if (stillOpen.length > 0) return err(openTasks(stillOpen));
+    // reason: the open-task check is made HERE, under the lease, on the plan as it is now: it is the one authoritative check (no second copy
+    // before the lease to disagree with it), and a refusal writes nothing
+    const open = openTasksOf(fresh.value.tasks);
+    if (open.length > 0) return err(openTasks(open));
     await this.verifyOrRefuse(plan);
     await this.applySpecs(plan);
     await this.checkAnchorsOrRefuse(plan);

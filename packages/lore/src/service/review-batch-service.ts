@@ -27,6 +27,9 @@
  *   - A current review is re-made when its facts fingerprint changed (suite result ids, deciding attestation ids,
  *     cited-rule states, prompt version, clearing result), never because main's HEAD alone moved (AC-AF-6).
  *   - The landing never waits for a review: {@link ReviewTriggerService.start} only reads state and spawns.
+ *   - Each plan is assessed through the ONE close function when {@link BatchRunPorts.closeFlow} is wired (BR-1507, AC-DCS2-11): the batch
+ *     keeps the store lease and the once-per-batch suite (BR-1379), the close function holds the plan's own lease and runs verify, rule
+ *     apply, the anchor check and the P0 UAT gate before the runner's review, filing and gated archive.
  * Side-effect class: IO through injected ports (services never import each other; the CLI adapter binds the real ones).
  *
  * Reference: GitHub merge queue (one batched check run for many queued items).
