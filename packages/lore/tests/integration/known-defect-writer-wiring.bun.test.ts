@@ -1,5 +1,5 @@
 /**
- * @spec_ref spec-a-corpus-only-task-has-nothing-to-measure-and-a-closed (AC-AQ-2, BR-1510)
+ * @spec_ref spec-a-corpus-only-task-has-nothing-to-measure-and-a-closed (BR-1510)
  *
  * The app `createApp` builds wires the issue writer a close with a detached known defect needs: with a GitHub
  * `feedback.upstream` the app has a writer (so the detach and every batch's retry reach GitHub, never a pending row
@@ -40,8 +40,8 @@ function configOf(raw: Record<string, unknown>): LoreConfig {
   return parsed.value;
 }
 
-describe("AC-AQ-2 the app wires the known-defect issue writer", () => {
-  it("AC-AQ-2 HAPPY: a GitHub feedback.upstream wires the writer next to the plan-close issue reader", () => {
+describe("BR-1510 the app wires the known-defect issue writer", () => {
+  it("BR-1510 HAPPY: a GitHub feedback.upstream wires the writer next to the plan-close issue reader", () => {
     const app = build(configOf({ project: { name: "lore", author: "owner" }, feedback: { upstream: { repo: "acme/widget" } } }));
     const writer = app.corpusService.getKnownDefectIssueWriter();
     expect(writer).toBeDefined();
@@ -50,13 +50,13 @@ describe("AC-AQ-2 the app wires the known-defect issue writer", () => {
     expect(app.corpusService.getPlanCloseIssuePort()).toBeDefined();
   });
 
-  it("AC-AQ-2 NEGATIVE: with no feedback.upstream no writer is wired", () => {
+  it("BR-1510 NEGATIVE: with no feedback.upstream no writer is wired", () => {
     const app = build(configOf({ project: { name: "lore", author: "owner" } }));
     expect(app.corpusService.getKnownDefectIssueWriter()).toBeUndefined();
     expect(app.corpusService.getPlanCloseIssuePort()).toBeUndefined();
   });
 
-  it("AC-AQ-2 REGRESSION: with no config at all no writer is wired either", () => {
+  it("BR-1510 REGRESSION: with no config at all no writer is wired either", () => {
     expect(build(undefined).corpusService.getKnownDefectIssueWriter()).toBeUndefined();
   });
 });
