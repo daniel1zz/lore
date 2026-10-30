@@ -326,7 +326,7 @@ export async function runIntegrate(opts: IntegrateRunOptions): Promise<number> {
   const log = (line: string): void => {
     inv.io.stdout.write(`${line}\n`);
   };
-  const reviewBatch = buildReviewTriggerService(app, `${resolveActor(inv)}:integrate:${String(process.pid)}`, () =>
+  const reviewBatch = buildReviewTriggerService(app, () =>
     spawnDetachedReviewBatch({
       cwd: projectRoot,
       corpusDir,

@@ -74,7 +74,7 @@ export async function runPlanClose(input: PlanCloseRunInput): Promise<number> {
     inv.io.stderr.write("Error: this composition has no lease store, so review work cannot be leased; nothing was changed\n");
     return 1;
   }
-  const wiring = createAssessWiring({ app, inv, actor, reviewService, leases });
+  const wiring = createAssessWiring({ app, inv, actor, reviewService });
   const filing = createAssessFiling({ app, inv, actor, upstream: classification.kind === "unconfigured" ? undefined : classification.cfg, leases });
   const closeService = buildPlanCloseService({ app, inv, dbPath: input.dbPath, actor });
   if (!closeService.ok) {

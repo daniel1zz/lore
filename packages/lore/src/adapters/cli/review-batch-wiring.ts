@@ -218,7 +218,7 @@ export interface PlanCloseTriggerInput {
 export function buildReviewBatchStarter(input: PlanCloseTriggerInput): ((planSlug: string, why: string) => Promise<string>) | undefined {
   const corpusDir = dirname(resolvePath(input.dbPath));
   const projectRoot = dirname(corpusDir);
-  const trigger = buildReviewTriggerService(input.app, `${input.actor}:plan-close:${String(process.pid)}`, () =>
+  const trigger = buildReviewTriggerService(input.app, () =>
     spawnDetachedReviewBatch({
       cwd: projectRoot,
       corpusDir,
@@ -276,12 +276,10 @@ export function refuseSpawnForRead(): Result<{ readonly pid: number | undefined 
 /**
  * The trigger/start service over the real App.
  *
- * @param _holder - unused: the trigger takes no lease any more (BR-1511); kept so every call site stays unchanged
  * @param spawnBatch - the detached spawn (`spawnDetachedReviewBatch` bound to the invocation)
  */
 export function buildReviewTriggerService(
   app: App,
-  _holder: string,
   spawnBatch: () => Result<{ readonly pid: number | undefined }, LoreError> | Promise<Result<{ readonly pid: number | undefined }, LoreError>>,
 ): ReviewTriggerService | undefined {
   const decisions = app.decisionReadService;

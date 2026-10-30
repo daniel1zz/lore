@@ -15,8 +15,8 @@
  * with its own verdict; a row fails alone. Exit 0 = every plan passed; 1 = any plan failed its review or could not
  * be reviewed; 2 = usage (no selector, ids and --where together, --no-ai, a bad --where).
  *
- * The diff is derived per plan from each landing's own `main_before..landing_commit`
- * (`assess-commit-derivation.ts::deriveLandingDiffForPlan`); a task with no landing record is named, has no measured diff,
+ * The diff is derived per plan as each changed file's NET diff across the plan's landings (BR-1508,
+ * `assess-commit-derivation.ts::deriveLandingDiffForPlan` -> `assess-final-state-diff.ts`); a task with no landing record is named, has no measured diff,
  * and makes regression and security not-measured (the stored review says so in `diff_source`).
  *
  * Gates (BR-1379): `correctness_vs_acs`, `regression` and `security` keep a plan open when they fail or are not measured
@@ -49,8 +49,12 @@ import { createGithubIssuePort } from "../assess-file-issues.js";
 import { IssueFilingService } from "../../../service/issue-filing-service.js";
 import type { FailedFinding } from "../../../service/root-cause-fingerprint.js";
 import { retirementAssessFields } from "../../../service/retired-ac-service.js";
-import type { BatchPlanRow } from "../../../service/review-batch-service.js";
-import { buildReviewLease, buildReviewTriggerService } from "../review-batch-wiring.js";
+import { skippedEveryPlan, type BatchPlanRow } from "../../../service/review-batch-service.js";
+import { leaseLostError, planLeaseKey, type LeaseHandle, type ReviewLeases } from "../../../service/review-batch-lease.js";
+import { buildReviewLeases, buildReviewTriggerService } from "../review-batch-wiring.js";
+import { ASSESS_EXIT_LEASE_HELD, renderAssessExitCodes } from "../assess-exit-codes.js";
+
+export { ASSESS_EXIT_CODES } from "../assess-exit-codes.js";
 import { err } from "@lore/core";
 import { DECISION_FLAG_ARGS, parseDecisionFlags } from "../decision-flags.js";
 import { DecisionGate } from "../../../service/decision-gate.js";
@@ -70,7 +74,7 @@ import type { LoreError } from "@lore/core";
 /** One plan's row of the batch result. */
 interface AssessRow {
   readonly plan: string;
-  readonly outcome: "PASS" | "FAIL" | "ERROR";
+  readonly outcome: "PASS" | "FAIL" | "ERROR" | "SKIPPED";
   readonly review: string | null;
   readonly failed: readonly string[];
   readonly diff_source: string | null;
@@ -101,7 +105,8 @@ function passFailRow(plan: string, reviewSlug: string, review: MilestoneReview):
 export default defineLoreCommand({
   meta: {
     name: "assess",
-    description: "Milestone review: judge plan(s) on seven dimensions; plan close requires a passing review of the current state",
+    // reason: AC-RL-4 — the exit codes are rendered from the one table, so the help cannot drift from what the command returns.
+    description: `Milestone review: judge plan(s) on seven dimensions; plan close requires a passing review of the current state\n\nExit codes:\n${renderAssessExitCodes()}`,
   },
   args: {
     plan: {
@@ -197,10 +202,16 @@ export default defineLoreCommand({
 
       const actor = resolveActor(inv);
       const holder = `${actor}:assess:${String(process.pid)}`;
+      // reason: BR-1511 — plan and issue work is leased per key; a composition without the store's lease verbs cannot review at all.
+      const leases = buildReviewLeases(app, holder);
+      if (leases === undefined) {
+        inv.io.stderr.write("Error: this composition has no lease store, so review work cannot be leased and nothing ran.\n");
+        return 1;
+      }
       let planRefs: string[];
       if (needsReview) {
         // reason: the SAME trigger set the landing computes (BR-1379); a hand run and the detached batch select identically.
-        const trigger = buildReviewTriggerService(app, holder, () => err({ code: "VALIDATION_ERROR", field: "spawn", message: "a hand run never spawns a batch" }));
+        const trigger = buildReviewTriggerService(app, () => err({ code: "VALIDATION_ERROR", field: "spawn", message: "a hand run never spawns a batch" }));
         if (trigger === undefined) {
           inv.io.stderr.write("Error: this composition cannot compute the needs-review set (no lease store or decision reader wired).\n");
           return 1;
@@ -224,20 +235,66 @@ export default defineLoreCommand({
       // reason: the measurements, the judge call and the issue filing are one module shared with the review batch and `lore plan close`
       const wiring = createAssessWiring({ app, inv, actor, reviewService });
       const { measureSuite, reviewOne } = wiring;
-      const filing = createAssessFiling({ app, inv, actor, upstream: issueUpstream });
+      const filing = createAssessFiling({ app, inv, actor, upstream: issueUpstream, leases });
 
       if (args.close === true) {
-        return await runBatchClose({ app, inv, dbPath, actor, holder, planRefs, wiring, filing, json: args.json === true });
+        return await runBatchClose({ app, inv, dbPath, actor, leases, direct: !needsReview && typeof args.where !== "string", planRefs, wiring, filing, json: args.json === true });
       }
 
-      const suite = await measureSuite(refs.value);
-
+      // reason: BR-1511 — a hand review of a plan runs under that plan's lease, taken for every selected plan BEFORE any
+      // measuring or writing: a held plan is listed with its holder and expiry (and when every plan is held nothing runs, exit 75).
       const rows: AssessRow[] = [];
-      const findings: FailedFinding[] = [];
+      const handles = new Map<string, LeaseHandle>();
+      const leasedRefs: string[] = [];
+      let heldCount = 0;
+      try {
       for (const ref of refs.value) {
+        const resolved = await app.corpusService.getPlanBundle(ref);
+        if (!resolved.ok) {
+          rows.push(errorRow(ref, resolved.error));
+          continue;
+        }
+        const taken = await leases.acquire(planLeaseKey(resolved.value.plan.id));
+        if (!taken.ok) {
+          rows.push(errorRow(ref, taken.error));
+          continue;
+        }
+        if (taken.value.state === "busy") {
+          heldCount += 1;
+          rows.push({ plan: ref, outcome: "SKIPPED", review: null, failed: [], diff_source: null, reason: `skipped: held by ${taken.value.holder} until ${taken.value.expires_at}` });
+          continue;
+        }
+        // reason: the plan is read again after its lease is taken; an archived plan is already closed and is skipped, not re-judged.
+        const current = await app.corpusService.getPlanBundle(ref);
+        if (current.ok && (current.value.plan.status === "archived" || current.value.plan.status === "deprecated")) {
+          await taken.value.handle.release();
+          rows.push({ plan: ref, outcome: "SKIPPED", review: null, failed: [], diff_source: null, reason: `skipped: already ${current.value.plan.status}` });
+          continue;
+        }
+        handles.set(ref, taken.value.handle);
+        leasedRefs.push(ref);
+      }
+      const fenceAll = async (): Promise<boolean> => {
+        for (const handle of handles.values()) {
+          const renewed = await handle.renewNow();
+          if (!renewed.ok || !renewed.value) return false;
+        }
+        return true;
+      };
+
+      const suite = leasedRefs.length > 0 ? await measureSuite(leasedRefs) : undefined;
+
+      const findings: FailedFinding[] = [];
+      for (const ref of leasedRefs) {
         const bundle = await app.corpusService.getPlanBundle(ref);
         if (!bundle.ok) {
           rows.push(errorRow(ref, bundle.error));
+          continue;
+        }
+        // reason: BR-1511 fencing — the plan's lease is renewed before the writes of this review; a failed renewal writes nothing.
+        const renewedLease = await handles.get(ref)?.renewNow();
+        if (renewedLease === undefined || !renewedLease.ok || !renewedLease.value) {
+          rows.push(errorRow(ref, leaseLostError()));
           continue;
         }
         // reason: the owner's answer to an earlier retired-AC question is carried out, and the one pending decision for
@@ -271,7 +328,7 @@ export default defineLoreCommand({
       let fileError: LoreError | undefined;
       const filedByPlan = new Map<string, number[]>();
       if (filing !== undefined && findings.length > 0) {
-        const filed = await filing.fileFindings(findings);
+        const filed = await filing.fileFindings(findings, fenceAll);
         if (filed.ok) {
           for (const group of filed.value) {
             if (group.error !== undefined) fileError ??= group.error;
@@ -306,7 +363,14 @@ export default defineLoreCommand({
         inv.io.stderr.write(formatErrorFor(inv, fileError) + "\n");
         return 1;
       }
-      return rows.some((r) => r.outcome !== "PASS") ? 1 : 0;
+      if (heldCount > 0 && heldCount === refs.value.length) {
+        inv.io.stderr.write("Every selected plan is leased by another holder; nothing ran. Re-run later.\n");
+        return ASSESS_EXIT_LEASE_HELD;
+      }
+      return rows.some((r) => r.outcome === "FAIL" || r.outcome === "ERROR") ? 1 : 0;
+      } finally {
+        for (const handle of handles.values()) await handle.release();
+      }
     } finally {
       app.close();
     }
@@ -347,6 +411,8 @@ async function runAcceptGate(context: Parameters<typeof invocationOf>[0], positi
               app.corpusService,
               app.corpusService.getPlanCloseIssuePort(),
             ),
+            undefined,
+            buildReviewLeases(app, `${actor}:accept-gate:${String(process.pid)}`),
           );
     const service = new GateAcceptanceService({
       getPlanBundle: (ref) => app.corpusService.getPlanBundle(ref),
@@ -379,7 +445,10 @@ interface BatchCloseInput {
   /** The corpus database path: the plan lease lives in the git common dir of the project two levels above it. */
   readonly dbPath: string;
   readonly actor: string;
-  readonly holder: string;
+  /** The process's keyed leases (BR-1511). */
+  readonly leases: ReviewLeases;
+  /** True when the plans were named by id (a direct assess always reviews); false for `--where` (a batch). */
+  readonly direct: boolean;
   readonly planRefs: readonly string[];
   readonly wiring: AssessWiring;
   readonly filing: IssueFilingService | undefined;
