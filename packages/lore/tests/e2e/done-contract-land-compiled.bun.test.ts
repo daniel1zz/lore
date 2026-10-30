@@ -179,6 +179,26 @@ async function codeTask(
   return { slug, tree, tip };
 }
 
+/**
+ * Moves main one commit on, by plumbing, as another landing would (the update carries the marker the main-ref guard accepts). With
+ * `file` the commit also writes that file; without it the commit has main's own tree.
+ */
+function advanceMain(file?: { readonly path: string; readonly content: string }): string {
+  const base = mainTip();
+  const index = join(scratch, `advance-index-${(sequence += 1)}`);
+  const env = { ...process.env, GIT_INDEX_FILE: index };
+  execFileSync("git", ["read-tree", base], { cwd: fixture.dir, env });
+  if (file !== undefined) {
+    const blob = execFileSync("git", ["hash-object", "-w", "--stdin"], { cwd: fixture.dir, input: file.content, encoding: "utf8" }).trim();
+    execFileSync("git", ["update-index", "--add", "--cacheinfo", `100644,${blob},${file.path}`], { cwd: fixture.dir, env });
+  }
+  const tree = execFileSync("git", ["write-tree"], { cwd: fixture.dir, env, encoding: "utf8" }).trim();
+  const moved = fixture.git(["-c", "user.email=f@example.invalid", "-c", "user.name=f", "commit-tree", tree, "-p", base, "-m", "main moves on"]);
+  execFileSync("git", ["update-ref", "refs/heads/main", moved, base], { cwd: fixture.dir, env: { ...process.env, LORE_INTEGRATE: "1" } });
+  fixture.git(["checkout", "-q", "--detach", "main"]);
+  return moved;
+}
+
 /** A plan declaring an integration branch (created by the declaration itself, AC-DCS2-10). */
 async function planWithBranch(title: string, branch: string): Promise<string> {
   return fixture.createPlan(title, branch);
@@ -342,16 +362,7 @@ describe("AC-DCS2-9: land resumes after a failed step and is idempotent", () => 
     const plan = await planWithBranch("Land resume plan", branch);
     const a = await codeTask(plan, "resume-a", { from: branch, work: { "tests/resume-a.test.ts": "// a\n", "src/resume.ts": "export const side = 'branch';\n" } });
     // main moves on with a conflicting change to the same file (what another landing would leave)
-    const base = mainTip();
-    const tree = fixture.git(["rev-parse", `${base}^{tree}`]);
-    const blob = execFileSync("git", ["hash-object", "-w", "--stdin"], { cwd: fixture.dir, input: "export const side = 'main';\n", encoding: "utf8" }).trim();
-    const index = join(scratch, "conflict-index");
-    execFileSync("git", ["read-tree", tree], { cwd: fixture.dir, env: { ...process.env, GIT_INDEX_FILE: index } });
-    execFileSync("git", ["update-index", "--add", "--cacheinfo", `100644,${blob},src/resume.ts`], { cwd: fixture.dir, env: { ...process.env, GIT_INDEX_FILE: index } });
-    const newTree = execFileSync("git", ["write-tree"], { cwd: fixture.dir, env: { ...process.env, GIT_INDEX_FILE: index }, encoding: "utf8" }).trim();
-    const moved = fixture.git(["-c", "user.email=f@example.invalid", "-c", "user.name=f", "commit-tree", newTree, "-p", base, "-m", "main moves on"]);
-    execFileSync("git", ["update-ref", "refs/heads/main", moved, base], { cwd: fixture.dir, env: { ...process.env, LORE_INTEGRATE: "1" } });
-    fixture.git(["checkout", "-q", "--detach", "main"]);
+    const moved = advanceMain({ path: "src/resume.ts", content: "export const side = 'main';\n" });
 
     const failed = await land(a.slug);
     expect(failed.exitCode, failed.text).toBe(4);
@@ -402,6 +413,7 @@ describe("AC-DCS2-10: lore plan integration-branch creates the declared branch a
 
   it("AC-DCS2-10: an absent branch is created at the tip of main (exit 0); an existing one at that tip is reused unchanged", async () => {
     // main must have moved past an older commit, so a branch created at a stale commit would differ
+    advanceMain();
     const plan = await planWithoutBranch("Branch create plan");
     const declared = await fixture.run(["plan", "integration-branch", plan, "integration/p10-new"]);
     expect(declared.exitCode, declared.stderr).toBe(0);
@@ -419,10 +431,9 @@ describe("AC-DCS2-10: lore plan integration-branch creates the declared branch a
 
   it("AC-DCS2-10: a branch at a different commit is refused with integration-branch-exists naming both commits; nothing changes", async () => {
     const plan = await planWithoutBranch("Branch different plan");
-    const older = fixture.git(["rev-parse", "main~1"]);
+    const older = mainTip();
+    advanceMain();
     fixture.git(["branch", "integration/p10-old", older]);
-    const planBefore = await fixture.readTask(plan).catch(() => undefined);
-    void planBefore;
     const refused = await fixture.run(["plan", "integration-branch", plan, "integration/p10-old"]);
     expect(refused.exitCode, refused.stderr).toBe(4);
     expect(refused.stderr).toContain("integration-branch-exists");
