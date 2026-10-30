@@ -431,7 +431,8 @@ describe("AC-DCS2-1: integrate selects the landing tasks, runs the union once an
     expect((await taskOf(world, x.slug)).status).toBe("archived");
 
     const logBefore = runLines(world).length;
-    const again = await integrateBranch(world, x.tree.branch);
+    // reason: the archive removed the landed branch (done runs after the shared checkout moved to main), so the re-run names its tip
+    const again = await integrateBranch(world, gitIn(world.fixture.dir, ["rev-parse", `${tip}^2`]));
     expect(again.exitCode, again.text).toBe(0);
     expect(again.text).toContain("names no task");
     expect(runLines(world).length).toBe(logBefore);
