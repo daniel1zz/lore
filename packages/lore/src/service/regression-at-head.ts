@@ -34,7 +34,7 @@
 
 import { err, ok, type LoreError, type MilestoneFactRow, type RegressionNotMeasuredCause, type Result } from "@lore/core";
 import type { SuiteFileRunRecord, SuiteResultRecord } from "../store/store-interface.js";
-import { NO_CODE_REASON } from "./corpus-only-task.js";
+import { noCodeRegressionRow } from "./corpus-only-task.js";
 import { loreErrorText, singleFileRunKey, type CommitSuiteRunnerPort, type SingleFileRunKind } from "./suite-result-service.js";
 
 /** One landing of the plan, as `deriveLandingDiffForPlan` reports it. */
@@ -344,8 +344,7 @@ export async function regressionAtHead(
   // reason: BR-1509 — when every task is corpus-only no task changes code: nothing to bisect and no suite to run; the
   // regression dimension is `na`, never pass. A corpus-only task beside landed or unlanded tasks contributes nothing.
   if (landings.length === 0 && unlandedTasks.length === 0 && noCodeTasks.length > 0) {
-    const row: MilestoneFactRow = { subject: "no-code", verdict: "na", detail: `${NO_CODE_REASON}: ${noCodeTasks.join(", ")}` };
-    return ok({ head: undefined, files: [], charged: [], single_file_run_ids: [], rows: [row], causes: [] });
+    return ok({ head: undefined, files: [], charged: [], single_file_run_ids: [], rows: [noCodeRegressionRow(noCodeTasks)], causes: [] });
   }
   if (landings.length === 0 && unlandedTasks.length === 0) {
     return err({ code: "VALIDATION_ERROR", field: "landings", message: "regression at head needs at least one landing or unlanded task", rule: "BR-1496" });

@@ -13,7 +13,7 @@
  * @spec_ref spec-a-corpus-only-task-has-nothing-to-measure-and-a-closed (AC-AQ-1, BR-1509)
  */
 
-import { ok, type DimensionJudgment, type DocId, type LoreError, type Result } from "@lore/core";
+import { ok, type DimensionJudgment, type DocId, type LoreError, type MilestoneFactRow, type Result } from "@lore/core";
 import { readTaskLanding } from "./task-commit-range.js";
 
 /** The sentence naming why regression and security have nothing to measure; one text for both dimensions. */
@@ -78,6 +78,16 @@ export async function findCorpusOnlyTaskSlugs(tasks: readonly CorpusOnlyCandidat
     if (isCorpusOnlyTask({ file_anchors: task.extra["file_anchors"], claim_rows: rows.value, current_claim: current, has_landing: false })) slugs.add(task.slug);
   }
   return ok(slugs);
+}
+
+/**
+ * The one regression fact row of a plan whose every task is corpus-only.
+ *
+ * @param noCodeTasks - the corpus-only tasks, named in the detail
+ * @returns an `na` row naming that no task changes code
+ */
+export function noCodeRegressionRow(noCodeTasks: readonly string[]): MilestoneFactRow {
+  return { subject: "no-code", verdict: "na", detail: `${NO_CODE_REASON}: ${noCodeTasks.join(", ")}` };
 }
 
 /**
