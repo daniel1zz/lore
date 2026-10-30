@@ -46,6 +46,7 @@ import { MIGRATION_016_ADD_COLUMNS, MIGRATION_016_SQL } from "./migrations/migra
 import { MIGRATION_041_ADD_COLUMNS, MIGRATION_041_SQL } from "./migrations/migration-041.js";
 import { MIGRATION_042_ADD_COLUMNS, MIGRATION_042_SQL } from "./migrations/migration-042.js";
 import { MIGRATION_043_SQL } from "./migrations/migration-043.js";
+import { MIGRATION_044_SQL } from "./migrations/migration-044.js";
 import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migration-017.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
@@ -1279,6 +1280,11 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 43) {
         // reason: migration-043 creates suite_results + suite_file_runs (BR-1497).
         await this.client.executeMultiple(MIGRATION_043_SQL);
+      }
+
+      if (currentVersion < 44) {
+        // reason: migration-044 marks stored suite results whose command exited outside {0,1} unrunnable (BR-1497).
+        await this.client.executeMultiple(MIGRATION_044_SQL);
       }
     })();
 

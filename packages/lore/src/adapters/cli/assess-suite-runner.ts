@@ -22,6 +22,10 @@
  *     whose directory is gone or whose owner pid (recorded in the directory name) is not alive, and never one a live process
  *     owns (`assess-stale-worktrees.ts`). A per-file re-run that times out or leaves its process group running is a
  *     failed file whose outcome carries `incomplete` (single-file bisection refuses it, BR-1496).
+ *   - `bun run test` takes the checkout's oracle lock (keyed by the git common dir, shared by every worktree including this
+ *     throwaway one). A run that finds it held exits 5 without running a test: the runner waits for the lock (poll
+ *     `lockPollMs`, bounded by the suite timeout) and retries; if it is still held at the limit the run is `not_measured`
+ *     naming the lock. It never runs without the lock and never reports the non-run as a result.
  *   - A run that cannot be set up (no `main`, no git, install failure) is `not_measured` with the reason, never a pass.
  *   - Failing test files carry their direct relative imports as read at the measured commit, so attribution to a plan
  *     needs no second checkout.
@@ -69,6 +73,16 @@ export interface ProcessLimits {
   readonly graceMs: number;
   /** The group-signal primitive (`process.kill(-pid, signal)`); injectable so tests can make it fail. */
   readonly kill?: (pid: number, signal: NodeJS.Signals) => void;
+  /** How long to wait between attempts to take a contended oracle lock (default {@link LOCK_POLL_MS}); injectable so tests need not sleep. */
+  readonly lockPollMs?: number;
+}
+
+/** Between two attempts to take the checkout's oracle lock held by another run. */
+const LOCK_POLL_MS = 5 * 1000;
+
+/** `scripts/oracle-lock.ts` exits 5 and prints this when a live run holds the lock: no test ran. */
+function isLockContended(ran: { readonly status: number; readonly output: string; readonly timeout?: unknown }): boolean {
+  return ran.status === 5 && ran.timeout === undefined && /oracle-lock: contended/.test(ran.output);
 }
 
 const DEFAULT_LIMITS: ProcessLimits = { timeoutMs: SUITE_TIMEOUT_MS, graceMs: KILL_GRACE_MS };
@@ -475,7 +489,22 @@ async function measure(root: string, commit: string, env: NodeJS.ProcessEnv, lim
       skipped.push({ command, reason: `package.json defines no "${script}" script` });
       continue;
     }
-    const ran = await spawn("bun", ["run", script], root, env, limits);
+    let ran = await spawn("bun", ["run", script], root, env, limits);
+    if (script === FULL_TEST_SCRIPT) {
+      // reason: `bun run test` takes the oracle lock of the CHECKOUT (keyed by the git common dir, shared by every worktree incl. this
+      // throwaway one, on purpose: AC-OX-4). Another run holding it makes ours exit 5 without running a test. We WAIT for the lock,
+      // bounded by the suite timeout, rather than run without it (the lock also guards fixed paths no worktree isolates) and never
+      // record the non-run as a result.
+      const deadline = Date.now() + limits.timeoutMs;
+      const pollMs = limits.lockPollMs ?? LOCK_POLL_MS;
+      while (isLockContended(ran) && Date.now() + pollMs < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+        ran = await spawn("bun", ["run", script], root, env, limits);
+      }
+      if (isLockContended(ran)) {
+        return { status: "not_measured", reason: `\`${command}\` could not take the oracle lock before the ${limits.timeoutMs} ms limit: ${tail(ran.output).trim().split("\n").at(-1) ?? "held by another run"}` };
+      }
+    }
     // reason: a run the timeout ended is incomplete, not red: stored `unrunnable` with this cause and retried by a later batch (BR-1497).
     if (ran.killFailure !== undefined) {
       // reason: a tree that could not be ended leaves stragglers that corrupt the measurement; incomplete, not red (A10).

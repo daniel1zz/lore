@@ -180,6 +180,43 @@ describe("suite-result store: lookup-or-run", () => {
     expect(again.ok && again.value.attempt).toBe(2);
   });
 
+  it("AC-AF-2 a run whose test command exited outside {0, 1} (5 = oracle lock contended) is stored unrunnable with that cause and retried, never stored measured", async () => {
+    const { service } = build();
+    const contended: SuiteRun = {
+      status: "measured",
+      commit: COMMIT_A,
+      commands: [{ command: "bun run test", exit_code: 5, output_tail: "oracle-lock: contended — another oracle run holds the lock" }],
+      skipped: [],
+      failing_test_files: [],
+    };
+    const runner = fakeRunner((_commit, attempt) => ok(attempt === 1 ? contended : GREEN));
+    const first = await service.lookupOrRun("main", runner);
+    expect(first.ok && first.value).toMatchObject({ status: "unrunnable", attempt: 1 });
+    expect(first.ok && first.value.cause).toContain("exited with code 5");
+    expect(first.ok && first.value.cause).toContain("oracle lock");
+    const second = await service.lookupOrRun("main", runner);
+    expect(second.ok && second.value).toMatchObject({ status: "measured", attempt: 2 });
+    expect(runner.suiteRuns).toHaveLength(2);
+  });
+
+  it("AC-AF-2 a red run (exit 1) and a green run (exit 0) are still stored measured", async () => {
+    const { service } = build();
+    const first = await service.lookupOrRun("main", fakeRunner(() => ok(red(COMMIT_A))));
+    expect(first.ok && first.value.status).toBe("measured");
+    const other = build();
+    const second = await other.service.lookupOrRun("main", fakeRunner(() => ok(GREEN)));
+    expect(second.ok && second.value.status).toBe("measured");
+  });
+
+  it("AC-AF-2 a single-file run that exited outside {0, 1} is refused and stores no row", async () => {
+    const { service } = build();
+    const runner = { ...fakeRunner(() => ok(GREEN)), runFiles: async (_c: string, files: readonly string[]) => ok(files.map((file): FileRunOutcome => ({ file, exit_code: 2, output_tail: "usage", duration_ms: 1 }))) };
+    const ran = await service.runSingleFile(COMMIT_A, FILE_X, "bisect", runner);
+    expect(ran.ok).toBe(false);
+    const rows = await service.listFileRuns(`file-bisect@${COMMIT_A}`);
+    expect(rows.ok && rows.value).toEqual([]);
+  });
+
   it("AC-AF-2 a ref that does not resolve is an error and stores nothing", async () => {
     const { service, store } = build();
     const runner = fakeRunner(() => ok(GREEN));
@@ -463,6 +500,38 @@ describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () =>
     expect(existsSync(seenRoot)).toBe(false);
     expect(worktreeCount(repo)).toBe(1);
   }, 30_000);
+
+  /** A `test` script that behaves like a contended oracle lock for the first `contendedRuns` calls (counted in `counterFile`), then passes. */
+  function contendedRepo(counterFile: string, contendedRuns: number): { repo: string; commit: string } {
+    const script = [
+      'const fs = require("node:fs");',
+      `const file = ${JSON.stringify(counterFile)};`,
+      'const n = (fs.existsSync(file) ? Number(fs.readFileSync(file, "utf8")) : 0) + 1;',
+      "fs.writeFileSync(file, String(n));",
+      `if (n <= ${String(contendedRuns)}) { console.error("oracle-lock: contended — another oracle run holds /x/.git/lore-oracle-test.lock (pid 1, still alive)."); process.exit(5); }`,
+      'console.log("all-green");',
+    ].join("\n");
+    const made = makeRepo({ test: "node contend.js" }, { "contend.js": script });
+    return { repo: made.repo, commit: made.commit };
+  }
+
+  it("AC-AF-2 a suite that finds the oracle lock held waits for it and measures the run that then takes it, never storing the non-run", async () => {
+    const counter = join(mkdtempSync(join(tmpdir(), "suite-lock-count-")), "n");
+    dirs.push(join(counter, ".."));
+    const { repo, commit } = contendedRepo(counter, 2);
+    const run = await createGitCommitSuiteRunner(repo, process.env, { timeoutMs: 20_000, graceMs: GRACE_MS, lockPollMs: 50 }).runSuite(commit);
+    expect(run.ok && run.value).toMatchObject({ status: "measured" });
+    expect(run.ok && run.value.status === "measured" && run.value.commands[0]).toMatchObject({ command: "bun run test", exit_code: 0 });
+    expect(readFileSync(counter, "utf8")).toBe("3");
+  }, 40_000);
+
+  it("AC-AF-2 a suite whose oracle lock stays held past the suite timeout is not measured, naming the lock", async () => {
+    const counter = join(mkdtempSync(join(tmpdir(), "suite-lock-count-")), "n");
+    dirs.push(join(counter, ".."));
+    const { repo, commit } = contendedRepo(counter, 1_000_000);
+    const run = await createGitCommitSuiteRunner(repo, process.env, { timeoutMs: 3000, graceMs: GRACE_MS, lockPollMs: 100 }).runSuite(commit);
+    expect(run.ok && run.value.status === "not_measured" && run.value.reason).toContain("oracle lock");
+  }, 40_000);
 
   it("AC-AF-2 a normal run is unchanged: a green suite is measured with its exit code, a red one keeps its exit code and tail", async () => {
     const green = makeRepo({ test: "echo all-green" }, {});

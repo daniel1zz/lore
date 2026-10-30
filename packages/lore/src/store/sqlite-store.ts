@@ -197,6 +197,7 @@ import { applyMigration040 } from "./migrations/migration-040.js";
 import { MIGRATION_041_ADD_COLUMNS, MIGRATION_041_SQL } from "./migrations/migration-041.js";
 import { MIGRATION_042_ADD_COLUMNS, MIGRATION_042_SQL } from "./migrations/migration-042.js";
 import { MIGRATION_043_SQL } from "./migrations/migration-043.js";
+import { MIGRATION_044_SQL } from "./migrations/migration-044.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey, DecisionVersionQuery } from "./store-interface.js";
@@ -1070,6 +1071,20 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("ROLLBACK;");
         } catch {
           // reason: same as migration-042 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 44 && 44 <= ceiling) {
+      // reason: migration-044 marks stored suite results whose command exited outside {0,1} `unrunnable` (BR-1497) in ONE BEGIN/COMMIT; a failure rolls back and leaves schema 43.
+      try {
+        this.db.exec(MIGRATION_044_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-043 — safe to ignore, the failure below is what to report.
         }
         throw error;
       }

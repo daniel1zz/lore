@@ -128,6 +128,21 @@ export function singleFileRunKey(kind: SingleFileRunKind, commit: string): strin
   return `file-${kind}@${commit}`;
 }
 
+/**
+ * Whether a command's exit code is a TEST RESULT: 0 = everything passed, 1 = some test failed. Any other code (5 = the
+ * oracle lock of the checkout was held by another run, 2/4 = usage or environment errors, 127 = not found) means the tests
+ * did not run, so the run says nothing about any file and is never stored as a measurement (BR-1497).
+ */
+export function isTestResultExit(exitCode: number): boolean {
+  return exitCode === 0 || exitCode === 1;
+}
+
+/** Why a command that exited outside {0, 1} produced no measurement; names the oracle lock when its output says so. */
+export function nonRunCause(command: string, exitCode: number, outputTail: string): string {
+  const contended = /oracle-lock: contended/.test(outputTail) ? " (the oracle lock of the checkout was held by another run)" : "";
+  return `\`${command}\` exited with code ${String(exitCode)}${contended}, which is not a test result (0 = pass, 1 = failures): the tests did not run`;
+}
+
 /** Readable text of any LoreError (not every member carries a `message`). */
 export function loreErrorText(error: LoreError): string {
   return "message" in error && typeof error.message === "string" ? error.message : error.code;
@@ -164,7 +179,8 @@ export class SuiteResultService {
     const durationMs = Math.max(0, Math.round(this.deps.clockMs() - startedMs));
     const base = { id: this.deps.newId(), commit_sha: commit, tree_sha: tree, attempt, duration_ms: durationMs, measured_at: this.deps.now() };
     let record: SuiteResultRecord;
-    if (ran.ok && ran.value.status === "measured") {
+    const nonRun = ran.ok && ran.value.status === "measured" ? ran.value.commands.find((c) => !isTestResultExit(c.exit_code)) : undefined;
+    if (ran.ok && ran.value.status === "measured" && nonRun === undefined) {
       record = {
         ...base,
         status: "measured",
@@ -176,7 +192,8 @@ export class SuiteResultService {
     } else {
       // reason: an incomplete run is a stored fact with its cause, not a missing row, so the attempt count survives and
       // the review can say "unrunnable (attempt 2): <cause>" instead of silently treating it as green (BR-1497).
-      const cause = ran.ok ? (ran.value.status === "not_measured" ? ran.value.reason : "the suite run did not complete") : loreErrorText(ran.error);
+      // reason: a command that exited outside {0, 1} never ran the tests; stored `measured` it read as "every file passed" (exit 5 = oracle lock contended).
+      const cause = nonRun !== undefined ? nonRunCause(nonRun.command, nonRun.exit_code, nonRun.output_tail) : ran.ok ? (ran.value.status === "not_measured" ? ran.value.reason : "the suite run did not complete") : loreErrorText(ran.error);
       record = { ...base, status: "unrunnable", cause, commands: [], skipped: [], failing_test_files: [] };
     }
     const inserted = await this.deps.store.insertSuiteResult(record);
@@ -278,6 +295,10 @@ export class SuiteResultService {
     // reason: a timed-out run says nothing about the file; storing it as a red row would charge a plan for a hang (BR-1496).
     if (outcome.incomplete !== undefined) {
       return err({ code: "STORE_ERROR", message: `${file} did not complete at ${commit}: ${outcome.incomplete}` });
+    }
+    // reason: an exit outside {0, 1} (usage error, lock contention) is no test result; stored, it would read as red.
+    if (!isTestResultExit(outcome.exit_code)) {
+      return err({ code: "STORE_ERROR", message: `${file} did not run at ${commit}: ${nonRunCause("bun run test:file", outcome.exit_code, outcome.output_tail)}` });
     }
     const row: SuiteFileRunRecord = {
       suite_result_id: singleFileRunKey(kind, commit),
