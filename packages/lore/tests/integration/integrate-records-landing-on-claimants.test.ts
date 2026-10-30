@@ -89,7 +89,7 @@ function makeBranch(name: string): void {
 function createTask(title: string): string {
   taskCounter += 1;
   return parseSlug(
-    mustRun(["create", "task", "--title", `${title} ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"]),
+    mustRun(["create", "task", "--title", `${title} ${taskCounter}`, "--kind", "code", "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"]),
   );
 }
 
@@ -184,11 +184,14 @@ describe("AC-LRD-2 — lore integrate records a landing on every claimant", () =
     expect(landing?.main_before).not.toBe(mainTip);
   }, 300_000);
 
-  it("(2c) integrate-service.ts reconstructs nothing from main's history", () => {
+  it("(2c) integrate-service.ts places an already-integrated branch through the ONE first-parent mapping, never its own ancestry walk (D44)", () => {
     const source = readFileSync(join(PROJECT_ROOT, "src", "service", "integrate-service.ts"), "utf8");
     expect(source).not.toContain("locateExistingLanding");
     expect(source).not.toContain("ancestry-path");
-    expect(source).not.toContain('"rev-list"');
+    // reason: D44 supersedes "reconstructs nothing from main's history" (BR-1336): the landing commit IS the earliest first-parent
+    // commit of main containing the tip (BR-1496, BR-1508), found by the injected `findFirstParentCommitContaining`, not re-derived here.
+    expect(source).toContain("firstParentContaining");
+    expect(source).not.toContain("base_from_claim");
   });
 
   it("(3) a branch no claim named is refused (BR-1348): no task belongs to it, so no landing could name one", () => {
