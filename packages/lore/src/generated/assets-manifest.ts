@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "4b3b63796a5720c237e8912d78099f0e4a7d65842fc4a294470c679d76ac8965",
+  tree_digest: "85addee9e87787c3edd69cc0cbea64f2bff6637b15d2a29698b403de9a674089",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "be7b99d5d1f72cf4ff8579ab09c2e42454c03ec0e0f9ba4e8fdb303b4a6cb73f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -124,7 +124,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "skills/lore-auto-wire/references/tools/selfhosted-pg.md", kind: "skill", ownership: "managed", sha256: "ed7af13b5ef6eb53ca7b61ef2df6a4e20ad99bd3d4a674b74b922a4fc57a7d3f" },
   { path: "skills/lore-auto-wire/scripts/check-tools.sh", kind: "skill", ownership: "managed", sha256: "9be51f9df4717b93f50bd024440db60edd60f7d326a3c960cd72e0169c9d25bf" },
   { path: "skills/lore-auto-wire/scripts/fix-path.sh", kind: "skill", ownership: "managed", sha256: "76828df5440be276233fbd147f28bfeac00e91f73815ca9e85dc3911c436932f" },
-  { path: "skills/lore-autopilot/SKILL.md", kind: "skill", ownership: "managed", sha256: "2c57e9595eadde9685da3471e39eb00cd520b886ca6b70b19fb7c3f25a818c71" },
+  { path: "skills/lore-autopilot/SKILL.md", kind: "skill", ownership: "managed", sha256: "b489e1ef2c55d33e4245c56fecedf312c77ca30c2747cb7c40e03a2be6794672" },
   { path: "skills/lore-baseline/SKILL.md", kind: "skill", ownership: "managed", sha256: "02b8616ff9354ff0f4c8955d40f30ed9291109df9bdb5ce2c2d8aa894adfd2d2" },
   { path: "skills/lore-baseline/templates/branch.md", kind: "skill", ownership: "managed", sha256: "0db3c50293303cb7f879f0df0001d33a582f598f3d0a5f47151f99ce2e106049" },
   { path: "skills/lore-baseline/templates/leaf.md", kind: "skill", ownership: "managed", sha256: "b01451b45fe0b59d16a77df35a8575c105716ad60802d6bb9b2090cd52da237d" },
@@ -363,7 +363,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "skills/lore-uat/templates/acceptance-report.md", kind: "skill", ownership: "managed", sha256: "135ed6f2b32146d7e20d119d9c5393dde79d34d1e0258e93a55ad0a549b17bac" },
   { path: "skills/lore-uat/templates/journey.yaml", kind: "skill", ownership: "managed", sha256: "443d43a6f968f8fa8b7df460598f2d05f0e34ff47053b4d0a34d70f9eca0c05a" },
   { path: "skills/lore-write-a-skill/SKILL.md", kind: "skill", ownership: "managed", sha256: "01faaa41d0e7f7f8b3e126b568c848ac3753794aa19602227b0b7f8f1409cd66" },
-  { path: "skills/lore/SKILL.md", kind: "skill", ownership: "managed", sha256: "337c8cb1d6d1c9716ebd59a3ca4fab95d7f49748dc8f73f7167292ec5ef7d163" },
+  { path: "skills/lore/SKILL.md", kind: "skill", ownership: "managed", sha256: "feb69aba12ea53355f29661fa793aab76e0c989f5e3610d30931c86a4dbb210e" },
   { path: "skills/shared/batched-governance.md", kind: "skill", ownership: "managed", sha256: "f50808396c3a8e83264219020d9e174a8d4cc9442a5717fe82cd8e87bfe0f20b" },
   { path: "skills/shared/docs-lookup-guide.md", kind: "skill", ownership: "managed", sha256: "978aa02e7943ebf0f4afe21bda79da7d5d4551d94a4da2ef7ca90241edd0d99a" },
   { path: "skills/shared/ears-spec-generation.md", kind: "skill", ownership: "managed", sha256: "91532135bd8cf18c8e9dcece25bb33d33df15caef6ee536b41f33333674daf2b" },

@@ -49,8 +49,12 @@ import { createGithubIssuePort } from "../assess-file-issues.js";
 import { IssueFilingService } from "../../../service/issue-filing-service.js";
 import type { FailedFinding } from "../../../service/root-cause-fingerprint.js";
 import { retirementAssessFields } from "../../../service/retired-ac-service.js";
-import { BATCH_ERROR_AUDIT_ACTION, ReviewBatchRunner, type BatchPlanRow, type BatchRunPorts } from "../../../service/review-batch-service.js";
-import { buildReviewLease, buildReviewTriggerService } from "../review-batch-wiring.js";
+import { BATCH_ERROR_AUDIT_ACTION, ReviewBatchRunner, skippedEveryPlan, type BatchPlanRow, type BatchRunPorts } from "../../../service/review-batch-service.js";
+import { leaseLostError, planLeaseKey, type LeaseHandle, type ReviewLeases } from "../../../service/review-batch-lease.js";
+import { buildReviewLeases, buildReviewTriggerService } from "../review-batch-wiring.js";
+import { ASSESS_EXIT_LEASE_HELD, renderAssessExitCodes } from "../assess-exit-codes.js";
+
+export { ASSESS_EXIT_CODES } from "../assess-exit-codes.js";
 import { err, ok, type DocId, type Result } from "@lore/core";
 import { DECISION_FLAG_ARGS, parseDecisionFlags } from "../decision-flags.js";
 import { DecisionGate } from "../../../service/decision-gate.js";
@@ -80,7 +84,7 @@ import type { LoreError, MilestoneFacts, PlanBundle } from "@lore/core";
 /** One plan's row of the batch result. */
 interface AssessRow {
   readonly plan: string;
-  readonly outcome: "PASS" | "FAIL" | "ERROR";
+  readonly outcome: "PASS" | "FAIL" | "ERROR" | "SKIPPED";
   readonly review: string | null;
   readonly failed: readonly string[];
   readonly diff_source: string | null;
@@ -137,7 +141,8 @@ function passFailRow(plan: string, reviewSlug: string, review: MilestoneReview):
 export default defineLoreCommand({
   meta: {
     name: "assess",
-    description: "Milestone review: judge plan(s) on seven dimensions; plan close requires a passing review of the current state",
+    // reason: AC-RL-4 — the exit codes are rendered from the one table, so the help cannot drift from what the command returns.
+    description: `Milestone review: judge plan(s) on seven dimensions; plan close requires a passing review of the current state\n\nExit codes:\n${renderAssessExitCodes()}`,
   },
   args: {
     plan: {
@@ -233,6 +238,12 @@ export default defineLoreCommand({
 
       const actor = resolveActor(inv);
       const holder = `${actor}:assess:${String(process.pid)}`;
+      // reason: BR-1511 — plan, suite and issue work is leased per key; a composition without the store's lease verbs cannot review at all.
+      const leases = buildReviewLeases(app, holder);
+      if (leases === undefined) {
+        inv.io.stderr.write("Error: this composition has no lease store, so review work cannot be leased and nothing ran.\n");
+        return 1;
+      }
       let planRefs: string[];
       if (needsReview) {
         // reason: the SAME trigger set the landing computes (BR-1379); a hand run and the detached batch select identically.
@@ -309,7 +320,7 @@ export default defineLoreCommand({
         // reason: BR-1497 — main's HEAD is looked up in the suite-result store first; the suite runs only when that
         // commit has no measured result, so a second batch at the same commit runs nothing. No suite runs at a landing
         // commit: the batch measures nothing per landing (spec D1).
-        const suiteResults = app.suiteResultService;
+        const suiteResults = app.suiteResultService?.withLeases(leases);
         if (suiteResults === undefined) return { status: "not_measured", reason: "the suite-result store is not wired in this app" };
         const runner = createGitCommitSuiteRunner(inv.cwd, inv.env);
         // reason: ONE worktree at the assessed commit serves the stale cited-rule refresh (only when some plan cites a stale
@@ -361,7 +372,7 @@ export default defineLoreCommand({
       const filing =
         issueUpstream === undefined
           ? undefined
-          : new IssueFilingService(createGithubIssuePort(issueUpstream, filingCtx, app.corpusService, app.corpusService.getPlanCloseIssuePort()));
+          : new IssueFilingService(createGithubIssuePort(issueUpstream, filingCtx, app.corpusService, app.corpusService.getPlanCloseIssuePort()), undefined, leases);
 
       /** One plan's measured inputs: its landing-derived diff and the facts layer (what a review reads). */
       interface MeasuredPlan {
@@ -398,7 +409,7 @@ export default defineLoreCommand({
         // reason: BR-1496 — regression is measured at the assessed commit: main's head suite (stored per commit, so a second plan at
         // the same head runs nothing), each red file confirmed once and bisected alone; without the suite-result store regression
         // stays not-measured, never pass.
-        const suiteResults = app.suiteResultService;
+        const suiteResults = app.suiteResultService?.withLeases(leases);
         let regressionFacts: Pick<MilestoneFacts, "regression" | "regression_files" | "head_suite_result_id" | "single_file_run_ids" | "assessed_commit" | "failing_fact_files" | "regression_causes"> = {};
         // reason: BR-1509 — when no task changes code, regression is `na` with no suite to run, so it is measured even without
         // the suite-result store.
@@ -487,17 +498,63 @@ export default defineLoreCommand({
         // reason: BR-1379 — the batch measures nothing per landing: no suite and no criterion attestation at a landing commit.
         // A kept-open plan is re-reviewed only when a landing touched a file its failing facts name (`changedFilesSince`).
         const changedFilesSince = createGitChangedFilesSince(inv.cwd, inv.env);
-        return await runBatchClose({ app, inv, actor, holder, planRefs, measureSuite, reviewOne, changedFilesSince, filing, json: args.json === true });
+        return await runBatchClose({ app, inv, actor, leases, direct: !needsReview && typeof args.where !== "string", planRefs, measureSuite, reviewOne, changedFilesSince, filing, json: args.json === true });
       }
 
-      const suite = await measureSuite(refs.value);
-
+      // reason: BR-1511 — a hand review of a plan runs under that plan's lease, taken for every selected plan BEFORE any
+      // measuring or writing: a held plan is listed with its holder and expiry (and when every plan is held nothing runs, exit 75).
       const rows: AssessRow[] = [];
-      const findings: FailedFinding[] = [];
+      const handles = new Map<string, LeaseHandle>();
+      const leasedRefs: string[] = [];
+      let heldCount = 0;
+      try {
       for (const ref of refs.value) {
+        const resolved = await app.corpusService.getPlanBundle(ref);
+        if (!resolved.ok) {
+          rows.push(errorRow(ref, resolved.error));
+          continue;
+        }
+        const taken = await leases.acquire(planLeaseKey(resolved.value.plan.id));
+        if (!taken.ok) {
+          rows.push(errorRow(ref, taken.error));
+          continue;
+        }
+        if (taken.value.state === "busy") {
+          heldCount += 1;
+          rows.push({ plan: ref, outcome: "SKIPPED", review: null, failed: [], diff_source: null, reason: `skipped: held by ${taken.value.holder} until ${taken.value.expires_at}` });
+          continue;
+        }
+        // reason: the plan is read again after its lease is taken; an archived plan is already closed and is skipped, not re-judged.
+        const current = await app.corpusService.getPlanBundle(ref);
+        if (current.ok && (current.value.plan.status === "archived" || current.value.plan.status === "deprecated")) {
+          await taken.value.handle.release();
+          rows.push({ plan: ref, outcome: "SKIPPED", review: null, failed: [], diff_source: null, reason: `skipped: already ${current.value.plan.status}` });
+          continue;
+        }
+        handles.set(ref, taken.value.handle);
+        leasedRefs.push(ref);
+      }
+      const fenceAll = async (): Promise<boolean> => {
+        for (const handle of handles.values()) {
+          const renewed = await handle.renewNow();
+          if (!renewed.ok || !renewed.value) return false;
+        }
+        return true;
+      };
+
+      const suite = leasedRefs.length > 0 ? await measureSuite(leasedRefs) : undefined;
+
+      const findings: FailedFinding[] = [];
+      for (const ref of leasedRefs) {
         const bundle = await app.corpusService.getPlanBundle(ref);
         if (!bundle.ok) {
           rows.push(errorRow(ref, bundle.error));
+          continue;
+        }
+        // reason: BR-1511 fencing — the plan's lease is renewed before the writes of this review; a failed renewal writes nothing.
+        const renewedLease = await handles.get(ref)?.renewNow();
+        if (renewedLease === undefined || !renewedLease.ok || !renewedLease.value) {
+          rows.push(errorRow(ref, leaseLostError()));
           continue;
         }
         // reason: the owner's answer to an earlier retired-AC question is carried out, and the one pending decision for
@@ -531,7 +588,7 @@ export default defineLoreCommand({
       let fileError: LoreError | undefined;
       const filedByPlan = new Map<string, number[]>();
       if (filing !== undefined && findings.length > 0) {
-        const filed = await filing.fileFindings(findings);
+        const filed = await filing.fileFindings(findings, fenceAll);
         if (filed.ok) {
           for (const group of filed.value) {
             if (group.error !== undefined) fileError ??= group.error;
@@ -566,7 +623,14 @@ export default defineLoreCommand({
         inv.io.stderr.write(formatErrorFor(inv, fileError) + "\n");
         return 1;
       }
-      return rows.some((r) => r.outcome !== "PASS") ? 1 : 0;
+      if (heldCount > 0 && heldCount === refs.value.length) {
+        inv.io.stderr.write("Every selected plan is leased by another holder; nothing ran. Re-run later.\n");
+        return ASSESS_EXIT_LEASE_HELD;
+      }
+      return rows.some((r) => r.outcome === "FAIL" || r.outcome === "ERROR") ? 1 : 0;
+      } finally {
+        for (const handle of handles.values()) await handle.release();
+      }
     } finally {
       app.close();
     }
@@ -607,6 +671,8 @@ async function runAcceptGate(context: Parameters<typeof invocationOf>[0], positi
               app.corpusService,
               app.corpusService.getPlanCloseIssuePort(),
             ),
+            undefined,
+            buildReviewLeases(app, `${actor}:accept-gate:${String(process.pid)}`),
           );
     const service = new GateAcceptanceService({
       getPlanBundle: (ref) => app.corpusService.getPlanBundle(ref),
@@ -637,7 +703,10 @@ interface BatchCloseInput {
   readonly app: App;
   readonly inv: ReturnType<typeof invocationOf>;
   readonly actor: string;
-  readonly holder: string;
+  /** The process's keyed leases (BR-1511). */
+  readonly leases: ReviewLeases;
+  /** True when the plans were named by id (a direct assess always reviews); false for `--where` (a batch). */
+  readonly direct: boolean;
   readonly planRefs: readonly string[];
   readonly measureSuite: (refs: readonly string[]) => Promise<SuiteRun | undefined>;
   readonly reviewOne: (ref: string, suite: SuiteRun | undefined) => ReturnType<NonNullable<App["milestoneReviewService"]>["review"]>;
@@ -655,23 +724,20 @@ function listDocsOf(app: App): ListDocsPort {
 }
 
 /**
- * `lore assess ... --close`: the review batch (BR-1379). Takes the store lease (a live lease of another batch makes this
- * a no-op, exit 0), then runs `ReviewBatchRunner.runBatch` and prints one row per plan.
+ * `lore assess ... --close`: the review batch (BR-1379). Runs `ReviewBatchRunner.runBatch`, which takes each plan's lease
+ * (BR-1511), and prints one row per plan with its skip reason. Exits 75 when every selected plan was skipped as held by
+ * another holder (nothing ran); skips as already closed or already reviewed are done work and exit as the rows say.
  */
 async function runBatchClose(input: BatchCloseInput): Promise<number> {
-  const { app, inv, actor } = input;
-  const lease = buildReviewLease(app, input.holder);
-  if (lease === undefined) {
-    inv.io.stderr.write("Error: this composition has no lease store, so the review batch cannot run.\n");
-    return 1;
-  }
+  const { app, inv, actor, leases } = input;
   const service = new ReviewBatchRunner({
     getPlanBundle: (ref) => app.corpusService.getPlanBundle(ref),
     listReviewDocs: (planId) => app.corpusService.listMilestoneReviewDocs(planId),
     issueCoverage: (planId, failed) => app.corpusService.coverageOfFailedDimensions(planId, failed),
   });
   const run = await service.runBatch(input.planRefs, {
-    acquireLease: () => lease.acquire(),
+    acquirePlanLease: (planId) => leases.acquire(planLeaseKey(planId)),
+    mode: input.direct ? "direct" : "batch",
     settleRetirement: async (bundle) => {
       if (app.retiredAcService === undefined) return ok(undefined);
       return app.retiredAcService.settle(bundle);
@@ -699,13 +765,10 @@ async function runBatchClose(input: BatchCloseInput): Promise<number> {
     inv.io.stderr.write(formatErrorFor(inv, run.error) + "\n");
     return exitCode(run.error);
   }
-  if (run.value.state === "busy") {
-    printLine(inv.io.stdout, `Another review batch holds the lease (${run.value.holder}, until ${run.value.expires_at}); nothing ran.`);
-    return 0;
-  }
   const rows: readonly BatchPlanRow[] = run.value.rows;
+  const heldEvery = skippedEveryPlan(run.value, input.planRefs.length);
   if (input.json) {
-    printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rows, suite_runs: run.value.suiteRuns, took_over: run.value.tookOver } }, null, 2));
+    printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rows, suite_runs: run.value.suiteRuns } }, null, 2));
   } else if (rows.length === 0) {
     printLine(inv.io.stdout, "No plans selected.");
   } else {
@@ -716,6 +779,10 @@ async function runBatchClose(input: BatchCloseInput): Promise<number> {
         rows.map((r) => [r.outcome.toUpperCase(), r.plan, r.review ?? "-", r.issues.length > 0 ? `${r.detail}; issues ${r.issues.map((n) => `#${String(n)}`).join(", ")}` : r.detail]),
       ),
     );
+  }
+  if (heldEvery) {
+    inv.io.stderr.write("Every selected plan is leased by another holder; nothing ran. Re-run later.\n");
+    return ASSESS_EXIT_LEASE_HELD;
   }
   return rows.some((r) => r.outcome === "error") ? 1 : 0;
 }

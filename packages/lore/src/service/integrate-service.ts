@@ -205,11 +205,11 @@ export interface LandingCompleter {
 
 /**
  * Starts the post-landing review batch (BR-1379, AC-PCR-3). Wired by the CLI to `ReviewTriggerService.start`: it computes
- * the trigger set from stored plan progress and, when non-empty and no review batch holds the lease, spawns ONE detached
- * batch and returns at once. A failure is a WARNING line, never a failed landing; the landing carries no review time.
+ * the trigger set from stored plan progress and, when non-empty, spawns ONE detached batch and returns at once, whatever
+ * other batches run (the per-plan lease skips the plans another batch holds, BR-1511). A failure is a WARNING line, never a failed landing; the landing carries no review time.
  */
 export interface ReviewBatchStarter {
-  readonly start: () => Promise<Result<{ readonly state: "empty" | "lease-live" | "started"; readonly triggered?: number; readonly pid?: number | undefined }, LoreError>>;
+  readonly start: () => Promise<Result<{ readonly state: "empty" | "started"; readonly triggered?: number; readonly pid?: number | undefined }, LoreError>>;
 }
 
 /** Judges a branch's own change before it lands (BR-1346, BR-1347, BR-1348, BR-1355); `OwnDiffJudgment` implements it. Reads, never writes. */
@@ -662,8 +662,8 @@ export class IntegrateService {
   }
 
   /**
-   * After a landing: computes the review trigger set and starts one detached batch when it is non-empty and no lease is
-   * live (BR-1379). Never fails the integration and never waits: the outcome is one line.
+   * After a landing: computes the review trigger set and starts one detached batch when it is non-empty, whatever other
+   * batches are running (BR-1379, BR-1511). Never fails the integration and never waits: the outcome is one line.
    */
   private async startReviewBatch(): Promise<void> {
     const starter = this.deps.reviewBatch;
@@ -675,7 +675,6 @@ export class IntegrateService {
     }
     const outcome = started.value;
     if (outcome.state === "empty") this.deps.log("integrate: review batch: no plan needs review");
-    else if (outcome.state === "lease-live") this.deps.log(`integrate: review batch: ${String(outcome.triggered)} plan(s) need review; a batch already holds the lease`);
     else this.deps.log(`integrate: review batch started for ${String(outcome.triggered)} plan(s)${outcome.pid !== undefined ? ` (pid ${String(outcome.pid)})` : ""}; the landing does not wait for it`);
   }
 

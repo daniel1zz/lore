@@ -39,7 +39,10 @@ import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, type PlanRetirementSta
 import { coverFailedDimensions } from "../../src/service/milestone-review-inputs.js";
 import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/service/issue-filing-service.js";
 import { issueTitleOf, rootCauseOf } from "../../src/service/root-cause-fingerprint.js";
-import { ReviewBatchLease, REVIEW_BATCH_LEASE_NAME, REVIEW_LEASE_EXPIRY_MS, REVIEW_LEASE_RENEW_MS } from "../../src/service/review-batch-lease.js";
+import { ReviewLeases, planLeaseKey, REVIEW_LEASE_EXPIRY_MS, REVIEW_LEASE_RENEW_MS } from "../../src/service/review-batch-lease.js";
+
+/** A plan key the lease-mechanics tests use (the corpus-wide `review-batch` lease is retired, BR-1511). */
+const RENEW_KEY = planLeaseKey("p-lease-mechanics");
 import { ReviewBatchRunner, ReviewTriggerService, type BatchErrorRecord, type BatchRunPorts, type ReviewTriggerDeps } from "../../src/service/review-batch-service.js";
 import type { MilestoneReviewResult } from "../../src/service/milestone-review-service.js";
 import { CheckStatsService } from "../../src/service/check-stats-service.js";
@@ -629,8 +632,8 @@ class World {
     return plan;
   }
 
-  lease(holder: string): ReviewBatchLease {
-    return new ReviewBatchLease(this.store, holder, () => this.now, (callback) => {
+  lease(holder: string): ReviewLeases {
+    return new ReviewLeases(this.store, holder, () => this.now, (callback: () => void) => {
       this.timers.push(callback);
       return () => undefined;
     });
@@ -645,6 +648,7 @@ class World {
     return ok(coverFailedDimensions(failed, entries));
   }
 
+  /** `leaseLive` is retired with the corpus-wide lease (BR-1511): the trigger no longer reads a lease; callers that still pass it are unaffected. */
   triggerDeps(opts: { pending?: Set<string>; leaseLive?: boolean } = {}): ReviewTriggerDeps {
     return {
       listPlans: async () => ok([...this.plans.values()].filter((p) => !p.archived).map((p) => p.bundle.plan)),
@@ -653,7 +657,6 @@ class World {
       pendingDecisionSubjects: async () => ok(opts.pending ?? new Set<string>()),
       // the real predicate over the fake tracker's recorded findings: a title is never read
       issueCoverage: (planId, failed) => this.coverage(planId, failed),
-      isLeaseLive: async () => (opts.leaseLive !== undefined ? ok(opts.leaseLive) : this.lease("probe").isLive()),
       spawnBatch: () => {
         this.spawns += 1;
         return ok({ pid: 4242 });
@@ -668,7 +671,7 @@ class World {
   ports(holder: string, overrides: Partial<BatchRunPorts> = {}): BatchRunPorts {
     const lease = this.lease(holder);
     return {
-      acquireLease: () => lease.acquire(),
+      acquirePlanLease: (planId) => lease.acquire(planLeaseKey(planId)),
       settleRetirement: async (bundle) => ok(this.find(bundle.plan.slug).retirement),
       measureSuite: async () => {
         this.suiteRuns += 1;
@@ -748,16 +751,13 @@ describe("landing starts the review — trigger set and detached start (AC-PCR-3
     expect(world.spawns).toBe(0);
   });
 
-  it("NEGATIVE: a live lease starts nothing, and an expired lease lets the next landing start a batch", async () => {
+  it("STATE: a landing starts a batch whenever the trigger set is non-empty, whatever lease another batch holds (BR-1511)", async () => {
     const world = new World();
-    world.add(makeWorldPlan("p-needs"));
-    const holder = await world.lease("batch-a").acquire();
+    const needs = world.add(makeWorldPlan("p-needs"));
+    const holder = await world.lease("batch-a").acquire(planLeaseKey(needs.bundle.plan.id));
     expect(holder.ok && holder.value.state).toBe("held");
     const service = new ReviewTriggerService(world.triggerDeps());
-    expect(await service.start()).toEqual({ ok: true, value: { state: "lease-live", triggered: 1 } });
-    expect(world.spawns).toBe(0);
-    world.now += REVIEW_LEASE_EXPIRY_MS + 1;
-    expect(await service.start()).toMatchObject({ ok: true, value: { state: "started" } });
+    expect(await service.start()).toMatchObject({ ok: true, value: { state: "started", triggered: 1 } });
     expect(world.spawns).toBe(1);
   });
 
@@ -1058,26 +1058,26 @@ describe("batch outcomes — one main red issue per suite run, issue titles keep
 describe("lease and retry — renewal, takeover, errors, once per fingerprint, owner reject (AC-PCR-5)", () => {
   it("HAPPY: the batch renews its lease on the 1-minute timer; a start while it runs is busy", async () => {
     const world = new World();
-    const held = await world.lease("batch-a").acquire();
+    const held = await world.lease("batch-a").acquire(RENEW_KEY);
     if (!held.ok || held.value.state !== "held") throw new Error("expected held");
-    const before = await world.store.readLease(REVIEW_BATCH_LEASE_NAME);
+    const before = await world.store.readLease(RENEW_KEY);
     expect(before.ok && before.value?.expires_at).toBe(new Date(T0 + REVIEW_LEASE_EXPIRY_MS).toISOString());
     world.now += REVIEW_LEASE_RENEW_MS;
     world.timers[0]?.();
     await held.value.handle.renewNow(); // the timer callback is fire-and-forget; this awaits the same renewal deterministically
-    const after = await world.store.readLease(REVIEW_BATCH_LEASE_NAME);
+    const after = await world.store.readLease(RENEW_KEY);
     expect(after.ok && after.value?.expires_at).toBe(new Date(T0 + REVIEW_LEASE_RENEW_MS + REVIEW_LEASE_EXPIRY_MS).toISOString());
-    const second = await world.lease("batch-b").acquire();
+    const second = await world.lease("batch-b").acquire(RENEW_KEY);
     expect(second.ok && second.value.state).toBe("busy");
     expect(world.timers.length).toBe(1);
   });
 
   it("STATE: a start after expiry takes the lease over, and the dead holder's renewal finds it lost", async () => {
     const world = new World();
-    const dead = await world.lease("batch-dead").acquire();
+    const dead = await world.lease("batch-dead").acquire(RENEW_KEY);
     if (!dead.ok || dead.value.state !== "held") throw new Error("expected held");
     world.now += REVIEW_LEASE_EXPIRY_MS + 1;
-    const takeover = await world.lease("batch-new").acquire();
+    const takeover = await world.lease("batch-new").acquire(RENEW_KEY);
     expect(takeover.ok && takeover.value.state === "held" && takeover.value.tookOver).toBe(true);
     const renewed = await dead.value.handle.renewNow();
     expect(renewed).toEqual({ ok: true, value: false });
@@ -1151,12 +1151,13 @@ describe("lease and retry — renewal, takeover, errors, once per fingerprint, o
     expect(plan.docs[1]?.extra["milestone_review"]).toMatchObject({ fingerprint: currentFingerprint(plan) });
   });
 
-  it("BOUNDARY: a batch that finds a live lease runs nothing", async () => {
+  it("BOUNDARY: a batch that finds the plan's lease live skips that plan as held and judges nothing (BR-1511)", async () => {
     const world = new World();
-    world.add(makeWorldPlan("p-busy"));
-    await world.lease("batch-a").acquire();
+    const busy = world.add(makeWorldPlan("p-busy"));
+    await world.lease("batch-a").acquire(planLeaseKey(busy.bundle.plan.id));
     const run = await world.runner().runBatch(["p-busy"], world.ports("batch-b"));
-    expect(run).toMatchObject({ ok: true, value: { state: "busy", holder: "batch-a" } });
+    expect(run.ok && run.value.rows[0]).toMatchObject({ plan: "p-busy", outcome: "skipped", reviewed: false });
+    expect(run.ok && run.value.rows[0]?.held?.holder).toContain("batch-a");
     expect(world.judgeCalls).toEqual([]);
   });
 });
@@ -1169,7 +1170,7 @@ describe.each(KINDS)("lease and retry — the store lease verbs, %s store", (kin
   });
 
   it("acquire is exclusive until expiry, renew is holder-only, release frees it, an expired lease is taken over", async () => {
-    const name = "review-batch";
+    const name = RENEW_KEY;
     const t = (ms: number): string => new Date(T0 + ms).toISOString();
     expect(await fx.store.acquireLease(name, "a", t(0), t(1000))).toEqual({ ok: true, value: { acquired: true, tookOver: false } });
     expect(await fx.store.acquireLease(name, "b", t(500), t(1500))).toEqual({ ok: true, value: { acquired: false, holder: "a", expires_at: t(1000) } });
@@ -1722,7 +1723,8 @@ describe("AC-PCR-5 a failing re-review files every uncovered dimension; a plan r
     expect(world.judgeCalls).toEqual(["p-loop", "p-loop"]);
     const second = await world.runner().runBatch(["p-loop"], world.ports("batch-2"));
     const rows = second.ok && second.value.state === "ran" ? second.value.rows : [];
-    expect(rows.map((r) => [r.outcome, r.reviewed])).toEqual([["kept-open", false]]);
+    // BR-1511: skipped as "already reviewed" (was: a kept-open row)
+    expect(rows.map((r) => [r.outcome, r.reviewed])).toEqual([["skipped", false]]);
     expect(world.judgeCalls).toEqual(["p-loop", "p-loop"]);
   });
 

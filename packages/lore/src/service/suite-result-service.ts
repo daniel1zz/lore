@@ -14,6 +14,8 @@
  *   - A single-file run (`runSingleFile`, regression at the assessed commit) is stored keyed by (commit, file): its
  *     `suite_result_id` column holds {@link singleFileRunKey} (`file-<kind>@<commit>`), not a suite result id, so a commit
  *     that never had a full suite can still carry file runs and a later review reads them back (BR-1496).
+ *   - A full-suite run at commit C runs under lease `suite:C`, a single-file run under `suite:C:F` (BR-1511): a caller that
+ *     finds the key held waits, then reads the store and runs only when no measured result is stored after the wait.
  *   - Nothing here reads or writes the audit chain: main-red / main-red-green records stay audit rows (BR-1412), the
  *     "main was checked at <commit>" fact is {@link deriveMainCheckedRows} over the stored results.
  * Side-effect class: stateful (store writes, runner IO through the injected port).
@@ -25,6 +27,7 @@ import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { StoreInterface, SuiteFileRunRecord, SuiteResultRecord } from "../store/store-interface.js";
 import { MAIN_CHECKED_ACTION, classifySuiteForMainRed, type MainRedRow } from "./milestone-review.js";
 import type { SuiteRun } from "./milestone-review-inputs.js";
+import { suiteFileLeaseKey, suiteLeaseKey, type ReviewLeases } from "./review-batch-lease.js";
 
 /** One test file re-run at a commit. */
 export interface FileRunOutcome {
@@ -78,6 +81,11 @@ export interface SuiteResultServiceDeps {
   readonly newId: () => string;
   /** Monotonic milliseconds, for run durations. */
   readonly clockMs: () => number;
+  /**
+   * The keyed leases that single-flight a commit's suite run and a (commit, file) run (BR-1511). Absent only in bare
+   * constructions; the app always wires it.
+   */
+  readonly leases?: ReviewLeases;
 }
 
 /**
@@ -153,6 +161,14 @@ export class SuiteResultService {
   constructor(private readonly deps: SuiteResultServiceDeps) {}
 
   /**
+   * The same service with `leases` wired: a caller that has the store's lease verbs binds them for the runs it starts
+   * (BR-1511). Pure: the receiver is unchanged.
+   */
+  withLeases(leases: ReviewLeases): SuiteResultService {
+    return new SuiteResultService({ ...this.deps, leases });
+  }
+
+  /**
    * The stored suite result of the commit `ref` names; runs the suite only when no `measured` result exists.
    *
    * @param ref - `main` or a commit sha
@@ -172,6 +188,28 @@ export class SuiteResultService {
     if (!stored.ok) return stored;
     const measured = stored.value.find((r) => r.status === "measured");
     if (measured !== undefined) return ok(measured);
+    const leases = this.deps.leases;
+    if (leases === undefined) return this.runAndStore(commit, tree, runner, inWorktree);
+    // reason: BR-1511 — `suite:<commit>` single-flights the run. The holder (and each waiter, once the key is free)
+    // re-reads the store before running: a waiter that skipped the re-read would run the suite a second time.
+    return leases.withWaiting(suiteLeaseKey(commit), async () => {
+      const again = await this.deps.store.listSuiteResultsForCommit(commit);
+      if (!again.ok) return again;
+      const done = again.value.find((r) => r.status === "measured");
+      if (done !== undefined) return ok(done);
+      return this.runAndStore(commit, tree, runner, inWorktree);
+    });
+  }
+
+  /** Runs the suite at `commit` and stores the result as the next attempt of that commit (never returns a cached row). */
+  private async runAndStore(
+    commit: string,
+    tree: string,
+    runner: CommitSuiteRunnerPort,
+    inWorktree?: (root: string, commit: string) => Promise<void>,
+  ): Promise<Result<SuiteResultRecord, LoreError>> {
+    const stored = await this.deps.store.listSuiteResultsForCommit(commit);
+    if (!stored.ok) return stored;
     const attempt = (stored.value.at(-1)?.attempt ?? 0) + 1;
 
     const startedMs = this.deps.clockMs();
@@ -290,6 +328,18 @@ export class SuiteResultService {
     const key = singleFileRunKey(kind, commit);
     const existing = await this.firstStoredFileRun(key, file);
     if (!existing.ok || existing.value !== null) return existing.ok ? ok(existing.value as SuiteFileRunRecord) : existing;
+    const leases = this.deps.leases;
+    if (leases === undefined) return this.runFileAndStore(commit, file, key, runner);
+    // reason: BR-1511 — `suite:<commit>:<file>` single-flights the file run; the re-read after acquiring is what makes a waiter reuse the holder's row.
+    return leases.withWaiting(suiteFileLeaseKey(commit, file), async () => {
+      const again = await this.firstStoredFileRun(key, file);
+      if (!again.ok) return again;
+      if (again.value !== null) return ok(again.value);
+      return this.runFileAndStore(commit, file, key, runner);
+    });
+  }
+
+  private async runFileAndStore(commit: string, file: string, key: string, runner: CommitSuiteRunnerPort): Promise<Result<SuiteFileRunRecord, LoreError>> {
     const ran = await runner.runFiles(commit, [file]);
     if (!ran.ok) return ran;
     const outcome = ran.value.find((o) => o.file === file);
