@@ -283,181 +283,177 @@ export interface IntegrateRunOptions {
 export async function runIntegrate(opts: IntegrateRunOptions): Promise<number> {
   const { inv, app, dbPath, config, branch, args } = opts;
   const runGit = gitRunnerFor(inv.env);
-  {
-    {
-      // reason: the migrate child of integrate runs as the CALLER's party, so the caller's run is resolved from the VERIFIED
-      // invocation identity (an unregistered run verifies to null -> the service refuses) before anything moves.
-      const verifiedIdentity = await app.verifiedInvocationIdentity?.();
-      if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
-        inv.io.stderr.write(`${formatError(verifiedIdentity.error)}\n`);
-        return exitCode(verifiedIdentity.error);
-      }
-      const corpusDir = dirname(resolvePath(dbPath));
-      const projectRoot = dirname(corpusDir);
-      const mainRoot = mainCheckoutRoot(runGit, projectRoot);
-      if (mainRoot === undefined) {
-        inv.io.stderr.write(`Error: ${projectRoot} is not inside a non-bare git repository whose common dir is <root>/.git\n`);
-        return 1;
-      }
-      const ownership = app.branchOwnershipReader;
-      if (ownership === undefined) {
-        inv.io.stderr.write("Error: this composition has no branch ownership reader, so the branch's own change cannot be judged; nothing was landed\n");
-        return 1;
-      }
-      const drift = app.driftCheckService;
-      if (drift === undefined) {
-        inv.io.stderr.write("Error: this composition has no drift-check service, so anchored paths cannot be judged (BR-1355); nothing was landed\n");
-        return 1;
-      }
-      const oracleService = app.integrateOracleService;
-      if (oracleService === undefined) {
-        inv.io.stderr.write("Error: this composition has no oracle service, so the landing's contract oracles cannot be run (AC-DCS2-1); nothing was landed\n");
-        return 1;
-      }
-      const createQueue = app.createIntegrateQueue;
-      if (createQueue === undefined) {
-        inv.io.stderr.write("Error: this composition has no merge queue, so landings cannot be serialized (AC-DCS2-5); nothing was landed\n");
-        return 1;
-      }
-      const commonDir = runGit(projectRoot, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
-      if (commonDir.status !== 0 || commonDir.stdout.trim() === "") {
-        inv.io.stderr.write(`Error: cannot locate the git common dir of ${projectRoot} for the merge queue: ${commonDir.stderr.trim()}\n`);
-        return 1;
-      }
-      const log = (line: string): void => {
-        inv.io.stdout.write(`${line}\n`);
-      };
-      const reviewBatch = buildReviewTriggerService(app, `${resolveActor(inv)}:integrate:${String(process.pid)}`, () =>
-        spawnDetachedReviewBatch({
-          cwd: projectRoot,
-          corpusDir,
-          execPath: inv.execPath,
-          isCompiled: inv.isCompiled,
-          env: inv.env,
-          // reason: #501 — the batch outlives this process, so it gets a child run registered by THIS (verified) caller
-          runService: app.runService,
-          caller: { claimedRun: inv.identity.harnessRun, verified: verifiedIdentity ?? { ok: true, value: undefined } },
-        }),
-      );
-      const service = new IntegrateService({
-        git: runGit,
-        lease: sqliteIntegrationLease,
-        runFloor: floorRunnerFor(inv.env),
-        corpus: {
-          take: (worktree) => takeCorpusSnapshot(corpusDir, worktree),
-          remove: (worktree) => removeCorpusSnapshot(worktree),
-        },
-        // AC-DCS2-1: the landing's contract oracles run on the merged tree before main moves, and their rows are recorded after
-        oracles: oracleService,
-        ledger: new IntegrateLossLedger(corpusDir),
-        queue: opts.queue ?? createQueue({ commonDir: commonDir.stdout.trim(), log }),
-        attempts: new IntegrateAttemptLedger(corpusDir),
-        // the landing is recorded through the corpus write route (TaskWorkflowService -> CorpusService.writeDoc)
-        landings: { record: (landing) => app.taskWorkflowService.recordLanding(landing) },
-        // BR-1355: spec and knowledge anchors follow the files the branch renamed, through the corpus write route
-        anchors: { follow: (moves, landing) => drift.followMovedFiles(moves, landing) },
-        // BR-1356: the done walk for every task of the landed branch; a refusal prints and never un-lands main
-        completion: {
-          complete: async (tasks) => {
-            const identity = await app.verifiedInvocationIdentity?.();
-            if (identity !== undefined && !identity.ok) {
-              return tasks.map((task) => ({ task, outcome: "refused" as const, message: formatErrorFor(inv, identity.error) }));
-            }
-            const by = resolveActor(inv);
-            const callerSession = resolveCallerSession(undefined, inv.env);
-            const doneOpts = {
-              by,
-              harnessRun: identity?.value?.harnessRun ?? null,
-              source: app.callerSurface,
-              ...(callerSession !== undefined ? { callerSession } : {}),
-            };
-            const completions: TaskCompletion[] = [];
-            for (const task of tasks) {
-              const done = await app.taskWorkflowService.done(task, doneOpts);
-              if (done.ok) {
-                completions.push({ task, outcome: "archived" });
-                continue;
-              }
-              const floor = (done.error as { details?: { floor?: unknown } }).details?.floor;
-              completions.push({ task, outcome: "refused", ...(typeof floor === "string" ? { floor } : {}), message: formatErrorFor(inv, done.error) });
-            }
-            return completions;
-          },
-        },
-        // BR-1379: after a landing, one detached review batch when plans need review and no lease is live; never waited for
-        ...(reviewBatch !== undefined ? { reviewBatch: { start: () => reviewBatch.start() } } : {}),
-        // the branch's own change is judged before the floor (BR-1346, BR-1347, BR-1348); it reads the repository and the claims only
-        ownDiff: new OwnDiffJudgment({
-          git: runGit,
-          projectRoot,
-          ownership,
-          codeAnchors: {
-            read: async () => {
-              const declared = await drift.listDeclaredAnchors();
-              if (!declared.ok) return declared;
-              return ok(
-                declared.value
-                  .filter((entry) => !isTerminalStatus(entry.doc_status as DocStatus, entry.doc_type))
-                  .map((entry) => ({ doc_slug: entry.doc_slug, anchor: entry.anchor.raw, path: entry.anchor.path, is_dir: entry.anchor.isDir })),
-              );
-            },
-          },
-          // AC-LG-7: the prose bound to each changed file (what `lore refs <path>` lists), replacing the post-edit hook
-          boundProse: {
-            read: async (paths) => {
-              const declared = await drift.listDeclaredAnchors();
-              if (!declared.ok) return declared;
-              const probe = buildRealFsProbe(projectRoot);
-              let knownScripts: ReadonlySet<string> = new Set();
-              if (probe.stat(GOVERNING_PACKAGE_JSON) === "file") {
-                const scripts = scanPackageScripts(probe.readFile(GOVERNING_PACKAGE_JSON) ?? "");
-                if (scripts === undefined) {
-                  return err({ code: "VALIDATION_ERROR", field: GOVERNING_PACKAGE_JSON, message: `${GOVERNING_PACKAGE_JSON} has no usable scripts object` });
-                }
-                knownScripts = scripts;
-              }
-              const index = buildReferenceIndex({
-                declaredAnchors: declared.value,
-                memoryFiles: discoverMemoryFiles(projectRoot, resolveMemoryFileBudgets(config).filenames),
-                fragments: discoverFragmentDocuments(projectRoot),
-                knownScripts,
-                probe,
-              });
-              return ok(paths.map((path) => ({ path, bindings: findBindings(index, path) })));
-            },
-          },
-          loadCoChangeRules: () => loadCoChangeRules(projectRoot, readFileOrNull),
-          matchesGlob: (pattern, path) => new Bun.Glob(pattern).match(path),
-        }),
-        projectRoot,
-        worktreesRoot: resolvePath(mainRoot, ".claude", "worktrees"),
-        log,
-      });
-      const result = await service.integrate({
-        branch,
-        sessionId: resolveCallerSession(typeof args.session === "string" ? args.session : undefined, inv.env) ?? "",
-        floorCommand: config?.workflow?.integrate?.floor_command,
-        postRefreshCommand: config?.workflow?.integrate?.post_refresh_command,
-        migrateCommand: config?.workflow?.integrate?.migrate_command,
-        harnessRun: verifiedIdentity?.value?.harnessRun ?? undefined,
-        // the CURRENT config's oracle settings (workflow.integrate.oracle_timeout_seconds is a positive integer or the config is refused at load)
-        oracleSettings: {
-          installCommand: config?.workflow?.done_contract?.install,
-          timeoutSeconds: config?.workflow?.integrate?.oracle_timeout_seconds ?? ORACLE_TIMEOUT_DEFAULT_SECONDS,
-          floorCovers: new Set(config?.workflow?.integrate?.floor_covers ?? []),
-          by: resolveActor(inv),
-        },
-        ...(typeof args.message === "string" && args.message !== "" ? { message: args.message } : {}),
-      });
-      if (!result.ok) {
-        inv.io.stderr.write(`${formatError(result.error)}\n`);
-        return exitCode(result.error);
-      }
-      const rendered = renderOutcome(result.value);
-      if (args.json === true) inv.io.stdout.write(`${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n`);
-      else if (rendered.out !== undefined) inv.io.stdout.write(`${rendered.out}\n`);
-      if (rendered.err !== undefined) inv.io.stderr.write(`${rendered.err}\n`);
-      return integrateExitCode(result.value);
-    }
+  // reason: the migrate child of integrate runs as the CALLER's party, so the caller's run is resolved from the VERIFIED
+  // invocation identity (an unregistered run verifies to null -> the service refuses) before anything moves.
+  const verifiedIdentity = await app.verifiedInvocationIdentity?.();
+  if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
+    inv.io.stderr.write(`${formatError(verifiedIdentity.error)}\n`);
+    return exitCode(verifiedIdentity.error);
   }
+  const corpusDir = dirname(resolvePath(dbPath));
+  const projectRoot = dirname(corpusDir);
+  const mainRoot = mainCheckoutRoot(runGit, projectRoot);
+  if (mainRoot === undefined) {
+    inv.io.stderr.write(`Error: ${projectRoot} is not inside a non-bare git repository whose common dir is <root>/.git\n`);
+    return 1;
+  }
+  const ownership = app.branchOwnershipReader;
+  if (ownership === undefined) {
+    inv.io.stderr.write("Error: this composition has no branch ownership reader, so the branch's own change cannot be judged; nothing was landed\n");
+    return 1;
+  }
+  const drift = app.driftCheckService;
+  if (drift === undefined) {
+    inv.io.stderr.write("Error: this composition has no drift-check service, so anchored paths cannot be judged (BR-1355); nothing was landed\n");
+    return 1;
+  }
+  const oracleService = app.integrateOracleService;
+  if (oracleService === undefined) {
+    inv.io.stderr.write("Error: this composition has no oracle service, so the landing's contract oracles cannot be run (AC-DCS2-1); nothing was landed\n");
+    return 1;
+  }
+  const createQueue = app.createIntegrateQueue;
+  if (createQueue === undefined) {
+    inv.io.stderr.write("Error: this composition has no merge queue, so landings cannot be serialized (AC-DCS2-5); nothing was landed\n");
+    return 1;
+  }
+  const commonDir = runGit(projectRoot, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  if (commonDir.status !== 0 || commonDir.stdout.trim() === "") {
+    inv.io.stderr.write(`Error: cannot locate the git common dir of ${projectRoot} for the merge queue: ${commonDir.stderr.trim()}\n`);
+    return 1;
+  }
+  const log = (line: string): void => {
+    inv.io.stdout.write(`${line}\n`);
+  };
+  const reviewBatch = buildReviewTriggerService(app, `${resolveActor(inv)}:integrate:${String(process.pid)}`, () =>
+    spawnDetachedReviewBatch({
+      cwd: projectRoot,
+      corpusDir,
+      execPath: inv.execPath,
+      isCompiled: inv.isCompiled,
+      env: inv.env,
+      // reason: #501 — the batch outlives this process, so it gets a child run registered by THIS (verified) caller
+      runService: app.runService,
+      caller: { claimedRun: inv.identity.harnessRun, verified: verifiedIdentity ?? { ok: true, value: undefined } },
+    }),
+  );
+  const service = new IntegrateService({
+    git: runGit,
+    lease: sqliteIntegrationLease,
+    runFloor: floorRunnerFor(inv.env),
+    corpus: {
+      take: (worktree) => takeCorpusSnapshot(corpusDir, worktree),
+      remove: (worktree) => removeCorpusSnapshot(worktree),
+    },
+    // AC-DCS2-1: the landing's contract oracles run on the merged tree before main moves, and their rows are recorded after
+    oracles: oracleService,
+    ledger: new IntegrateLossLedger(corpusDir),
+    queue: opts.queue ?? createQueue({ commonDir: commonDir.stdout.trim(), log }),
+    attempts: new IntegrateAttemptLedger(corpusDir),
+    // the landing is recorded through the corpus write route (TaskWorkflowService -> CorpusService.writeDoc)
+    landings: { record: (landing) => app.taskWorkflowService.recordLanding(landing) },
+    // BR-1355: spec and knowledge anchors follow the files the branch renamed, through the corpus write route
+    anchors: { follow: (moves, landing) => drift.followMovedFiles(moves, landing) },
+    // BR-1356: the done walk for every task of the landed branch; a refusal prints and never un-lands main
+    completion: {
+      complete: async (tasks) => {
+        const identity = await app.verifiedInvocationIdentity?.();
+        if (identity !== undefined && !identity.ok) {
+          return tasks.map((task) => ({ task, outcome: "refused" as const, message: formatErrorFor(inv, identity.error) }));
+        }
+        const by = resolveActor(inv);
+        const callerSession = resolveCallerSession(undefined, inv.env);
+        const doneOpts = {
+          by,
+          harnessRun: identity?.value?.harnessRun ?? null,
+          source: app.callerSurface,
+          ...(callerSession !== undefined ? { callerSession } : {}),
+        };
+        const completions: TaskCompletion[] = [];
+        for (const task of tasks) {
+          const done = await app.taskWorkflowService.done(task, doneOpts);
+          if (done.ok) {
+            completions.push({ task, outcome: "archived" });
+            continue;
+          }
+          const floor = (done.error as { details?: { floor?: unknown } }).details?.floor;
+          completions.push({ task, outcome: "refused", ...(typeof floor === "string" ? { floor } : {}), message: formatErrorFor(inv, done.error) });
+        }
+        return completions;
+      },
+    },
+    // BR-1379: after a landing, one detached review batch when plans need review and no lease is live; never waited for
+    ...(reviewBatch !== undefined ? { reviewBatch: { start: () => reviewBatch.start() } } : {}),
+    // the branch's own change is judged before the floor (BR-1346, BR-1347, BR-1348); it reads the repository and the claims only
+    ownDiff: new OwnDiffJudgment({
+      git: runGit,
+      projectRoot,
+      ownership,
+      codeAnchors: {
+        read: async () => {
+          const declared = await drift.listDeclaredAnchors();
+          if (!declared.ok) return declared;
+          return ok(
+            declared.value
+              .filter((entry) => !isTerminalStatus(entry.doc_status as DocStatus, entry.doc_type))
+              .map((entry) => ({ doc_slug: entry.doc_slug, anchor: entry.anchor.raw, path: entry.anchor.path, is_dir: entry.anchor.isDir })),
+          );
+        },
+      },
+      // AC-LG-7: the prose bound to each changed file (what `lore refs <path>` lists), replacing the post-edit hook
+      boundProse: {
+        read: async (paths) => {
+          const declared = await drift.listDeclaredAnchors();
+          if (!declared.ok) return declared;
+          const probe = buildRealFsProbe(projectRoot);
+          let knownScripts: ReadonlySet<string> = new Set();
+          if (probe.stat(GOVERNING_PACKAGE_JSON) === "file") {
+            const scripts = scanPackageScripts(probe.readFile(GOVERNING_PACKAGE_JSON) ?? "");
+            if (scripts === undefined) {
+              return err({ code: "VALIDATION_ERROR", field: GOVERNING_PACKAGE_JSON, message: `${GOVERNING_PACKAGE_JSON} has no usable scripts object` });
+            }
+            knownScripts = scripts;
+          }
+          const index = buildReferenceIndex({
+            declaredAnchors: declared.value,
+            memoryFiles: discoverMemoryFiles(projectRoot, resolveMemoryFileBudgets(config).filenames),
+            fragments: discoverFragmentDocuments(projectRoot),
+            knownScripts,
+            probe,
+          });
+          return ok(paths.map((path) => ({ path, bindings: findBindings(index, path) })));
+        },
+      },
+      loadCoChangeRules: () => loadCoChangeRules(projectRoot, readFileOrNull),
+      matchesGlob: (pattern, path) => new Bun.Glob(pattern).match(path),
+    }),
+    projectRoot,
+    worktreesRoot: resolvePath(mainRoot, ".claude", "worktrees"),
+    log,
+  });
+  const result = await service.integrate({
+    branch,
+    sessionId: resolveCallerSession(typeof args.session === "string" ? args.session : undefined, inv.env) ?? "",
+    floorCommand: config?.workflow?.integrate?.floor_command,
+    postRefreshCommand: config?.workflow?.integrate?.post_refresh_command,
+    migrateCommand: config?.workflow?.integrate?.migrate_command,
+    harnessRun: verifiedIdentity?.value?.harnessRun ?? undefined,
+    // the CURRENT config's oracle settings (workflow.integrate.oracle_timeout_seconds is a positive integer or the config is refused at load)
+    oracleSettings: {
+      installCommand: config?.workflow?.done_contract?.install,
+      timeoutSeconds: config?.workflow?.integrate?.oracle_timeout_seconds ?? ORACLE_TIMEOUT_DEFAULT_SECONDS,
+      floorCovers: new Set(config?.workflow?.integrate?.floor_covers ?? []),
+      by: resolveActor(inv),
+    },
+    ...(typeof args.message === "string" && args.message !== "" ? { message: args.message } : {}),
+  });
+  if (!result.ok) {
+    inv.io.stderr.write(`${formatError(result.error)}\n`);
+    return exitCode(result.error);
+  }
+  const rendered = renderOutcome(result.value);
+  if (args.json === true) inv.io.stdout.write(`${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n`);
+  else if (rendered.out !== undefined) inv.io.stdout.write(`${rendered.out}\n`);
+  if (rendered.err !== undefined) inv.io.stderr.write(`${rendered.err}\n`);
+  return integrateExitCode(result.value);
 }

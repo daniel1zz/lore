@@ -257,6 +257,16 @@ describe("AC-DCS2-7: land finishes a landing in one command for a plan without a
     expect((await logOf(task.slug)).filter((entry) => entry.kind === "landed").length).toBe(1);
   });
 
+  it("AC-DCS2-7: the done walk of a plain `lore integrate` removes the landed task's branch and worktree itself (no second delete)", async () => {
+    const plan = await fixture.createPlan("Land done cleanup plan");
+    const task = await codeTask(plan, "cleanup-a");
+    const out = await loreIn(fixture.dir, ["integrate", task.tree.branch]);
+    expect(out.exitCode, out.text).toBe(0);
+    expect(await statusOf(task.slug)).toBe("archived");
+    expect(existsSync(task.tree.path), "worktree removed").toBe(false);
+    expect(fixture.git(["branch", "--list", task.tree.branch]), `branch removed: ${out.text}`).toBe("");
+  });
+
   it("AC-DCS2-7: a check task and an unknown name are refused with exit 4 / 3, nothing moves", async () => {
     const plan = await fixture.createPlan("Land refused plan");
     const check = await fixture.createTask({ plan, kind: "check", title: "Land check", acScope: ["AC-FX-1"] });

@@ -31,7 +31,6 @@ import {
   extractEvidence,
   extractHeldClaim,
   ok,
-  readClaimRecord,
   readExecutionLog,
   type DocId,
   type DocRecord,
@@ -152,13 +151,12 @@ function refusal(field: string, message: string, value?: unknown): LoreError {
 
 const short = (sha: string): string => sha.slice(0, 12);
 
-/** A task the landing is about to archive, with the branch it worked on (read before the landing: an archived task holds no claim). */
+/** A task the landing is about to archive (read before the landing: afterwards it is no longer open). */
 interface LandEntry {
   readonly slug: string;
-  readonly branch: string | undefined;
 }
 
-const landEntryOf = (task: DocRecord): LandEntry => ({ slug: task.slug, branch: claimBranchOf(extractHeldClaim(task)) });
+const landEntryOf = (task: DocRecord): LandEntry => ({ slug: task.slug });
 
 /** The branch a claim worked on: the recorded branch, else the `--worktree <branch>` value (a non-absolute path is a branch name). */
 function claimBranchOf(claim: TaskClaim | undefined): string | undefined {
@@ -257,7 +255,7 @@ export class LandService {
     const integrated = await this.integrateStep(branch, tip, log);
     if (integrated.exit !== 0) return ok(this.failed(integrated.exit, `integrating ${branch}`, task.slug));
     const lines = [integrated.skipped ? `land: ${branch} already landed on main (execution log); resuming at the done walk` : `land: landed ${branch} on main`];
-    const archived = await this.archiveWalk([{ slug: task.slug, branch }], task.slug);
+    const archived = await this.archiveWalk([{ slug: task.slug }], task.slug);
     return ok({ exit: archived.errors.length === 0 ? 0 : 4, lines: [...lines, ...archived.lines], errors: archived.errors });
   }
 
@@ -450,38 +448,24 @@ export class LandService {
   private async archiveWalk(entries: readonly LandEntry[], target: string): Promise<{ readonly lines: string[]; readonly errors: string[] }> {
     const lines: string[] = [];
     const errors: string[] = [];
-    for (const { slug, branch: claimed } of entries) {
+    for (const { slug } of entries) {
       const found = await resolveDoc(this.ports.store, slug);
       if (!found.ok) {
         errors.push(`land: ${slug} cannot be read: ${found.error.code}`);
         continue;
       }
       if (found.value.status === "archived") {
-        lines.push(`land: archived ${slug}`, ...this.removeBranch(claimed));
+        lines.push(`land: archived ${slug}`);
         continue;
       }
       const done = await this.ports.done(slug);
       if (done.ok) {
-        lines.push(`land: archived ${slug}`, ...this.removeBranch(claimed));
+        lines.push(`land: archived ${slug}`);
         continue;
       }
       errors.push(`land: ${slug} is landed but not archived: ${"message" in done.error ? done.error.message : done.error.code}\nland: the landing stays recorded; fix the cause, then run \`lore land ${target}\` again`);
     }
     return { lines, errors };
-  }
-
-  /**
-   * Removes the branch of an archived task once nothing holds it: `lore done` removed the worktree, but its `git branch -d` ran before
-   * the shared checkout moved to the landed main, so a merged branch can still be there. Plain `-d` only (git refuses an unmerged branch).
-   */
-  private removeBranch(branch: string | undefined): string[] {
-    if (branch === undefined) return [];
-    const exists = this.resolveBranch(branch);
-    if (!exists.ok) return [`land: branch ${branch} kept: ${exists.error.code}`];
-    if (exists.value === null) return [];
-    const removed = this.ports.git(["branch", "-d", branch]);
-    if (removed.status === 0) return [`land: removed branch ${branch}`];
-    return [`land: kept branch ${branch}: ${removed.stderr.trim().split("\n")[0] ?? ""}`];
   }
 
   // ───────────────────────────── helpers ─────────────────────────────

@@ -581,10 +581,11 @@ export class IntegrateService {
       const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: base.value, landing_commit: landedAt, base_from_claim: true, ...onlySelected });
       const provenSlugs = new Set((proven?.tasks ?? []).map((task) => task.slug));
       const walked = oraclePort === undefined ? claimants : claimants.filter((slug) => provenSlugs.has(slug));
+      // reason: the shared checkout moves to main BEFORE the done walk, so the walk's `git branch -d` finds the branch merged into HEAD.
+      const view = this.refreshSharedView();
       await this.completeLanding(walked, [], { branch: request.branch, landing_commit: landedAt });
       const cleared = ledger.clear(request.branch);
       if (!cleared.ok) return cleared;
-      const view = this.refreshSharedView();
       const rebuild = this.rebuildSharedView(view, request.postRefreshCommand);
       return ok({ kind: "already_integrated", branch: request.branch, main: base.value, shared_view: view, rebuild, schema: this.migrateLiveCorpus(view, rebuild, request.migrateCommand, request.harnessRun) });
     }
@@ -691,10 +692,11 @@ export class IntegrateService {
       finish({ outcome: "landed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: casMs });
       await this.recordOracleRows(tasks, merge, outcomes);
       const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: merge, landing_commit: merge, ...footprint, ...onlySelected });
+      // reason: the shared checkout moves to main BEFORE the done walk, so the walk's `git branch -d` finds the branch merged into HEAD.
+      const view = this.refreshSharedView();
       await this.completeLanding(claimants, judged.renames, { branch: request.branch, landing_commit: merge });
       const cleared = ledger.clear(request.branch);
       if (!cleared.ok) return cleared;
-      const view = this.refreshSharedView();
       const rebuild = this.rebuildSharedView(view, request.postRefreshCommand);
       const schema = this.migrateLiveCorpus(view, rebuild, request.migrateCommand, request.harnessRun);
       // reason: BR-1379 — last step, after the rebuild and the schema migration, so the detached batch runs main's binary
