@@ -139,6 +139,7 @@ import { createRealMigrationGit } from "./adapters/real-done-contract-migration-
 import { TaskFinishService } from "./service/task-finish-service.js";
 import { TaskStartService } from "./service/task-start-service.js";
 import { IntegrateOracleService } from "./service/integrate-oracle-service.js";
+import { IntegrateQueue, QUEUE_WAIT_SECONDS_DEFAULT } from "./service/integrate-queue.js";
 import { FlakyLedgerService } from "./service/issue-filing-service.js";
 import { createGhFlakyLedgerPort, createUnconfiguredFlakyLedgerPort } from "./service/flaky-ledger-port.js";
 import { createRealOracleGit } from "./adapters/real-oracle-git.js";
@@ -386,6 +387,13 @@ export interface App {
    * its command; absent when the verify runner is not composed.
    */
   integrateOracleService?: IntegrateOracleService;
+  /**
+   * The FIFO merge queue of `lore integrate` (AC-DCS2-5) and, later, the fold of `lore land` (AC-DCS2-8): builds the queue over the git
+   * common dir of the repository the caller found, reading process identity from the real process table and the wait limit from
+   * `workflow.integrate.queue_wait_seconds` (default 1800). A factory, not an instance: the common dir is a git fact the command
+   * resolves when it runs, so composing the app never spawns git. Wired by {@link wireDoneContract} at both composition sites.
+   */
+  createIntegrateQueue?: (options: { readonly commonDir: string; readonly log: (line: string) => void }) => IntegrateQueue;
   /**
    * The suite-result store (BR-1497): one full-suite result per commit, looked up before it is run. Optional like its
    * siblings so hand-built App stubs stay valid; both composition roots wire it.
@@ -1836,6 +1844,17 @@ function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | 
       projectRoot: repoRoot,
     });
   }
+  // reason: AC-DCS2-5 — landings take their turn in one FIFO queue; the holder is identified by pid plus process start time, read from the
+  // same process-table port run reaping uses (fixed /bin/ps, retried empty reads, timeout).
+  const queueProcesses = createRealProcessTablePort({ env: ambient.env, cwd: ambient.cwd });
+  app.createIntegrateQueue = ({ commonDir, log }) =>
+    new IntegrateQueue({
+      commonDir,
+      pid: process.pid,
+      inspect: (pid) => queueProcesses.inspect(pid),
+      waitSeconds: config?.workflow?.integrate?.queue_wait_seconds ?? QUEUE_WAIT_SECONDS_DEFAULT,
+      log,
+    });
   // reason: AC-DCS1-13 — start composes the workflow service (the lease check and the one claim write).
   app.taskStartService = new TaskStartService({ store, workflow: app.taskWorkflowService });
 }

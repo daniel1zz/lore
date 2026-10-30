@@ -33,6 +33,7 @@ import type { GithubFilingContext, GithubUpstreamCfg } from "../../src/adapters/
 import { DOC_TYPE_ROLE_MAP, MILESTONE_DIMENSIONS, err, ok, readKnownDefects, renderMilestoneReviewContent, type AuditEntry, type DocId, type DocRecord, type LoreError, type MilestoneDimension, type MilestoneReview, type PlanBundle, type VersionRecord } from "@lore/core";
 import { IntegrateService, type IntegrateDeps } from "../../src/service/integrate-service.js";
 import { IntegrateLossLedger } from "../../src/service/integrate-loss-ledger.js";
+import { immediateIntegrateQueue } from "../helpers/immediate-integrate-queue";
 import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledger.js";
 import { installShippedGuard } from "./support/main-guard-repo.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, type PlanRetirementState } from "../../src/service/milestone-review.js";
@@ -837,6 +838,7 @@ describe("landing starts the review — IntegrateService hands the landing to th
       corpus: { take: () => ok({ takenAt: "2026-10-23T00:00:00.000Z" }), remove: () => ok(undefined) },
       runFloor: () => ({ status: 0, output: "" }),
       ledger: new IntegrateLossLedger(corpusDir),
+      queue: immediateIntegrateQueue(),
       attempts: new IntegrateAttemptLedger(corpusDir, () => "2026-10-23T00:00:00.000Z"),
       clock,
       projectRoot: repo,

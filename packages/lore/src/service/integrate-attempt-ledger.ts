@@ -36,7 +36,7 @@ const AttemptRecordSchema = z
     /** main as this attempt saw it. */
     base: z.string().min(1),
     started_at: z.string().min(1),
-    outcome: z.enum(["landed", "lost_race", "floor_failed", "snapshot_migrate_failed", "conflict", "oracle_failed"]),
+    outcome: z.enum(["landed", "lost_race", "main_moved", "floor_failed", "snapshot_migrate_failed", "conflict", "oracle_failed"]),
     merge_ms: z.number().int().nonnegative(),
     /** `null` when the attempt ended (a conflict) before the snapshot. */
     corpus_snapshot_ms: z.number().int().nonnegative().nullable(),
