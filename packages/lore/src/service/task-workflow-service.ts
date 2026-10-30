@@ -1329,7 +1329,7 @@ function isRunnerProducedRow(entry: EvidenceEntry): boolean {
  * A hand-typed `lore evidence --result expected-fail` (no `--capture`, no verify) proves nothing ran
  * (DCL-1 (d); local report "red-first floor ignores capture_source", #11).
  */
-function isRunnerProducedRedRun(entry: EvidenceEntry): boolean {
+export function isRunnerProducedRedRun(entry: EvidenceEntry): boolean {
   return isRedRunResult(entry.result) && isRunnerProducedRow(entry);
 }
 

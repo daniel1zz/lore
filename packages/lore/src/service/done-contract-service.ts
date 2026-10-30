@@ -187,6 +187,20 @@ export class DoneContractService implements ApproveContractPort {
     });
   }
 
+  /**
+   * Whether `task`'s ac_scope holds a live script-mode criterion: the one fact the migration infers a kind from (AC-DCS1-22).
+   * Reads the same criteria the compile reads.
+   *
+   * @param task - the task whose scope is read
+   */
+  async hasLiveScriptAc(task: DocRecord): Promise<Result<boolean, LoreError>> {
+    const plan = await this.resolvePlan(task);
+    if (!plan.ok) return plan;
+    const criteria = await this.resolveCriteria(task, plan.value);
+    if (!criteria.ok) return criteria;
+    return ok(liveScriptCriteriaOf(task, criteria.value).length > 0);
+  }
+
   /** The plan the task belongs to (`extra.plan_id`, else the parent when it is a plan); `null` for an ad-hoc task. */
   private async resolvePlan(task: DocRecord): Promise<Result<DocRecord | null, LoreError>> {
     const declared = task.extra["plan_id"];

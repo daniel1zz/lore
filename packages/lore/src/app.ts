@@ -134,6 +134,8 @@ import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
 import { armMainTree, buildBaselineDeclarationPort } from "./adapters/cli/absent-declarations.js";
 import { DoneContractService } from "./service/done-contract-service.js";
+import { DoneContractMigrationService } from "./service/done-contract-migration-service.js";
+import { createRealMigrationGit } from "./adapters/real-done-contract-migration-git.js";
 import { TaskFinishService } from "./service/task-finish-service.js";
 import { TaskStartService } from "./service/task-start-service.js";
 import { createRealDoneContractGit } from "./adapters/real-done-contract-git.js";
@@ -490,6 +492,11 @@ export interface App {
    * hand-built-App-stub reason as `specParentMigrationService`; always present in production.
    */
   planOutlineExemptMigrationService?: PlanOutlineExemptMigrationService;
+  /**
+   * DoneContractMigrationService — `lore migrate done-contract [--apply]` (AC-DCS1-22, AC-DCS1-23): compiles the contract of
+   * every in-flight task through the approve-time compile, all or nothing. Wired by {@link wireDoneContract}.
+   */
+  doneContractMigrationService?: DoneContractMigrationService;
   /**
    * OutlineSectionsRetireMigrationService — `lore migrate outline-sections [--apply]`: removes the stored
    * `extra.outline` from every PRD (the outline command family is gone), through the corpus write route. Same
@@ -1794,7 +1801,10 @@ function buildMainRedLedger(store: StoreInterface, corpusService: CorpusService)
  */
 function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | undefined, repoRoot: string): void {
   const commands = config?.workflow?.done_contract ?? {};
-  app.reviewService.setDoneContractPort(new DoneContractService(store, commands, createRealDoneContractGit(repoRoot)));
+  const contracts = new DoneContractService(store, commands, createRealDoneContractGit(repoRoot));
+  app.reviewService.setDoneContractPort(contracts);
+  // reason: AC-DCS1-22 — the migration compiles through the SAME service approve uses, and writes through the one write route.
+  app.doneContractMigrationService = new DoneContractMigrationService(store, app.corpusService, contracts, createRealMigrationGit(repoRoot));
   // reason: AC-DCS1-11 — a write-set addition runs a test file with the same template the approve-time contract used.
   app.taskWorkflowService.setTestFileTemplate(commands.test_file);
   // reason: AC-DCS1-15 — finish composes the workflow service (the one write) and the verify runner (the one measurement).

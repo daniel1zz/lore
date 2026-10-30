@@ -75,6 +75,7 @@ import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import { runMigrateSchema } from "../migrate-schema.js";
 import { findLoreProjectRoot, runFragmentsMigration } from "../migrate-fragments-wiring.js";
+import { parseDoneContractDecisions } from "../done-contract-migrate-input.js";
 
 export default defineLoreCommand({
   meta: {
@@ -105,6 +106,18 @@ export default defineLoreCommand({
     scope: {
       type: "string",
       description: "[fragments only] Layer to migrate: user | project (required)",
+    },
+    kind: {
+      type: "string",
+      description: "[done-contract only] Decide a task's kind: <slug>=<code|check|corpus> (repeatable)",
+    },
+    "red-waiver": {
+      type: "string",
+      description: "[done-contract only] Waive the red run of a code task that has none: <slug>=<reason> (repeatable)",
+    },
+    tip: {
+      type: "string",
+      description: "[done-contract only] Give the tip where a task's branch work ended: <slug>=<commit> (repeatable)",
     },
     revert: {
       type: "boolean",
@@ -154,14 +167,96 @@ export default defineLoreCommand({
       args.version !== "ordinals" &&
       args.version !== "spec-parents" &&
       args.version !== "plan-outline-exempt" &&
+      args.version !== "done-contract" &&
       args.version !== "config-keys" &&
       args.version !== "memory-limits" &&
       args.version !== "audit-backfill"
     ) {
       inv.io.stderr.write(
-        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, outline-sections, ordinals, spec-parents, plan-outline-exempt, config-keys, memory-limits, audit-backfill.\n`,
+        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, outline-sections, ordinals, spec-parents, plan-outline-exempt, done-contract, config-keys, memory-limits, audit-backfill.\n`,
       );
       exitCli(2);
+    }
+
+    // ── done-contract action ──────────────────────────────────────────────
+    // reason: AC-DCS1-22/23 — preview by default; exit 0 when every task compiles, 4 while any task has a gap (a gap is a
+    // finding to act on, unlike the other previews); `--apply` is all or nothing.
+    if (args.version === "done-contract") {
+      const parsed = parseDoneContractDecisions(args.kind, args["red-waiver"], args.tip);
+      if (typeof parsed === "string") {
+        inv.io.stderr.write(`Error: ${parsed}\n`);
+        return 2;
+      }
+      const { app } = loadLoreApp({ inv });
+      try {
+        const service = app.doneContractMigrationService;
+        if (service === undefined) {
+          inv.io.stderr.write("Internal error: DoneContractMigrationService not wired on App\n");
+          return 1;
+        }
+        const usage = service.checkDecisions(parsed);
+        if (usage.length > 0) {
+          inv.io.stderr.write(`Error: ${usage.join("\n")}\n`);
+          return 2;
+        }
+        const apply = args.apply === true;
+        const result = apply ? await service.apply(parsed) : await service.preview(parsed);
+        if (!result.ok) {
+          if (args.json) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
+          } else {
+            inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+          }
+          return exitCode(result.error);
+        }
+        const report = result.value;
+        const code = report.gaps.length > 0 ? 4 : 0;
+        if (args.json) {
+          printLine(
+            inv.io.stdout,
+            JSON.stringify(
+              {
+                ok: code === 0,
+                data: {
+                  applied: apply,
+                  tasks: report.rows.map((row) => ({
+                    slug: row.slug,
+                    status: row.status,
+                    kind: row.kind ?? null,
+                    kind_source: row.kindSource,
+                    already_compiled: row.alreadyCompiled,
+                    releases_claim: row.releasesClaim,
+                    contract: row.contract ?? null,
+                    gaps: row.gaps,
+                  })),
+                  written: report.written,
+                },
+              },
+              null,
+              2,
+            ),
+          );
+          return code;
+        }
+        printLine(inv.io.stdout, apply ? "Done-contract migration complete" : "Done-contract migration (preview)");
+        printLine(inv.io.stdout, "─".repeat(40));
+        for (const row of report.rows) {
+          const kindText = row.kind === undefined ? "kind unknown" : `kind ${row.kind} (${row.kindSource})`;
+          const state = row.alreadyCompiled ? "already holds a contract" : row.gaps.length > 0 ? "cannot be compiled yet" : apply ? "contract stored" : "contract would be stored";
+          printLine(inv.io.stdout, `${row.slug} [${row.status}] ${kindText}: ${state}`);
+          if (row.contract !== undefined) printLine(inv.io.stdout, `  oracles: ${row.contract.oracles.map((oracle) => oracle.id).join(", ") || "(none)"}; red_required ${String(row.contract.red_required)}`);
+          if (row.releasesClaim) printLine(inv.io.stdout, `  claim names no branch: ${apply ? "released" : "to be released"}`);
+          for (const gap of row.gaps) {
+            printLine(inv.io.stdout, `  missing ${gap.code}: ${gap.message}`);
+            printLine(inv.io.stdout, `    fill it: ${gap.fill}`);
+          }
+        }
+        if (report.gaps.length > 0) printLine(inv.io.stdout, `\n${report.gaps.length} gap(s): nothing is written until every gap is filled; pass every decision in one --apply call.`);
+        else if (!apply) printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
+        return code;
+      } finally {
+        app.close();
+      }
     }
 
     // ── audit-backfill action ─────────────────────────────────────────────
