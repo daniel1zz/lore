@@ -495,7 +495,7 @@ describe("AC-RL-4 exit codes documented", () => {
     for (const [code, meaning] of Object.entries(ASSESS_EXIT_CODES)) {
       expect(text, `help lacks exit ${code}`).toContain(`${code.padStart(2)}  ${meaning}`);
     }
-    expect(text).toContain("another holder leases the plan; nothing ran; re-run later");
+    expect(text).toContain(`${ASSESS_EXIT_LEASE_HELD}  ${ASSESS_EXIT_CODES[ASSESS_EXIT_LEASE_HELD]}`);
   });
 
   it("exit codes documented: the help text is rendered from the table, not written by hand", () => {
