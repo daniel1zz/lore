@@ -350,6 +350,31 @@ describe("cross-field check library", () => {
     expect(run("out-of-scope-not-in-scope", props, { scope: ["a"], out: ["c"] })).toEqual([]);
   });
 
+  it("out-of-scope-not-in-scope compares entry TEXT, ignoring ids: same text with different ids is a finding", () => {
+    const props = { scope: { type: "array", "x-scope-list": true }, out: { type: "array", "x-out-of-scope-list": true } } as Record<string, JsonSchemaNode>;
+    const findings = run("out-of-scope-not-in-scope", props, {
+      scope: [{ id: "S1", text: "Rewrite the CLI" }],
+      out: [{ id: "O1", text: "Rewrite the CLI" }],
+    });
+    expect(findings.map((f) => f.entry)).toEqual(["out: Rewrite the CLI"]);
+  });
+
+  it("out-of-scope-not-in-scope: different texts with different ids yield no finding", () => {
+    const props = { scope: { type: "array", "x-scope-list": true }, out: { type: "array", "x-out-of-scope-list": true } } as Record<string, JsonSchemaNode>;
+    expect(
+      run("out-of-scope-not-in-scope", props, { scope: [{ id: "S1", text: "Rewrite the CLI" }], out: [{ id: "O1", text: "Rewrite the dashboard" }] }),
+    ).toEqual([]);
+  });
+
+  it("out-of-scope-not-in-scope: case and whitespace variants of the same text are a finding, even when ids are equal-looking or absent", () => {
+    const props = { scope: { type: "array", "x-scope-list": true }, out: { type: "array", "x-out-of-scope-list": true } } as Record<string, JsonSchemaNode>;
+    const findings = run("out-of-scope-not-in-scope", props, {
+      scope: [{ id: "S1", text: "Rewrite   the CLI" }, "plain item"],
+      out: [{ id: "O1", text: "  rewrite the cli " }, { text: "PLAIN  item" }],
+    });
+    expect(findings).toHaveLength(2);
+  });
+
   it("goal-has-measure: flags a goal with no measure (object or string); passes one with a measure", () => {
     const props = { goal: { type: "object", "x-goal": true } } as Record<string, JsonSchemaNode>;
     expect(run("goal-has-measure", props, { goal: { statement: "better", measure: " " } })).toHaveLength(1);

@@ -30,8 +30,9 @@
  *                                                      `rejected` = non-empty string or non-empty array of
  *                                                      strings / `{option}` objects; `why` non-empty string
  *   x-scope-list            out-of-scope-not-in-scope  array of entries (in scope)
- *   x-out-of-scope-list     out-of-scope-not-in-scope  array of entries (out of scope); no entry may equal
- *                                                      (trim, lower-case, collapsed whitespace) a scope entry
+ *   x-out-of-scope-list     out-of-scope-not-in-scope  array of entries (out of scope); no entry's TEXT (the string, else
+ *                                                      `text` / `item`; ids ignored) may equal (trim, lower-case,
+ *                                                      collapsed whitespace) a scope entry's text
  *   x-goal                  goal-has-measure           object `{statement, measure}`; `measure` non-empty
  *                                                      string naming the observable outcome
  *
@@ -396,17 +397,29 @@ const decisionHasRejected: CrossFieldCheck = (view) =>
     }),
   );
 
+/** Text of a scope entry: the string itself, else `text` of an object, else `item`; ids are ignored (they differ by design). */
+function entryText(entry: unknown, index: number): string {
+  if (typeof entry === "string") return entry;
+  if (isRecord(entry)) {
+    for (const property of ["text", "item"] as const) {
+      const candidate = entry[property];
+      if (typeof candidate === "string" && candidate !== "") return candidate;
+    }
+  }
+  return `#${index}`;
+}
+
 const outOfScopeNotInScope: CrossFieldCheck = (view) => {
   const inScope = new Map<string, string>();
   for (const name of markedFields(view, "x-scope-list")) {
     entryList(view, name).forEach((entry, index) => {
-      const key = entryKey(entry, index);
-      inScope.set(normaliseForCompare(key), key);
+      const text = entryText(entry, index);
+      inScope.set(normaliseForCompare(text), text);
     });
   }
   return markedFields(view, "x-out-of-scope-list").flatMap((name) =>
     entryList(view, name).flatMap((entry, index) => {
-      const key = entryKey(entry, index);
+      const key = entryText(entry, index);
       return inScope.has(normaliseForCompare(key))
         ? [{ check: "out-of-scope-not-in-scope" as const, entry: `${name}: ${key}`, problem: "is listed both in scope and out of scope" }]
         : [];
