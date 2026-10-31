@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @spawns-external git builds the throwaway repository and its linked worktrees
 // @reads assets/project/reference-transaction
 /**
  * @spec_ref spec-lore-done-closes-a-commitless-task-through-an-audited-no  AC-ND-2, AC-ND-4, AC-ND-9, AC-ND-10 (the git-facts part that survives the done contract)
@@ -38,8 +39,6 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../../helpers/clean-tree-repo.js";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
-
-// @spawns-external git builds the throwaway repository and its linked worktrees
 
 interface RunResult {
   readonly stdout: string;
