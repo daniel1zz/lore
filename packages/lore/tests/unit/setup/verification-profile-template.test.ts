@@ -1,4 +1,7 @@
 // @reads assets/project/**
+// @spawns packages/lore/src/index.ts -- the main-guard fixture it imports runs the lore entry point as a child process
+// @spawns-external git the setup service's git probes run through a real exec port, and the fixture builds a repository
+// @spawns-external sh the main-guard fixture resolves the real git path through sh
 /**
  * Config-template overlay suite (SPEC-058 §Design Decisions D6, task
  * AC-V-4) — proves the NEW `assets/project/lore-config-template.yaml`

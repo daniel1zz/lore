@@ -1,3 +1,4 @@
+// @spawns-external sh the child-environment probe in test-isolation-env.ts runs `sh -c`
 // @reads scripts/test-isolation-env.ts
 /**
  * TG-49: the per-worker child-environment probe (assertChildrenInheritSandbox) must not misreport a

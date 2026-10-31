@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * Six-dimension tests for TaskWorkflowService's uncommitted-worktree
  * attestation guard (task-lore-evidence-and-lore-release-accept-an-

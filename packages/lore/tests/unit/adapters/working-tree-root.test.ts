@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * INT-T5 unit coverage of `resolveWorkingTreeRoot` / `resolveTrackedWriteRoot` (adapters/cli/working-tree-root.ts).
  *

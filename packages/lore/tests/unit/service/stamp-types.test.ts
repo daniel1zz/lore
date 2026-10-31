@@ -1,3 +1,4 @@
+// @spawns-external tsc type-checks the compile-fail fixture project
 // @reads packages/core/src/**
 // @reads packages/lore/packages/core/src/index.ts
 // @reads packages/lore/src/service/gate-predicates.ts

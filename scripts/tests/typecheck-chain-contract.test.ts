@@ -1,3 +1,4 @@
+// @spawns-external tsc lists the files of the e2e tsconfig (`tsc --listFilesOnly`)
 // @reads package.json
 /** @spec_ref AC-TC-1 */
 /**

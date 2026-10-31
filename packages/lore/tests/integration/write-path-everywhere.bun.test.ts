@@ -1,4 +1,5 @@
 // @reads packages/lore/src/**
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * AC-DCL-5 — NO MODULE WRITES AROUND THE WRITE PATH (spec-no-module-writes-around-the-write-path-the-remaining-17).
  *

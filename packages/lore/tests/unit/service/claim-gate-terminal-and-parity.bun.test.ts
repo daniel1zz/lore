@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts -- the claim-run fixture runs the lore entry point as a child process
+// @spawns-external git the run-end fixture builds a git repository
 /**
  * A terminal task holds no claim by definition, and `lore gate task-claim` reaches the verdict `lore claim` reaches.
  *

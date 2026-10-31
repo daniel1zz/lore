@@ -29,11 +29,12 @@ import assessCommand, { ASSESS_EXIT_CODES } from "../../src/adapters/cli/command
 import { ASSESS_EXIT_LEASE_HELD, renderAssessExitCodes } from "../../src/adapters/cli/assess-exit-codes.js";
 import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/service/issue-filing-service.js";
 import { retryPendingIssueWrites, type IssueWriteAuditRow } from "../../src/service/known-defects-at-close.js";
-import { coverFailedDimensions, type SuiteRun } from "../../src/service/milestone-review-inputs.js";
+import { coverFailedDimensions } from "../../src/service/milestone-review-inputs.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint } from "../../src/service/milestone-review.js";
 import type { MilestoneReviewResult } from "../../src/service/milestone-review-service.js";
 import * as leaseModule from "../../src/service/review-batch-lease.js";
-import { ReviewLeases, REVIEW_LEASE_EXPIRY_MS, LEASE_WAIT_POLL_MS, issueLeaseKey, planLeaseKey, suiteFileLeaseKey, suiteLeaseKey } from "../../src/service/review-batch-lease.js";
+import { ReviewLeases, REVIEW_LEASE_EXPIRY_MS, LEASE_WAIT_POLL_MS, issueLeaseKey, planLeaseKey, suiteFileLeaseKey } from "../../src/service/review-batch-lease.js";
+import { noDecisionLog } from "../helpers/gate-acceptance-log.js";
 import { ReviewBatchRunner, skippedEveryPlan, type BatchRunPorts } from "../../src/service/review-batch-service.js";
 import { SuiteResultService, type CommitSuiteRunnerPort, type FileRunOutcome } from "../../src/service/suite-result-service.js";
 import type { FailedFinding } from "../../src/service/root-cause-fingerprint.js";
@@ -197,6 +198,7 @@ class BatchWorld {
     return new ReviewBatchRunner({
       getPlanBundle: async (ref) => ok(this.bundleOf(this.find(ref))),
       listReviewDocs: async (planId) => ok([...this.plans.values()].find((p) => p.bundle.plan.id === planId)?.docs ?? []),
+      acceptanceLog: noDecisionLog(),
       issueCoverage: async (planId, failed) => {
         const slug = [...this.plans.values()].find((p) => p.bundle.plan.id === planId)?.slug;
         const entries = this.issues.links.filter((l) => l.plan === slug).flatMap((l) => l.dimensions.map((dimension) => ({ number: l.issue, dimension, state: "open" as const })));
@@ -518,34 +520,23 @@ describe("AC-RL-4 exit codes documented", () => {
 
 // ─── AC-RL-2: suite single-flight (real SuiteResultService over a real store, stub runner) ───────────────────────────
 
-const MEASURED = (commit: string): SuiteRun => ({
-  status: "measured",
-  commit,
-  commands: [{ command: "bun run test", exit_code: 0, output_tail: "ok" }],
-  skipped: [],
-  failing_test_files: [],
-});
+const FILE_A = "packages/x/tests/a.test.ts";
+const FILE_B = "packages/x/tests/b.test.ts";
 
-/** A runner stub that counts its calls and holds each suite run for `runMs`. */
+/** A runner stub that counts its calls and holds each file run for `runMs`. */
 class StubRunner implements CommitSuiteRunnerPort {
-  suiteRuns: string[] = [];
   fileRuns: string[] = [];
   runMs = 20;
-  /** Per-commit gates: a suite run at that commit waits until the test opens it. */
+  /** Per-commit gates: a file run at that commit waits until the test opens it. */
   readonly gates = new Map<string, Promise<void>>();
   async resolveCommit(ref: string) {
     return ok({ commit: ref, tree: `tree-${ref}` });
   }
-  async runSuite(commit: string) {
-    this.suiteRuns.push(commit);
+  async runFiles(commit: string, files: readonly string[]) {
+    this.fileRuns.push(`${commit}:${files.join(",")}`);
     const held = this.gates.get(commit);
     if (held !== undefined) await held;
     else await pause(this.runMs);
-    return ok(MEASURED(commit));
-  }
-  async runFiles(commit: string, files: readonly string[]) {
-    this.fileRuns.push(`${commit}:${files.join(",")}`);
-    await pause(this.runMs);
     return ok<readonly FileRunOutcome[]>(files.map((file) => ({ file, exit_code: 0, output_tail: "ok", duration_ms: 1 })));
   }
 }
@@ -561,24 +552,27 @@ function suiteService(lw: LeaseWorld, holder: string | undefined): SuiteResultSe
   });
 }
 
+// RETIRED with spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach (AC-RL-2's full-suite cases: no review runs the full
+// suite, so `suite:<sha>` is no lease key any more). The same single-flight guarantees now hold per (commit, file): `suite:<sha>:<file>`.
 describe("AC-RL-2 suite single-flight", () => {
-  it("suite single-flight: two concurrent lookups at one commit invoke the runner once and return the same stored result id", async () => {
+  it("suite single-flight: two concurrent runs of one file at one commit invoke the runner once, share one stored row and the second really waited", async () => {
     const lw = newWorld();
     const runner = new StubRunner();
-    const [a, b] = await Promise.all([suiteService(lw, "holder-a").lookupOrRun("c1", runner), suiteService(lw, "holder-b").lookupOrRun("c1", runner)]);
-    expect(runner.suiteRuns).toEqual(["c1"]);
+    const [a, b] = await Promise.all([
+      suiteService(lw, "holder-a").runSingleFile("c1", FILE_A, "confirm", runner),
+      suiteService(lw, "holder-b").runSingleFile("c1", FILE_A, "confirm", runner),
+    ]);
+    expect(runner.fileRuns).toEqual([`c1:${FILE_A}`]);
     expect(a.ok && b.ok).toBe(true);
-    if (a.ok && b.ok) {
-      expect(a.value.id).toBe(b.value.id);
-      expect(a.value.status).toBe("measured");
-    }
+    if (a.ok && b.ok) expect(a.value).toEqual(b.value);
+    expect(lw.acquired).toContain(suiteFileLeaseKey("c1", FILE_A));
     expect(lw.sleeps.length).toBeGreaterThan(0); // the second caller really waited on the key
     expect(Math.max(...lw.sleeps)).toBeLessThanOrEqual(LEASE_WAIT_POLL_MS);
-    const stored = await lw.store.listSuiteResultsForCommit("c1");
+    const stored = await lw.store.listSuiteFileRuns("file-confirm@c1");
     expect(stored.ok && stored.value).toHaveLength(1);
   });
 
-  it("suite single-flight: the app's own suite service single-flights two concurrent lookups at one commit (BR-1511 binding point)", async () => {
+  it("suite single-flight: the app's own suite service single-flights two concurrent runs of one file at one commit (BR-1511 binding point)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lore-review-leases-app-"));
     try {
       const app = createLiveApp(join(dir, "corpus.db"));
@@ -586,74 +580,68 @@ describe("AC-RL-2 suite single-flight", () => {
       expect(service).toBeDefined();
       const runner = new StubRunner();
       // reason: the app's leases use the real clock and sleep, so the waiter polls once (up to LEASE_WAIT_POLL_MS) after the holder finishes.
-      const [a, b] = await Promise.all([service!.lookupOrRun("c1", runner), service!.lookupOrRun("c1", runner)]);
-      expect(runner.suiteRuns).toEqual(["c1"]);
+      const [a, b] = await Promise.all([service!.runSingleFile("c1", FILE_A, "bisect", runner), service!.runSingleFile("c1", FILE_A, "bisect", runner)]);
+      expect(runner.fileRuns).toEqual([`c1:${FILE_A}`]);
       expect(a.ok && b.ok).toBe(true);
-      if (a.ok && b.ok) expect(a.value.id).toBe(b.value.id);
+      if (a.ok && b.ok) expect(a.value).toEqual(b.value);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   }, 40_000);
 
-  it("suite single-flight: without the key the same two lookups run the suite twice (the guard is the lease)", async () => {
+  it("suite single-flight: without the key the same two runs run the file twice (the guard is the lease)", async () => {
     const lw = newWorld();
     const runner = new StubRunner();
-    await Promise.all([suiteService(lw, undefined).lookupOrRun("c1", runner), suiteService(lw, undefined).lookupOrRun("c1", runner)]);
-    expect(runner.suiteRuns).toEqual(["c1", "c1"]);
+    await Promise.all([suiteService(lw, undefined).runSingleFile("c1", FILE_A, "bisect", runner), suiteService(lw, undefined).runSingleFile("c1", FILE_A, "bisect", runner)]);
+    expect(runner.fileRuns).toEqual([`c1:${FILE_A}`, `c1:${FILE_A}`]);
   });
 
-  it("suite single-flight: two concurrent single-file runs of one file at one commit invoke the runner once and share one stored row", async () => {
-    const lw = newWorld();
-    const runner = new StubRunner();
-    const [a, b] = await Promise.all([
-      suiteService(lw, "holder-a").runSingleFile("c1", "packages/x/tests/a.test.ts", "confirm", runner),
-      suiteService(lw, "holder-b").runSingleFile("c1", "packages/x/tests/a.test.ts", "confirm", runner),
-    ]);
-    expect(runner.fileRuns).toEqual(["c1:packages/x/tests/a.test.ts"]);
-    expect(a.ok && b.ok).toBe(true);
-    if (a.ok && b.ok) expect(a.value).toEqual(b.value);
-    expect(lw.acquired).toContain(suiteFileLeaseKey("c1", "packages/x/tests/a.test.ts"));
-  });
-
-  it("suite single-flight: lookups at two different commits run concurrently, each runner invoked once, neither waits on the other", async () => {
+  it("suite single-flight: runs at two different commits run concurrently, each runner invoked once, neither waits on the other", async () => {
     const lw = newWorld();
     const runner = new StubRunner();
     const hold = gate();
-    runner.gates.set("c1", hold.wait); // c1's suite run stays open until c2 has finished
-    const first = suiteService(lw, "holder-a").lookupOrRun("c1", runner);
+    runner.gates.set("c1", hold.wait); // c1's file run stays open until c2 has finished
+    const first = suiteService(lw, "holder-a").runSingleFile("c1", FILE_A, "bisect", runner);
     await pause(10);
-    const second = await suiteService(lw, "holder-b").lookupOrRun("c2", runner);
+    const second = await suiteService(lw, "holder-b").runSingleFile("c2", FILE_A, "bisect", runner);
     expect(second.ok).toBe(true);
-    expect(runner.suiteRuns.sort()).toEqual(["c1", "c2"]);
+    expect(runner.fileRuns.sort()).toEqual([`c1:${FILE_A}`, `c2:${FILE_A}`]);
     hold.open();
     expect((await first).ok).toBe(true);
-    expect(runner.suiteRuns.sort()).toEqual(["c1", "c2"]);
     expect(lw.sleeps).toEqual([]); // no waiter existed: the keys differ
   });
 
-  it("suite single-flight: a waiter whose holder's lease expires without a stored result runs the suite itself, polling at most every 10 seconds", async () => {
+  it("suite single-flight: two files at one commit are different keys and do not wait on each other", async () => {
     const lw = newWorld();
     const runner = new StubRunner();
-    const dead = await lw.store.acquireLease(suiteLeaseKey("c1"), "dead-holder", lw.iso(), lw.iso(lw.now + REVIEW_LEASE_EXPIRY_MS));
+    await Promise.all([suiteService(lw, "holder-a").runSingleFile("c1", FILE_A, "bisect", runner), suiteService(lw, "holder-b").runSingleFile("c1", FILE_B, "bisect", runner)]);
+    expect(runner.fileRuns.sort()).toEqual([`c1:${FILE_A}`, `c1:${FILE_B}`]);
+    expect(lw.sleeps).toEqual([]);
+  });
+
+  it("suite single-flight: a waiter whose holder's lease expires without a stored row runs the file itself, polling at most every 10 seconds", async () => {
+    const lw = newWorld();
+    const runner = new StubRunner();
+    const dead = await lw.store.acquireLease(suiteFileLeaseKey("c1", FILE_A), "dead-holder", lw.iso(), lw.iso(lw.now + REVIEW_LEASE_EXPIRY_MS));
     expect(dead).toMatchObject({ ok: true, value: { acquired: true } });
     lw.advanceOnSleepMs = 60_000; // each poll the clock moves a minute: the dead lease expires after ten of them
-    const looked = await suiteService(lw, "waiter").lookupOrRun("c1", runner);
-    expect(looked.ok && looked.value.status).toBe("measured");
-    expect(runner.suiteRuns).toEqual(["c1"]);
+    const ran = await suiteService(lw, "waiter").runSingleFile("c1", FILE_A, "bisect", runner);
+    expect(ran.ok && ran.value.exit_code).toBe(0);
+    expect(runner.fileRuns).toEqual([`c1:${FILE_A}`]);
     expect(lw.sleeps.length).toBeGreaterThanOrEqual(2);
     expect(Math.max(...lw.sleeps)).toBeLessThanOrEqual(LEASE_WAIT_POLL_MS);
   });
 
-  it("suite single-flight: a waiter re-reads the store after the wait and runs nothing when the holder stored a measured result", async () => {
+  it("suite single-flight: a waiter re-reads the store after the wait and runs nothing when the holder stored the row", async () => {
     const lw = newWorld();
     const runner = new StubRunner();
-    const holderRun = suiteService(lw, "holder-a").lookupOrRun("c1", runner);
+    const holderRun = suiteService(lw, "holder-a").runSingleFile("c1", FILE_A, "bisect", runner);
     await pause(5);
     const waiterRunner = new StubRunner();
-    const waited = await suiteService(lw, "holder-b").lookupOrRun("c1", waiterRunner);
+    const waited = await suiteService(lw, "holder-b").runSingleFile("c1", FILE_A, "bisect", waiterRunner);
     const held = await holderRun;
-    expect(waiterRunner.suiteRuns).toEqual([]);
-    expect(waited.ok && held.ok && waited.value.id === held.value.id).toBe(true);
+    expect(waiterRunner.fileRuns).toEqual([]);
+    expect(waited.ok && held.ok && waited.value.measured_at === held.value.measured_at && waited.value.output_tail === held.value.output_tail).toBe(true);
   });
 });
 

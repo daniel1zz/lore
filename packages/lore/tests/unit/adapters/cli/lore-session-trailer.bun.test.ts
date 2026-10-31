@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * AC-OWN-4 (spec-multi-session-concurrency-queryable-ownership-checkout) —
  * a commit created under a claim carries the `Lore-Session: <id>` git

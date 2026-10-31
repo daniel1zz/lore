@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ensureRequirementsDocSlugViaEntry } from "../../packages/lore/tests/helpers/parented-create.js";
+import { ensureRequirementsDocSlugViaEntry } from "../../packages/lore/tests/helpers/parented-create-via-entry.js";
 import { type CorpusReader, type DropSetRow, evaluateDropSet, readDropSet, runCheck } from "../check-evidence-identity-drop-set.js";
 import { type Dump, diffDumps } from "../generate-evidence-identity-drop-set.js";
 

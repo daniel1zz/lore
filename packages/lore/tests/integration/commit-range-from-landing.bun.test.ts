@@ -1,4 +1,7 @@
 // @reads assets/project/reference-transaction
+// @spawns packages/lore/src/index.ts -- the main-guard fixture runs the lore entry point as a child process
+// @spawns-external git builds a throwaway git repository the test runs against
+// @spawns-external sh the main-guard fixture resolves the real git path through sh
 /**
  * A task's commit range is a fact of its LANDING (`lore integrate`), not of its last claim.
  * Throwaway git repos + InMemoryStore only (never the repo's `.lore/`).

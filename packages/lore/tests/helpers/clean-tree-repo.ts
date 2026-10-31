@@ -1,3 +1,4 @@
+// @spawns-external git initialises the throwaway repository (declared once here: every test that reaches this helper inherits it)
 /**
  * Test helper: turns a throwaway directory into a git repository whose working tree stays CLEAN
  * however the `.lore/` corpus inside it is edited.

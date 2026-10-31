@@ -1,3 +1,4 @@
+// @spawns-external sh runs short shell scripts (a hung grandchild, an exit code) under the process-group runner
 /**
  * Tests for run-process-group.ts (task-skill-implement-tg-24): a hung child is killed with its whole
  * process group and the timeout fails loud, so no test leaves a child behind.

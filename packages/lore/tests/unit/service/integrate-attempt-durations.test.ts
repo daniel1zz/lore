@@ -1,4 +1,7 @@
 // @reads assets/project/reference-transaction
+// @spawns packages/lore/src/index.ts -- the main-guard fixture runs the lore entry point as a child process
+// @spawns-external git builds a throwaway git repository the test runs against
+// @spawns-external sh the main-guard fixture resolves the real git path through sh
 /**
  * Per-attempt phase durations of `lore integrate` (task-integrate-records-per-attempt-phase-durations-so-the-floor).
  *

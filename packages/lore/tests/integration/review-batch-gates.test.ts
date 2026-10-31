@@ -34,6 +34,8 @@ import { CorpusService } from "../../src/service/corpus-service.js";
 import { GateEnforcer } from "../../src/service/gate-enforcer.js";
 import { RecordLockService } from "../../src/service/record-lock-service.js";
 import { rootCauseOf } from "../../src/service/root-cause-fingerprint.js";
+import { createGateAcceptanceLog } from "../../src/service/gate-acceptance-service.js";
+import { humanAcceptGate } from "../helpers/gate-acceptance-log.js";
 import { actedStore } from "../live-invocation.js";
 import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/service/issue-filing-service.js";
 import { coverFailedDimensions } from "../../src/service/milestone-review-inputs.js";
@@ -116,6 +118,7 @@ class World {
     return new ReviewBatchRunner({
       getPlanBundle: async (ref) => ok(this.find(ref).bundle),
       listReviewDocs: async (planId) => ok(this.find(planId).docs),
+      acceptanceLog: createGateAcceptanceLog(this.store),
       issueCoverage: async (planId, failed) => {
         const slug = this.find(planId).slug;
         const entries = this.issues.links
@@ -188,16 +191,14 @@ async function runOne(world: World, slug: string, holder = "batch"): Promise<Bat
   return row;
 }
 
-/** Records the plan's acceptance of a gate the way `GateAcceptanceService` does: a flagged known defect of that dimension. */
-function acceptGate(plan: WorldPlan, dimension: MilestoneDimension, issue: number): void {
-  const extra = plan.bundle.plan.extra as Record<string, unknown>;
-  const existing = (extra["known_defects"] as unknown[] | undefined) ?? [];
+/** Records the plan's acceptance of a gate the way a human does: an effective human accept in the decision log (#538). */
+async function acceptGate(world: World, plan: WorldPlan, dimension: MilestoneDimension): Promise<void> {
   // the acceptance is bound to the root cause of the failure the fake judge gives this dimension (its cites)
   const verdict = plan.verdicts[dimension];
   const cites = verdict === "fail" ? [`src/${dimension}.ts`] : [`${dimension}:subject`];
   const cause = rootCauseOf({ plan: plan.slug, dimension, reason: `${dimension} ${String(verdict)}`, reference: "fixture", cites, reviewSlug: "fixture" });
   if (!cause.ok) throw new Error(JSON.stringify(cause.error));
-  extra["known_defects"] = [...existing, { repo_id: 1, number: issue, dimension, fingerprint: cause.value.fingerprint, gate_accepted: true }];
+  await humanAcceptGate(world.store, plan.bundle.plan.id, dimension, cause.value.fingerprint);
 }
 
 describe("AC-AF-6 a failed or not-measured gate keeps the plan open", () => {
@@ -254,7 +255,7 @@ describe("AC-AF-6 a failed or not-measured gate keeps the plan open", () => {
     expect((await runOne(world, "p-sec")).outcome).toBe("kept-open");
     expect(world.issues.links).toEqual([{ plan: "p-sec", issue: 101, dimensions: ["security"] }]);
     expect(plan.archived).toBe(false);
-    acceptGate(plan, "security", 101);
+    await acceptGate(world, plan, "security");
     const closed = await runOne(world, "p-sec", "batch-3");
     expect(closed).toMatchObject({ outcome: "accepted-with-known-defects", failed: ["security"] });
     expect(plan.archived).toBe(true);
@@ -263,7 +264,7 @@ describe("AC-AF-6 a failed or not-measured gate keeps the plan open", () => {
   it("AC-AF-6 BOUNDARY: an accepted gate does not hide a second, unaccepted gate", async () => {
     const world = new World();
     const plan = world.add(makePlan("p-two", { security: "fail", correctness_vs_acs: "not-measured" }));
-    acceptGate(plan, "security", 101);
+    await acceptGate(world, plan, "security");
     const row = await runOne(world, "p-two");
     expect(row.outcome).toBe("kept-open");
     expect(row.detail).toContain("correctness_vs_acs");
@@ -426,9 +427,14 @@ async function handWorld(verdicts: Partial<Record<MilestoneDimension, "fail" | "
     const verdict = verdicts[entry.dimension] ?? "fail";
     const cause = rootCauseOf({ plan: "p", dimension: entry.dimension, reason: "x", reference: "r", cites: handCites(entry.dimension, verdict, entry.causeVariant ?? ""), reviewSlug: "r" });
     if (!cause.ok) throw new Error(JSON.stringify(cause.error));
-    return { repo_id: HAND_REPO_ID, number: HAND_ISSUE, dimension: entry.dimension, fingerprint: cause.value.fingerprint, ...(entry.gateAccepted === true ? { gate_accepted: true } : {}) };
+    return { repo_id: HAND_REPO_ID, number: HAND_ISSUE, dimension: entry.dimension, fingerprint: cause.value.fingerprint };
   });
   const plan = await seedDoc(store, handDoc("plan", "Hand plan", known.length > 0 ? { known_defects: known } : {}, "approved"));
+  // an accepted gate is a human accept in the decision log for THIS plan, gate and fingerprint (#538), never a stored flag
+  for (const [index, entry] of entries.entries()) {
+    const fingerprint = known[index]?.fingerprint;
+    if (entry.gateAccepted === true && fingerprint !== undefined) await humanAcceptGate(store, plan.id, entry.dimension, fingerprint);
+  }
   await seedDoc(store, handDoc("task", "Landed task", { plan_id: plan.id }, "archived", plan.id));
   const bundle = await corpus.getPlanBundle(plan.id);
   if (!bundle.ok) throw new Error(JSON.stringify(bundle.error));

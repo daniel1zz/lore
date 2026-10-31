@@ -1443,9 +1443,6 @@ export interface StoreInterface {
   /** The lease row as stored, expired or not; `null` when absent. */
   readLease(name: string): Promise<Result<LeaseRecord | null, LoreError>>;
 
-  /** Every lease row whose name starts with `prefix`, as stored (expired or not), by name; a caller judges liveness by `expires_at` (BR-1511, join a suite in flight). */
-  listLeases(prefix: string): Promise<Result<LeaseRecord[], LoreError>>;
-
   /**
    * Append one `check_outcomes` row per element of `rows` in ONE write (migration-033, BR-1373). Append-only:
    * there is no update or delete. An empty array writes nothing.

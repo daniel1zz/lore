@@ -1,4 +1,5 @@
 // @reads assets/**
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * @spec_ref spec-worktree-removal-is-decided-by-who-is-inside-not-by-how (AC-WL-2; D1; BR-1070)
  *

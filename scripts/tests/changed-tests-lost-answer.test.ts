@@ -1,3 +1,5 @@
+// @spawns-external git the module under test's default git runner (the test injects fakes for the lost-answer cases)
+// @spawns-external bun the module under test's default build and test runners (never started here)
 /**
  * TG-53: changed-tests.ts must not read a lost git answer (exit 0, empty stdout) as a real result.
  * Spawn is injected; no real git child runs.
