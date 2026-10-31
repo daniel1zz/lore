@@ -41,7 +41,7 @@
 import { z } from "zod";
 import type { Result } from "./errors.js";
 import {
-  checkJsonSchemaSupported,
+  checkJsonSchemaUsable,
   readFieldPath,
   schemaAtFieldPath,
   validateAgainstJsonSchema,
@@ -101,7 +101,7 @@ export const templateSchema = z
     render: z.array(templateRenderSectionSchema).min(1, "a template needs at least one render section"),
   })
   .superRefine((template, ctx) => {
-    for (const problem of checkJsonSchemaSupported(template.fields)) {
+    for (const problem of checkJsonSchemaUsable(template.fields)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: problem, path: ["fields"] });
     }
     if (template.fields.type !== "object") {

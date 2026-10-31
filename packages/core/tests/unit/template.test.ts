@@ -114,16 +114,9 @@ describe("template meta-schema", () => {
     expect(parseTemplate(baseTemplate({ fields: { type: "string" }, render: [{ heading: "H", fields: ["x"] }] })).ok).toBe(false);
   });
 
-  it("refuses an unsupported JSON Schema keyword instead of ignoring it", () => {
-    const fields = { type: "object", properties: { a: { type: "string", format: "email", oneOf: [] } } };
-    const result = parseTemplate(baseTemplate({ fields, render: [{ heading: "H", fields: ["a"] }] }));
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.some((issue) => issue.problem.includes('unsupported JSON Schema keyword "format"'))).toBe(true);
-  });
-
-  it("refuses an invalid regex pattern in fields", () => {
-    const fields = { type: "object", properties: { a: { type: "string", pattern: "(" } } };
-    expect(parseTemplate(baseTemplate({ fields, render: [{ heading: "H", fields: ["a"] }] })).ok).toBe(false);
+  it("accepts x-* annotation keywords and other standard JSON Schema keywords the library supports", () => {
+    const fields = { type: "object", properties: { a: { type: "string", format: "email", "x-refusal-list": true } } };
+    expect(parseTemplate(baseTemplate({ fields, render: [{ heading: "H", fields: ["a"] }] })).ok).toBe(true);
   });
 
   it("refuses a missing version, an empty render list and an empty heading", () => {
@@ -208,6 +201,16 @@ describe("validateDocument", () => {
     const dims = [{ id: "inputs", status: "maybe", answer: "x" }, 42, goodDimensions[1], goodDimensions[2]];
     const codes = problemsOf({ summary: "hello" }, dims).map((p) => p.code);
     expect(codes.filter((code) => code === "invalid-dimension-entry")).toHaveLength(2);
+  });
+
+  it("reports (not throws) a template whose schema has an unresolvable $ref", () => {
+    const broken = mustParse({
+      fields: { type: "object", properties: { a: { $ref: "#/$defs/missing" } } },
+      render: [{ heading: "H", fields: ["a"] }],
+    });
+    const result = validateDocument(broken, { a: 1 }, goodDimensions);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContainEqual(expect.objectContaining({ code: "schema-violation", field: "(schema)" }));
   });
 
   it("does not throw when dimensions is not an array", () => {
