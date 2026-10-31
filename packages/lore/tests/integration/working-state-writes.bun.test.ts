@@ -101,9 +101,9 @@ interface KeyCase {
 }
 
 const CASES: readonly KeyCase[] = [
-  { type: "task", key: "claim", value: { by: "agent:x", at: "2026-10-26T00:00:00.000Z" }, input: (p) => ({ type: "task", title: "T", parent_id: p, content: "b", extra: { plan_id: p } }) },
-  { type: "task", key: "verification_evidence", value: [{ oracle: "manual", command: "c", result: "pass" }], input: (p) => ({ type: "task", title: "T", parent_id: p, content: "b", extra: { plan_id: p } }) },
-  { type: "task", key: "landing", value: { branch: "b", commit: "abc" }, input: (p) => ({ type: "task", title: "T", parent_id: p, content: "b", extra: { plan_id: p } }) },
+  { type: "task", key: "claim", value: { by: "agent:x", at: "2026-10-26T00:00:00.000Z" }, input: (p) => ({ type: "task", title: "T", parent_id: p, content: "b", extra: { kind: "code", plan_id: p } }) },
+  { type: "task", key: "verification_evidence", value: [{ oracle: "manual", command: "c", result: "pass" }], input: (p) => ({ type: "task", title: "T", parent_id: p, content: "b", extra: { kind: "code", plan_id: p } }) },
+  { type: "task", key: "landing", value: { branch: "b", commit: "abc" }, input: (p) => ({ type: "task", title: "T", parent_id: p, content: "b", extra: { kind: "code", plan_id: p } }) },
   { type: "phase", key: "checklist", value: [{ text: "item", done: true }], input: (p) => ({ type: "phase", title: "P", parent_id: p, content: "b", extra: { plan_id: p } }) },
   { type: "plan", key: "progress", value: { done: 1, total: 2 }, input: () => ({ type: "plan", title: "Pl", content: "b" }) },
   { type: "spec", key: "code_anchors", value: ["a.ts"], input: () => ({ type: "spec", title: "S", content: "b" }) },
@@ -147,7 +147,7 @@ for (const kind of ["sqlite", "turso", "memory"] as const) {
     it("STATE: evidence append, landing replace, release; replay from the create row reproduces the final state", async () => {
       const { store, corpus, tasks, versions } = compose(kind);
       const plan = await create(corpus, { type: "plan", title: "Plan", content: "b" });
-      const task = await create(corpus, { type: "task", title: "T", parent_id: plan.id, content: "b", extra: { plan_id: plan.id } });
+      const task = await create(corpus, { type: "task", title: "T", parent_id: plan.id, content: "b", extra: { kind: "code", plan_id: plan.id } });
       const createRow = (await versionRows(store, task.id)).find((v) => v.action === "create")!;
       const rowsAtStart = (await versionRows(store, task.id)).length;
 
@@ -159,7 +159,7 @@ for (const kind of ["sqlite", "turso", "memory"] as const) {
         output_tail: "captured output",
         capture_source: "self-report" as const,
       });
-      expect((await tasks.claim(task.id, { by: "alice", harnessRun: runOfName("alice") })).ok).toBe(true);
+      expect((await tasks.claim(task.id, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-working-state" })).ok).toBe(true);
       expect((await tasks.addEvidence(task.id, evidence("first"))).ok).toBe(true);
       expect((await tasks.addEvidence(task.id, evidence("second"))).ok).toBe(true);
       const mid = await reload(store, task.id);

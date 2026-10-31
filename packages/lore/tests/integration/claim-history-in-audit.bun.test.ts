@@ -57,8 +57,8 @@ for (const kind of ["sqlite", "turso", "memory"] as const) {
       const id = created.value.id;
       const rowsBefore = (await store.findVersions(id)).ok ? ((await store.findVersions(id)) as { value: unknown[] }).value.length : -1;
 
-      expect((await tasks.claim(id, { by: "run-a", harnessRun: runOfName("run-a") })).ok).toBe(true);
-      expect((await tasks.claim(id, { by: "run-b", harnessRun: runOfName("run-b"), steal: true })).ok).toBe(true);
+      expect((await tasks.claim(id, { by: "run-a", harnessRun: runOfName("run-a"), worktree: "wt-hc10-a" })).ok).toBe(true);
+      expect((await tasks.claim(id, { by: "run-b", harnessRun: runOfName("run-b"), worktree: "wt-hc10-b", steal: true })).ok).toBe(true);
       expect((await tasks.release(id, { by: "run-c", harnessRun: runOfName("run-c"), force: true, reason: "worker vanished" })).ok).toBe(true);
 
       const versions = await store.findVersions(id);

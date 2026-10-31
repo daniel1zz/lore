@@ -341,7 +341,7 @@ describe("AC-HID-4: the schema upgrade expires the claims that name no run", () 
   });
 
   it("the upgraded corpus is usable and a fresh claim names its run", () => {
-    expect(corpus.lore(["claim", legacy], AGENT_RUN).exitCode).toBe(0);
+    expect(corpus.lore(["claim", legacy, "--worktree", "wt-legacy-upgraded"], AGENT_RUN).exitCode).toBe(0);
     expect((docRow(corpus, legacy).extra["claim"] as { harness_run: string }).harness_run).toBe(AGENT_RUN.run);
   });
 });
