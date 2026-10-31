@@ -14,6 +14,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { OwnDiffFixture } from "../helpers/own-diff-fixture.js";
+import { approvedTask, DONE_CONTRACT_FIXTURE_CONFIG } from "./support/own-diff-contract.js";
 
 const BASE = {
   "src/a.ts": "export const a = 1;\n",
@@ -35,13 +36,14 @@ function statusOf(f: OwnDiffFixture, slug: string): string {
 
 describe("AC-LB-4 — landing archives tasks whose floors are met", () => {
   it("(1) complete attested evidence: integrate archives the task, no separate lore done", () => {
-    const f = new OwnDiffFixture();
+    const f = new OwnDiffFixture(DONE_CONTRACT_FIXTURE_CONFIG);
     fx = f;
     f.commitOnMain(BASE, "base sources");
     f.makeBranch("branch-x", { "src/a.ts": "export const a = 2;\n" });
-    const task = f.createTask("T", ["src/a.ts", "tests/a.test.ts"], "code");
+    // reason: the landing runs the task's contract oracles itself (its anchored test file whole, typecheck) and records the rows
+    // (AC-DCS2-1), so the task is approved with its contract and holds no evidence of its own before the landing.
+    const task = approvedTask(f, "T", ["src/a.ts", "tests/a.test.ts"]);
     f.claim(task, "branch-x");
-    f.mustLore(["evidence", task, "--oracle", "test", "--command", "bun test tests/a.test.ts", "--result", "pass", "--capture"], f.holderEnvOf(task));
     f.release(task);
     f.mustLore(["set", f.defaultPlan, "--status", "approved"]);
 
@@ -51,14 +53,16 @@ describe("AC-LB-4 — landing archives tasks whose floors are met", () => {
     expect(statusOf(f, task)).toBe("archived");
   }, 300_000);
 
-  it("(2) a filtered pass only: exit 0, the branch is on main, the task stays unarchived, stdout names the floor and the evidence command", () => {
-    const f = new OwnDiffFixture();
+  // reason: the unfiltered whole-file run of an anchored test file is an oracle `lore integrate` runs itself (AC-DCS2-1), so a landing can
+  // no longer end with that floor unmet: the case that keeps a landed task unarchived with its floor named is now the red run, which
+  // only a runner can produce before the work and which the landing cannot invent (approve without a waiver requires it, AC-DCS1-5).
+  it("(2) no red run on record: exit 0, the branch is on main, the task stays unarchived, stdout names the red-first floor and the evidence command", () => {
+    const f = new OwnDiffFixture(DONE_CONTRACT_FIXTURE_CONFIG);
     fx = f;
     f.commitOnMain(BASE, "base sources");
     f.makeBranch("branch-x2", { "src/a.ts": "export const a = 3;\n" });
-    const task = f.createTask("T2", ["src/a.ts", "tests/b.test.ts"], "code");
+    const task = approvedTask(f, "T2", ["src/a.ts", "tests/b.test.ts"], undefined, false);
     f.claim(task, "branch-x2");
-    f.mustLore(["evidence", task, "--oracle", "test", "--command", 'bun test tests/b.test.ts -t "b case"', "--result", "pass", "--capture"], f.holderEnvOf(task));
     f.release(task);
     f.mustLore(["set", f.defaultPlan, "--status", "approved"]);
     const mainBefore = f.git(["rev-parse", "refs/heads/main"]);
@@ -72,8 +76,7 @@ describe("AC-LB-4 — landing archives tasks whose floors are met", () => {
     // git exits 1 (and the helper throws) unless the branch tip is an ancestor of main
     f.git(["merge-base", "--is-ancestor", "branch-x2", "refs/heads/main"]);
     expect(statusOf(f, task)).not.toBe("archived");
-    expect(landed.stdout).toContain("unfiltered-test-file");
-    expect(landed.stdout).toContain(`lore evidence ${task} --oracle test --command`);
-    expect(landed.stdout).toContain("tests/b.test.ts");
+    expect(landed.stdout).toContain("red-first");
+    expect(landed.stdout).toContain(`lore evidence ${task} --oracle`);
   }, 300_000);
 });

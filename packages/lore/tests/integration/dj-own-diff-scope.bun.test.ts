@@ -14,6 +14,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { OwnDiffFixture } from "../helpers/own-diff-fixture.js";
+import { approvedTask, DONE_CONTRACT_FIXTURE_CONFIG, statusOf } from "./support/own-diff-contract.js";
 
 const BASE = {
   "src/a.ts": "export function alpha(): number {\n  return 1;\n}\n",
@@ -29,12 +30,13 @@ afterEach(() => {
 });
 
 function setup(): { fx: OwnDiffFixture; taskT: string; taskU: string } {
-  const f = new OwnDiffFixture();
+  const f = new OwnDiffFixture(DONE_CONTRACT_FIXTURE_CONFIG);
   fx = f;
   f.commitOnMain(BASE, "base sources");
   f.makeBranch("branch-y", { "y.txt": "y\n" });
-  const taskT = f.createTask("T", ["src/a.ts"], "code");
-  const taskU = f.createTask("U", ["src/b.ts#bar", "src/e.ts"], "code");
+  // reason: integrate selects only approved tasks holding a stored contract (AC-DCS2-1), so every task is approved before its claim
+  const taskT = approvedTask(f, "T", ["src/a.ts"]);
+  const taskU = approvedTask(f, "U", ["src/b.ts#bar", "src/e.ts"]);
   f.claim(taskU, "branch-y");
   return { fx: f, taskT, taskU };
 }
@@ -57,7 +59,7 @@ describe("AC-DJ-1 — the own diff is judged against the other live claims", () 
 
   it("(2) a changed symbol and a deleted file held by another live claim are refused; (3) the branch lands once the holder is archived", () => {
     const { fx: f, taskU } = setup();
-    const taskT2 = f.createTask("T2", ["src/a2.ts"], "code");
+    const taskT2 = approvedTask(f, "T2", ["src/a2.ts"]);
     f.makeBranch("branch-x2", {
       "src/b.ts": "export function foo(): number {\n  return 1;\n}\n\nexport function bar(): number {\n  return 22;\n}\n",
       "src/e.ts": null,
@@ -75,10 +77,10 @@ describe("AC-DJ-1 — the own diff is judged against the other live claims", () 
     expect(refused.stderr).toContain(taskU);
     expect(f.observableState()).toBe(before);
 
-    // U's own branch lands, then U is archived: nothing is held any more
+    // U's own branch lands, and the landing archives U (its contract oracles ran at the landing, AC-DCS2-1): nothing is held any more
     const yLanded = f.integrate("branch-y");
     expect(yLanded.exitCode, yLanded.text).toBe(0);
-    f.archive(taskU);
+    expect(statusOf(f, taskU)).toBe("archived");
 
     const landed = f.integrate("branch-x2");
 
@@ -92,13 +94,13 @@ describe("AC-DJ-1 — the own diff is judged against the other live claims", () 
     f.makeBranch("branch-x3m", { "src/am.ts": "export const am = 1;\n" });
     f.commitOnMain({ "src/e.ts": "export const e = 2;\n" }, "main moves e.ts after the branches were cut");
     f.mergeIntoBranch("branch-x3m", "main");
-    const t3 = f.createTask("T3", ["src/a.ts"], "code");
+    const t3 = approvedTask(f, "T3", ["src/a.ts"]);
     f.claim(t3, "branch-x3");
 
     const unmerged = f.integrate("branch-x3");
     expect(unmerged.exitCode, unmerged.text).toBe(0);
 
-    const t3m = f.createTask("T3m", ["src/am.ts"], "code");
+    const t3m = approvedTask(f, "T3m", ["src/am.ts"]);
     f.claim(t3m, "branch-x3m");
     const merged = f.integrate("branch-x3m");
     expect(merged.exitCode, merged.text).toBe(0);

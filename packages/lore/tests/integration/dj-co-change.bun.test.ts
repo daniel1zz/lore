@@ -13,6 +13,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { OwnDiffFixture } from "../helpers/own-diff-fixture.js";
+import { approvedTask, DONE_CONTRACT_FIXTURE_CONFIG } from "./support/own-diff-contract.js";
 
 const RULE = [
   "  turn_end:",
@@ -31,9 +32,9 @@ afterEach(() => {
 
 describe("AC-DJ-2 — co-change is judged on the branch's own change", () => {
   it("(1) a trigger without its required file is refused; (2) adding the required file lands, and it is recorded outside the anchors", () => {
-    const f = new OwnDiffFixture(RULE);
+    const f = new OwnDiffFixture([...RULE, ...DONE_CONTRACT_FIXTURE_CONFIG]);
     fx = f;
-    const task = f.createTask("Assets", ["assets/"], "code");
+    const task = approvedTask(f, "Assets", ["assets/"]);
     f.makeBranch("branch-assets", { "assets/x.txt": "x\n" });
     f.claim(task, "branch-assets");
     const before = f.observableState();
@@ -53,9 +54,9 @@ describe("AC-DJ-2 — co-change is judged on the branch's own change", () => {
   }, 300_000);
 
   it("(3) a change that does not match the trigger needs no co-change", () => {
-    const f = new OwnDiffFixture(RULE);
+    const f = new OwnDiffFixture([...RULE, ...DONE_CONTRACT_FIXTURE_CONFIG]);
     fx = f;
-    const task = f.createTask("Docs", ["docs/"], "code");
+    const task = approvedTask(f, "Docs", ["docs/"]);
     f.makeBranch("branch-docs", { "docs/y.txt": "y\n" });
     f.claim(task, "branch-docs");
 
