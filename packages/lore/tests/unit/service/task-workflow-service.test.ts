@@ -33,7 +33,6 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
-import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import { AC_REF_NOT_ON_RESOLVED_GOVERNING_SPEC } from "../../../src/service/ac-ref-messages.js";
@@ -61,7 +60,7 @@ import { runOfName } from "../../helpers/test-run-identity.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
-import { LANDING_COMMIT, landedPass, landedTaskExtra, makeNoChangeRepo, testFileCommand, unitDoneContract } from "./done-contract-unit-fixture.js";
+import { LANDING_COMMIT, landedPass, landedTaskExtra, makeNoChangeRepo, testFileCommand } from "./done-contract-unit-fixture.js";
 import { createRealWorktreeProbe } from "../../../src/service/worktree-cleanup.js";
 // ─── Capturing telemetry spy (mirrors corpus-service-telemetry.test.ts) ──────
 
@@ -92,7 +91,6 @@ function makeServices(ttl = 120) {
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const telemetry = new CapturingTelemetry();
   const taskWorkflowService = new TaskWorkflowService(store, telemetry, { claimTtlMinutes: ttl }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
-  taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   return { store, corpusService, taskWorkflowService, telemetry };
 }
 
@@ -105,7 +103,6 @@ function makeServicesOnRepo(repoDir: string, ttl = 120) {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: ttl }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, createRealWorktreeProbe(repoDir));
-  taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort());
   return { store, corpusService, taskWorkflowService };
 }
 
@@ -129,7 +126,6 @@ function makeServicesWithAcPort(
     return resolveDeclaredAcIds(planId);
   };
   const taskWorkflowService = new TaskWorkflowService(store, telemetry, { claimTtlMinutes: ttl }, spiedPort, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
-  taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   return {
     store,
     corpusService,
@@ -234,12 +230,6 @@ function attestedPass(overrides: Partial<VerifiedEvidenceInput> = {}): VerifiedE
     capture_source: "runner",
     ...overrides,
   };
-}
-
-/** The landed-task `extra` of a code task whose stored contract holds no oracle (so only the attested-pass floor stands). */
-function noOracleContractExtra(): Record<string, unknown> {
-  const base = landedTaskExtra();
-  return { ...base, done_contract: { ...unitDoneContract(), oracles: [] } };
 }
 
 // ─── HAPPY — claim → evidence → release → ready round-trip ──────────────────
@@ -1173,7 +1163,6 @@ function makeServicesWithRealAcPorts(ttl = 120) {
     undefined,
     corpusService.resolveDeclaredAcIdsForAdhocTask.bind(corpusService), undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
   );
-  taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   return { store, corpusService, acService, taskWorkflowService, telemetry };
 }
 
@@ -2519,16 +2508,12 @@ describe("REGRESSION — the interaction the floor exists to catch: two tests, e
   });
 });
 
-// ─── done()'s attested-pass floor + its audited escape hatch ────────────────
+// ─── done()'s attested-pass floor ───────────────────────────────────────────
 // (adr-lore-done-requires-a-runner-attested-pass-the-sixth-false,
 //  task-lore-done-accepts-an-unattested-self-reported-pass-as)
 //
-// The pre-existing `result:pass` floor now ALSO requires `attestation !==
-// undefined` — a self-reported-only pass (the ONLY shape any CLI/MCP `lore
-// evidence` write can produce) no longer suffices to archive. The ONE audited
-// bypass is `opts.overrideReason` (`commands/done.ts`'s `--override-attestation
-// "<reason>"`), which never relaxes the independent red-first / unfiltered-
-// test-file-run floors below it.
+// The `result:pass` floor also requires `attestation !== undefined` — a self-reported-only pass
+// no longer suffices to archive, and nothing waives it (the override was retired, D45).
 
 describe("HAPPY — done() accepts a task whose ONLY evidence is a runner-attested pass", () => {
   it("an attested pass with NO self-reported evidence at all archives normally", async () => {
@@ -2546,7 +2531,7 @@ describe("HAPPY — done() accepts a task whose ONLY evidence is a runner-attest
 });
 
 describe("NEGATIVE — done() refuses a self-reported-only pass, naming both repairs (AC1)", () => {
-  it("only a self-reported result:pass row → VALIDATION_ERROR naming lore verify AND the escape hatch", async () => {
+  it("only a self-reported result:pass row → VALIDATION_ERROR naming lore verify AND lore evidence --capture", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
@@ -2569,27 +2554,13 @@ describe("NEGATIVE — done() refuses a self-reported-only pass, naming both rep
     expect(doneResult.error.message).toContain("capture_source");
     expect(doneResult.error.message).not.toContain("runner-captured");
     expect(doneResult.error.message).toContain("lore verify");
-    expect(doneResult.error.message).toContain("--override-attestation");
+    expect(doneResult.error.message).toContain("lore evidence");
+    expect(doneResult.error.message).not.toContain("--override-attestation");
 
     const doc = await corpusService.get(taskId);
     expect(doc.ok).toBe(true);
     if (!doc.ok) return;
     expect(doc.value.doc.status).toBe("draft"); // unchanged — refusal never partially writes
-  });
-
-  it("a blank overrideReason passed directly to the service is refused (belt-and-suspenders, mirrors the CLI's own exit-2 usage check)", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
-    const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId);
-
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
-
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice"), overrideReason: "   " });
-    expect(doneResult.ok).toBe(false);
-    if (doneResult.ok) return;
-    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
-    if (doneResult.error.code !== "VALIDATION_ERROR") return;
-    expect(doneResult.error.field).toBe("overrideReason");
   });
 });
 
@@ -2647,63 +2618,8 @@ describe("BOUNDARY — an ATTESTED non-pass result never satisfies the floor (AC
   });
 });
 
-describe("STATE — the escape hatch archives AND writes the reason verbatim to every step's audit entry (AC-2)", () => {
-  it("overrideReason supplied on a self-reported-only task archives and stamps every audit row", async () => {
-    const { corpusService, taskWorkflowService, store } = makeServices();
-    const planId = await createPlan(corpusService);
-    // reason: the override waives ONLY the attested-pass floor; the contract-oracles floor still judges every oracle (see the
-    // refusal case below), so the archive path is exercised with a contract that has no oracle left to judge.
-    const taskId = await createTask(corpusService, planId, "Test Task", noOracleContractExtra());
-
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
-
-    const REASON = "manual browser check: verified in staging, screenshot attached to PR #123";
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice"), overrideReason: REASON });
-    expect(doneResult.ok).toBe(true);
-    if (!doneResult.ok) return;
-    expect(doneResult.value.transitions).toEqual(["approved", "active", "archived"]);
-
-    const auditResult = await store.queryAudit({ doc_id: taskId });
-    expect(auditResult.ok).toBe(true);
-    if (!auditResult.ok) return;
-    const doneSteps = auditResult.value.filter((e) => e.details?.["done"] === true);
-    expect(doneSteps).toHaveLength(3);
-    // every step carries the reason VERBATIM, not merely a truthy marker.
-    expect(doneSteps.every((e) => e.details?.["override_reason"] === REASON)).toBe(true);
-    expect(doneSteps.every((e) => e.details?.["attestation_overridden"] === true)).toBe(true);
-  });
-});
-
-describe("NEGATIVE — the escape hatch never waives a contract oracle (AC-DCS1-7: the oracle floor follows the attested-pass floor)", () => {
-  it("overrideReason on a task whose typecheck oracle has no counted pass is refused [floor: contract-oracles], nothing archived", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
-    const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId);
-
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
-
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice"), overrideReason: "manual check, no runner row" });
-    expect(doneResult.ok).toBe(false);
-    if (doneResult.ok) return;
-    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
-    if (doneResult.error.code !== "VALIDATION_ERROR") return;
-    expect(doneResult.error.message).toContain("[floor: contract-oracles]");
-    expect(doneResult.error.message).toContain("typecheck");
-
-    const doc = await corpusService.get(taskId);
-    expect(doc.ok).toBe(true);
-    if (!doc.ok) return;
-    expect(doc.value.doc.status).toBe("draft");
-  });
-});
-
-// The CONTROL run for the STATE test immediately above — the identical
-// archive-to-terminal scenario but WITHOUT the escape hatch (a genuine
-// attested pass instead) — proves the audit markers are absent when the
-// escape hatch is NOT used, not merely present when it is (the exact
-// "silently inert flag" shape this repo's own false-oracle catalog names).
-describe("REGRESSION — the escape hatch never taints a normal attested archive (control run, AC-2)", () => {
-  it("an attested-pass task archived WITHOUT overrideReason carries neither override_reason nor attestation_overridden on any audit row", async () => {
+describe("REGRESSION — a normal attested archive carries no override marker on any audit row", () => {
+  it("an attested-pass task archived carries neither override_reason nor attestation_overridden on any audit row", async () => {
     const { corpusService, taskWorkflowService, store } = makeServices();
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
@@ -2724,19 +2640,18 @@ describe("REGRESSION — the escape hatch never taints a normal attested archive
 });
 
 describe("REGRESSION — idempotency on an already-terminal task never regresses, WITH or WITHOUT attestation (AC-4)", () => {
-  it("an already-archived task (archived via the escape hatch) is still a no-op on a second call, evidence untouched", async () => {
+  it("an already-archived task (archived by a first done) is still a no-op on a second call, evidence untouched", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId, "Test Task", noOracleContractExtra());
+    const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
-    const first = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice"), overrideReason: "one-off manual check" });
+    await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
+    const first = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
     const versionAfterFirst = first.value.task.version;
 
-    // Second call carries NO overrideReason at all — the idempotent short-circuit
-    // must fire before any evidence/attestation re-check, so this must still succeed.
+    // The idempotent short-circuit must fire before any evidence/attestation re-check, so this must still succeed.
     const second = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(second.ok).toBe(true);
     if (!second.ok) return;

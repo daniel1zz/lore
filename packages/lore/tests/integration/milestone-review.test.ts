@@ -112,12 +112,14 @@ function installJudge(pass: string, fail: string): void {
  * so it is not corpus-only (BR-1509) and the plan's regression and security gates are judged / not-measured as for a plan that
  * changes code, never `na`. The plan lands no commit in this suite, so those gates are not-measured (see `closeAccepted`).
  */
-function makePlan(title: string): { plan: string; task: string } {
+function makePlan(title: string, opts: { corpusOnly?: boolean } = {}): { plan: string; task: string } {
   counter += 1;
   const plan = slugOf(runLore(["create", "plan", "--title", `${title} ${counter}`, "--parent", prdSlug, "--content", "x", "--no-ai"], tmpDir).stdout);
+  // reason: `corpusOnly` leaves the task without a file anchor (no branch claim, no landing), so the plan changes no code (BR-1509).
+  const anchorArgs = opts.corpusOnly === true ? [] : ["--anchor", "src/shell-runner.ts"];
   const task = slugOf(
     runLore(
-      ["create", "task", "--kind", "code", "--title", `Work ${title} ${counter}`, "--parent", plan, "--plan-id", plan, "--content", "x", "--anchor", "src/shell-runner.ts", "--no-ai"],
+      ["create", "task", "--kind", opts.corpusOnly === true ? "corpus" : "code", "--title", `Work ${title} ${counter}`, "--parent", plan, "--plan-id", plan, "--content", "x", ...anchorArgs, "--no-ai"],
       tmpDir,
     ).stdout,
   );
@@ -553,8 +555,8 @@ describe("milestone review gates close", () => {
   // front; a plan reads (or, only when none is stored or in flight, runs) the suite that contains ITS landings. These plans change no
   // code, so their regression is `na` and no full suite runs at all.
   it("milestone review gates close: a batch of plans that change no code runs no full suite and leaves no worktree behind", { timeout: 300_000 }, () => {
-    const first = makePlan("Suite one");
-    const second = makePlan("Suite two");
+    const first = makePlan("Suite one", { corpusOnly: true });
+    const second = makePlan("Suite two", { corpusOnly: true });
     const batch = assessRows(["--where", "type=plan,status=approved"]);
     expect(batch.exitCode, batch.stderr).toBe(0);
     expect(batch.rows.map((r) => r.plan).sort()).toEqual([first.plan, second.plan].sort());

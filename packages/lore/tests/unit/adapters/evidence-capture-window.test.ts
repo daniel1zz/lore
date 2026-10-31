@@ -8,8 +8,8 @@
  * repo's OWN mandated worktree oracle `bun run test:changed <base>`, measured at
  * ~624s on a `@lore/core` edit selecting 482 files — therefore could not be
  * captured AT ALL, and the only honest fallback (`--output-tail-file` with the real
- * log) records `capture_source: "self-report"`, which `lore done` refuses without
- * `--override-attestation`. The disciplined path terminated in the degraded record.
+ * log) records `capture_source: "self-report"`, which `lore done` refuses (its attestation
+ * floor has no escape). The disciplined path terminated in the degraded record.
  *
  * ⛔ NOT a timeout-tuning fix. Raising 600 to 1200 moves the cliff; the roots are
  * (a) the window is now owned by config (`workflow.evidence.capture_timeout_ms`,

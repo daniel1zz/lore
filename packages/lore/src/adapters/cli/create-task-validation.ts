@@ -187,7 +187,7 @@ export function formatTaskCreateMissingFlagsError(missing: string[]): string {
  * `VerifyRunnerService.verifyAdhocTask` resolves an ad-hoc task's governing
  * spec THROUGH `extra.ac_scope`. With the key absent, the one flag that unlocks
  * the shipped ad-hoc attestation path was gated on the one condition `--adhoc`
- * guarantees is absent, so `lore done --override-attestation` became the routine
+ * guarantees is absent, so the attestation waiver then in force became the routine
  * archival route for the dominant task shape (and `lore done`'s red-first floor,
  * keyed on the same key's presence, never fired either).
  *
@@ -243,8 +243,8 @@ export function formatAdhocAcScopeMissingError(): string {
     "Error: --adhoc requires an explicit --ac-scope declaration.",
     "  An ad-hoc task has no parent plan, so `lore verify --task <slug>` resolves its",
     "  governing spec THROUGH extra.ac_scope. With that key absent the task can never",
-    "  reach a runner-attested pass, leaving `lore done --override-attestation` as its",
-    "  only archival route.",
+    "  reach a runner-attested pass for its declared criteria (`lore evidence --capture`",
+    "  remains its route to an attested pass).",
     "  Declare the criterion ids this task claims (legal ids: lore ac list <spec>):",
     "    --ac-scope <AC-ID> [--ac-scope <AC-ID> ...]",
     "  Or declare explicitly that it claims NONE — an auditable decision, not a silence:",
