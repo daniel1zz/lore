@@ -33,6 +33,7 @@ import {
   readClaimRecord,
   withExecutionLogEntries,
   type AuditEntry,
+  type DocId,
   type DocRecord,
   type ExecutionLogEntry,
   type LoreError,
@@ -42,6 +43,7 @@ import type { CompanionDocWrite, StoreInterface } from "../store/store-interface
 import { PLAN_MEMBER_TERMINAL_STATUSES } from "../store/plan-progress.js";
 import { resolveWriteActorFor } from "../store/write-context-store.js";
 import type { DocWritePort } from "./corpus-service.js";
+import { isPlanMember } from "./plan-membership.js";
 
 /** `details.operation` of every audit row and version summary this migration writes (grep-friendly, stable). */
 export const CLOSE_TASK_MIGRATE_OPERATION = "close-task-migrate";
@@ -250,7 +252,7 @@ export class CloseTaskMigrationService {
       const plan = await this.store.find(id);
       if (!plan.ok) return plan;
       if (plan.value === null || plan.value.deleted_at !== null || plan.value.status === "archived" || plan.value.status === "deprecated") continue;
-      const stillOpen = tasks.filter((task) => task.extra["plan_id"] === id && !isTerminal(task) && !resolvingIds.has(task.id));
+      const stillOpen = tasks.filter((task) => isPlanMember(task, id as DocId) && !isTerminal(task) && !resolvingIds.has(task.id));
       rows.push(
         stillOpen.length > 0
           ? { plan: plan.value.slug, state: "waiting", detail: `open task(s): ${stillOpen.map((task) => `${task.slug} (${task.status})`).join(", ")}` }
