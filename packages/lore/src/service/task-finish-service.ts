@@ -28,11 +28,13 @@ import { realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import {
   CAPTURE_TAIL_CHARS,
+  classifyCaptureSource,
   doneContractSchema,
   err,
   extractHeldClaim,
   ok,
   parseFailedCaseCount,
+  type CaptureSource,
   type DocRecord,
   type DoneContract,
   type DoneContractOracle,
@@ -448,8 +450,8 @@ export class TaskFinishService {
     const rows = task.extra["verification_evidence"];
     if (!Array.isArray(rows)) return false;
     return rows.some((row) => {
-      const entry = row as { result?: string; attestation?: unknown; capture_source?: string };
-      return (entry.result === "expected-fail" || entry.result === "fail") && entry.attestation !== undefined && entry.capture_source === "runner";
+      const entry = row as { result?: string; attestation?: unknown; capture_source?: CaptureSource };
+      return (entry.result === "expected-fail" || entry.result === "fail") && entry.attestation !== undefined && classifyCaptureSource(entry.capture_source) === "runner";
     });
   }
 
