@@ -1,13 +1,23 @@
+// @spawns-external git throwaway fixture repositories for the real runner's process-tree cases
+// @spawns-external bun the real runner runs a fixture package's `test:file` script through `bun run`
+// @spawns-external node the fixture scripts are node programs that ignore SIGTERM
 /**
  * @spec_ref spec-the-milestone-review-measures-its-facts-per-landing-and (AC-AF-2, BR-1497, BR-1412)
+ * @spec_ref spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach (AC-SC-3, BR-1497)
  *
- * The suite-result store keeps one result per commit. A fake runner counts how often the suite runs; the store is the
- * in-memory double (the SQLite round-trip is pinned in `tests/unit/store/suite-result-store.bun.test.ts`).
+ * The suite-result store keeps per-(commit, file) runs once, and the suite results older measurements left behind (read by the
+ * main red/green ledger). A fake runner counts runs; the store is the in-memory double (the SQLite round-trip is pinned in
+ * `tests/unit/store/suite-result-store.bun.test.ts`).
  *
- * Dimensions: HAPPY (first lookup runs once and stores the full shape; second runs nothing), NEGATIVE (an unresolvable
- * ref stores nothing; unknown result id / no files refused), BOUNDARY (two commits run once each; a retry that finally
- * succeeds is then cached), ERROR (a runner error is stored as unrunnable, never thrown), STATE (unrunnable -> retry
- * with a new id and attempt + 1 -> measured), REGRESSION (main red/green is derived from the store and no
+ * RETIRED with spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach (no review runs the full suite): the "lookup-or-run"
+ * cases (a first lookup runs the suite once and stores it, a second reads the store, an incomplete run is stored unrunnable and
+ * retried, a runner error / exit 5 is stored unrunnable) and the real-runner cases of a SUITE run (a suite whose tree ignores
+ * SIGTERM, an EPERM kill of a suite, the oracle lock wait of a suite). What survives of them is carried by the cases below: the
+ * process-tree timeout for single-file AND batched runs, the EPERM kill handling, and the "exit outside {0, 1} is no result" rule.
+ *
+ * Dimensions: HAPPY (a stored result is read back in the review's shape), NEGATIVE (unknown result id / no files refused),
+ * BOUNDARY (a single-file run that exited outside {0, 1} stores nothing), ERROR (a hung process tree is ended, a failed kill
+ * settles), STATE (a (commit, file, kind) is stored once), REGRESSION (main red/green is derived from the store and no
  * `main-checked` row is written any more; an unrunnable result checks nothing).
  */
 
@@ -19,6 +29,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createGitCommitSuiteRunner } from "../../../src/adapters/cli/assess-suite-runner.js";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import type { SuiteResultRecord } from "../../../src/store/store-interface.js";
 import {
   SuiteResultService,
   deriveMainCheckedRows,
@@ -27,7 +38,6 @@ import {
   type FileRunOutcome,
 } from "../../../src/service/suite-result-service.js";
 import { MAIN_CHECKED_ACTION, MAIN_RED_ACTION, classifySuiteForMainRed, foldMainRedRecords, planMainRedWrites } from "../../../src/service/milestone-review.js";
-import type { SuiteRun } from "../../../src/service/milestone-review-inputs.js";
 
 const COMMIT_A = "a".repeat(40);
 const COMMIT_B = "b".repeat(40);
@@ -35,46 +45,35 @@ const TREE_A = "1".repeat(40);
 const TREE_B = "2".repeat(40);
 const FILE_X = "packages/x/tests/x.test.ts";
 
-const GREEN: SuiteRun = {
+type SuiteSeed = Pick<SuiteResultRecord, "status" | "cause" | "commands" | "skipped" | "failing_test_files">;
+
+const GREEN: SuiteSeed = {
   status: "measured",
-  commit: COMMIT_A,
+  cause: null,
   commands: [{ command: "bun run test", exit_code: 0, output_tail: "all passed" }],
   skipped: [{ command: "bun run check:plan-close", reason: 'package.json defines no "check:plan-close" script' }],
   failing_test_files: [],
 };
 
-function red(commit: string): SuiteRun {
-  return {
-    status: "measured",
-    commit,
-    commands: [{ command: "bun run test", exit_code: 1, output_tail: "FAIL x" }],
-    skipped: [],
-    failing_test_files: [{ file: FILE_X, imports: ["packages/x/src/x.ts"] }],
-  };
-}
+const RED: SuiteSeed = {
+  status: "measured",
+  cause: null,
+  commands: [{ command: "bun run test", exit_code: 1, output_tail: "FAIL x" }],
+  skipped: [],
+  failing_test_files: [{ file: FILE_X, imports: ["packages/x/src/x.ts"] }],
+};
+
+const UNRUNNABLE: SuiteSeed = { status: "unrunnable", cause: "no worktree", commands: [], skipped: [], failing_test_files: [] };
 
 interface FakeRunner extends CommitSuiteRunnerPort {
-  readonly suiteRuns: string[];
   readonly fileRuns: { commit: string; files: readonly string[] }[];
 }
 
-function fakeRunner(script: (commit: string, attempt: number) => Result<SuiteRun, LoreError>): FakeRunner {
-  const suiteRuns: string[] = [];
+function fakeRunner(): FakeRunner {
   const fileRuns: { commit: string; files: readonly string[] }[] = [];
-  const trees: Record<string, string> = { main: TREE_A, [COMMIT_A]: TREE_A, [COMMIT_B]: TREE_B };
   return {
-    suiteRuns,
     fileRuns,
-    resolveCommit: async (ref) => {
-      const commit = ref === "main" ? COMMIT_A : ref;
-      const tree = trees[ref];
-      if (tree === undefined) return err({ code: "STORE_ERROR", message: `no commit ${ref}` });
-      return ok({ commit, tree });
-    },
-    runSuite: async (commit) => {
-      suiteRuns.push(commit);
-      return script(commit, suiteRuns.filter((c) => c === commit).length);
-    },
+    resolveCommit: async (ref) => ok({ commit: ref, tree: ref === COMMIT_B ? TREE_B : TREE_A }),
     runFiles: async (commit, files) => {
       fileRuns.push({ commit, files });
       return ok(files.map((file): FileRunOutcome => ({ file, exit_code: file === FILE_X ? 1 : 0, output_tail: `out ${file}`, duration_ms: 7 })));
@@ -82,16 +81,17 @@ function fakeRunner(script: (commit: string, attempt: number) => Result<SuiteRun
   };
 }
 
-function build(): { service: SuiteResultService; store: InMemoryStore; tick: () => string } {
+let idCounter = 0;
+
+function build(): { service: SuiteResultService; store: InMemoryStore; seed: (commit: string, shape: SuiteSeed) => Promise<SuiteResultRecord> } {
   const store = new InMemoryStore();
   let n = 0;
   let ms = 0;
-  const tick = (): string => `2026-10-28T10:00:${String(n).padStart(2, "0")}.000Z`;
   const service = new SuiteResultService({
     store,
     now: () => {
       n += 1;
-      return tick();
+      return `2026-10-28T10:00:${String(n).padStart(2, "0")}.000Z`;
     },
     newId: () => `suite-test-${String(++idCounter)}`,
     clockMs: () => {
@@ -99,148 +99,62 @@ function build(): { service: SuiteResultService; store: InMemoryStore; tick: () 
       return ms;
     },
   });
-  return { service, store, tick };
-}
-let idCounter = 0;
-
-describe("suite-result store: lookup-or-run", () => {
-  it("AC-AF-2 first lookup of a commit runs the suite once and stores commit, tree, exit codes, failing files, tail, duration, time", async () => {
-    const { service, store } = build();
-    const runner = fakeRunner(() => ok(red(COMMIT_A)));
-    const looked = await service.lookupOrRun("main", runner);
-    expect(looked.ok).toBe(true);
-    if (!looked.ok) return;
-    expect(runner.suiteRuns).toEqual([COMMIT_A]);
-    expect(looked.value).toMatchObject({
-      commit_sha: COMMIT_A,
-      tree_sha: TREE_A,
-      status: "measured",
+  /** Stores a suite result as an older measurement would have left it (the main red/green ledger reads these). */
+  const seed = async (commit: string, shape: SuiteSeed): Promise<SuiteResultRecord> => {
+    n += 1;
+    const record: SuiteResultRecord = {
+      id: `suite-seed-${String(++idCounter)}`,
+      commit_sha: commit,
+      tree_sha: commit === COMMIT_B ? TREE_B : TREE_A,
       attempt: 1,
-      cause: null,
-      commands: [{ command: "bun run test", exit_code: 1, output_tail: "FAIL x" }],
-      failing_test_files: [{ file: FILE_X, imports: ["packages/x/src/x.ts"] }],
       duration_ms: 250,
-    });
-    expect(looked.value.measured_at).toMatch(/^2026-10-28T/);
-    const stored = await store.listSuiteResultsForCommit(COMMIT_A);
-    expect(stored.ok && stored.value).toEqual([looked.value]);
-  });
-
-  it("AC-AF-2 a second lookup of the same commit runs nothing and returns the stored result", async () => {
-    const { service } = build();
-    const runner = fakeRunner(() => ok(GREEN));
-    const first = await service.lookupOrRun("main", runner);
-    const second = await service.lookupOrRun(COMMIT_A, runner);
-    const third = await service.lookupOrRun("main", runner);
-    expect(runner.suiteRuns).toHaveLength(1);
-    expect(first.ok && second.ok && third.ok).toBe(true);
-    if (first.ok && second.ok && third.ok) {
-      expect(second.value.id).toBe(first.value.id);
-      expect(third.value).toEqual(first.value);
-    }
-  });
-
-  it("AC-AF-2 two different commits each run once", async () => {
-    const { service } = build();
-    const runner = fakeRunner((commit) => ok(commit === COMMIT_A ? GREEN : red(COMMIT_B)));
-    await service.lookupOrRun(COMMIT_A, runner);
-    await service.lookupOrRun(COMMIT_B, runner);
-    await service.lookupOrRun(COMMIT_A, runner);
-    await service.lookupOrRun(COMMIT_B, runner);
-    expect(runner.suiteRuns).toEqual([COMMIT_A, COMMIT_B]);
-  });
-
-  it("AC-AF-2 an incomplete run is stored unrunnable with cause and attempt number, and the next lookup retries under a new id", async () => {
-    const { service, store } = build();
-    const runner = fakeRunner((_commit, attempt) =>
-      attempt === 1 ? ok({ status: "not_measured", reason: "dependency install failed" }) : ok(GREEN),
-    );
-    const first = await service.lookupOrRun(COMMIT_A, runner);
-    expect(first.ok && first.value).toMatchObject({ status: "unrunnable", attempt: 1, cause: "dependency install failed", commands: [] });
-    const retry = await service.lookupOrRun(COMMIT_A, runner);
-    expect(runner.suiteRuns).toHaveLength(2);
-    expect(retry.ok && retry.value).toMatchObject({ status: "measured", attempt: 2, cause: null });
-    if (first.ok && retry.ok) expect(retry.value.id).not.toBe(first.value.id);
-    const stored = await store.listSuiteResultsForCommit(COMMIT_A);
-    expect(stored.ok && stored.value.map((r) => [r.status, r.attempt])).toEqual([
-      ["unrunnable", 1],
-      ["measured", 2],
-    ]);
-    // once measured, the commit is cached again
-    await service.lookupOrRun(COMMIT_A, runner);
-    expect(runner.suiteRuns).toHaveLength(2);
-  });
-
-  it("AC-AF-2 a runner that fails outright is stored as unrunnable with the error text, never thrown", async () => {
-    const { service } = build();
-    const runner = fakeRunner(() => err({ code: "STORE_ERROR", message: "could not create the throwaway worktree: boom" }));
-    const looked = await service.lookupOrRun(COMMIT_A, runner);
-    expect(looked.ok && looked.value).toMatchObject({ status: "unrunnable", attempt: 1, cause: "could not create the throwaway worktree: boom" });
-    const again = await service.lookupOrRun(COMMIT_A, runner);
-    expect(again.ok && again.value.attempt).toBe(2);
-  });
-
-  it("AC-AF-2 a run whose test command exited outside {0, 1} (5 = oracle lock contended) is stored unrunnable with that cause and retried, never stored measured", async () => {
-    const { service } = build();
-    const contended: SuiteRun = {
-      status: "measured",
-      commit: COMMIT_A,
-      commands: [{ command: "bun run test", exit_code: 5, output_tail: "oracle-lock: contended — another oracle run holds the lock" }],
-      skipped: [],
-      failing_test_files: [],
+      measured_at: `2026-10-28T10:00:${String(n).padStart(2, "0")}.000Z`,
+      ...shape,
     };
-    const runner = fakeRunner((_commit, attempt) => ok(attempt === 1 ? contended : GREEN));
-    const first = await service.lookupOrRun("main", runner);
-    expect(first.ok && first.value).toMatchObject({ status: "unrunnable", attempt: 1 });
-    expect(first.ok && first.value.cause).toContain("exited with code 5");
-    expect(first.ok && first.value.cause).toContain("oracle lock");
-    const second = await service.lookupOrRun("main", runner);
-    expect(second.ok && second.value).toMatchObject({ status: "measured", attempt: 2 });
-    expect(runner.suiteRuns).toHaveLength(2);
-  });
+    const inserted = await store.insertSuiteResult(record);
+    if (!inserted.ok) throw new Error(`could not seed the suite result: ${inserted.error.code}`);
+    return record;
+  };
+  return { service, store, seed };
+}
 
-  it("AC-AF-2 a red run (exit 1) and a green run (exit 0) are still stored measured", async () => {
-    const { service } = build();
-    const first = await service.lookupOrRun("main", fakeRunner(() => ok(red(COMMIT_A))));
-    expect(first.ok && first.value.status).toBe("measured");
-    const other = build();
-    const second = await other.service.lookupOrRun("main", fakeRunner(() => ok(GREEN)));
-    expect(second.ok && second.value.status).toBe("measured");
-  });
-
+describe("suite-result store: stored results are read back", () => {
   it("AC-AF-2 a single-file run that exited outside {0, 1} is refused and stores no row", async () => {
     const { service } = build();
-    const runner = { ...fakeRunner(() => ok(GREEN)), runFiles: async (_c: string, files: readonly string[]) => ok(files.map((file): FileRunOutcome => ({ file, exit_code: 2, output_tail: "usage", duration_ms: 1 }))) };
+    const runner = { ...fakeRunner(), runFiles: async (_c: string, files: readonly string[]) => ok(files.map((file): FileRunOutcome => ({ file, exit_code: 2, output_tail: "usage", duration_ms: 1 }))) };
     const ran = await service.runSingleFile(COMMIT_A, FILE_X, "bisect", runner);
     expect(ran.ok).toBe(false);
     const rows = await service.listFileRuns(`file-bisect@${COMMIT_A}`);
     expect(rows.ok && rows.value).toEqual([]);
   });
 
-  it("AC-AF-2 a ref that does not resolve is an error and stores nothing", async () => {
-    const { service, store } = build();
-    const runner = fakeRunner(() => ok(GREEN));
-    const looked = await service.lookupOrRun("nope", runner);
-    expect(looked.ok).toBe(false);
-    expect(runner.suiteRuns).toEqual([]);
-    const all = await store.listSuiteResults();
-    expect(all.ok && all.value).toEqual([]);
+  it("AC-AF-2 a batched run that exited outside {0, 1} (5 = oracle lock contended) is refused and stores no row", async () => {
+    const { service } = build();
+    const runner: CommitSuiteRunnerPort = {
+      ...fakeRunner(),
+      runFilesTogether: async (_c, files) => ok(files.map((file): FileRunOutcome => ({ file, exit_code: 5, output_tail: "oracle-lock: contended", duration_ms: 1 }))),
+    };
+    const ran = await service.runBatch(COMMIT_A, [FILE_X], runner);
+    expect(ran.ok).toBe(false);
+    expect(!ran.ok && "message" in ran.error ? ran.error.message : "").toContain("oracle lock");
+    const rows = await service.listFileRuns(`file-batch@${COMMIT_A}`);
+    expect(rows.ok && rows.value).toEqual([]);
   });
 
   it("AC-AF-2 a stored measured result is returned as the review's suite shape; an unrunnable one is not_measured with its cause", async () => {
-    const { service } = build();
-    const measured = await service.lookupOrRun(COMMIT_A, fakeRunner(() => ok(red(COMMIT_A))));
-    const unrunnable = await service.lookupOrRun(COMMIT_B, fakeRunner(() => ok({ status: "not_measured", reason: "no worktree" })));
-    expect(measured.ok && suiteRunOfResult(measured.value)).toMatchObject({ status: "measured", commit: COMMIT_A });
-    expect(unrunnable.ok && suiteRunOfResult(unrunnable.value)).toEqual({ status: "not_measured", reason: "no worktree" });
+    const { seed } = build();
+    const measured = await seed(COMMIT_A, RED);
+    const unrunnable = await seed(COMMIT_B, UNRUNNABLE);
+    expect(suiteRunOfResult(measured)).toMatchObject({ status: "measured", commit: COMMIT_A });
+    expect(suiteRunOfResult(unrunnable)).toEqual({ status: "not_measured", reason: "no worktree" });
   });
 });
 
 describe("suite-result store: main red/green is read from the store", () => {
   it("AC-AF-2 main-checked rows are derived from measured results; an unrunnable result checks nothing", async () => {
-    const { service } = build();
-    await service.lookupOrRun(COMMIT_A, fakeRunner(() => ok(GREEN)));
-    await service.lookupOrRun(COMMIT_B, fakeRunner(() => ok({ status: "not_measured", reason: "no worktree" })));
+    const { service, seed } = build();
+    await seed(COMMIT_A, GREEN);
+    await seed(COMMIT_B, UNRUNNABLE);
     const rows = await service.listMainCheckedRows();
     expect(rows.ok).toBe(true);
     if (!rows.ok) return;
@@ -249,11 +163,9 @@ describe("suite-result store: main red/green is read from the store", () => {
   });
 
   it("AC-AF-2 red at a later commit opens one main-red record whose range starts at the green commit stored before it, and writes no main-checked row", async () => {
-    const { service } = build();
-    await service.lookupOrRun(COMMIT_A, fakeRunner(() => ok(GREEN)));
-    const redLookup = await service.lookupOrRun(COMMIT_B, fakeRunner(() => ok(red(COMMIT_B))));
-    expect(redLookup.ok).toBe(true);
-    if (!redLookup.ok) return;
+    const { service, seed } = build();
+    await seed(COMMIT_A, GREEN);
+    const redResult = await seed(COMMIT_B, RED);
     // the store already holds the red commit's own check when the review records main red
     const rows = await service.listMainCheckedRows();
     if (!rows.ok) throw new Error("listMainCheckedRows failed");
@@ -264,21 +176,20 @@ describe("suite-result store: main red/green is read from the store", () => {
       [COMMIT_A, "green"],
       [COMMIT_B, "red"],
     ]);
-    const measured = classifySuiteForMainRed(suiteRunOfResult(redLookup.value) as Parameters<typeof classifySuiteForMainRed>[0]);
+    const measured = classifySuiteForMainRed(suiteRunOfResult(redResult) as Parameters<typeof classifySuiteForMainRed>[0]);
     const written = planMainRedWrites(folded.value, measured, "2026-10-28T11:00:00.000Z");
     expect(written.map((r) => r.action)).toEqual([MAIN_RED_ACTION]);
     expect(written[0]?.details).toMatchObject({ range_from: COMMIT_A, range_to: COMMIT_B, failing_files: [FILE_X], failing_checks: ["bun run test"] });
   });
 
   it("AC-AF-2 red with no earlier check starts the range at null, not at the red commit itself", async () => {
-    const { service } = build();
-    const redLookup = await service.lookupOrRun(COMMIT_B, fakeRunner(() => ok(red(COMMIT_B))));
-    if (!redLookup.ok) throw new Error("lookup failed");
+    const { service, seed } = build();
+    const redResult = await seed(COMMIT_B, RED);
     const rows = await service.listMainCheckedRows();
     if (!rows.ok) throw new Error("rows failed");
     const folded = foldMainRedRecords(rows.value);
     if (!folded.ok) throw new Error("fold failed");
-    const written = planMainRedWrites(folded.value, classifySuiteForMainRed(suiteRunOfResult(redLookup.value) as Parameters<typeof classifySuiteForMainRed>[0]), "t");
+    const written = planMainRedWrites(folded.value, classifySuiteForMainRed(suiteRunOfResult(redResult) as Parameters<typeof classifySuiteForMainRed>[0]), "t");
     expect(written[0]?.details).toMatchObject({ range_from: null, last_green_at: null });
   });
 
@@ -289,52 +200,47 @@ describe("suite-result store: main red/green is read from the store", () => {
 
 describe("suite-result store: per-file re-runs", () => {
   it("AC-AF-2 re-running named files at a result's commit stores one row per file attached to that result", async () => {
-    const { service } = build();
-    const runner = fakeRunner(() => ok(red(COMMIT_A)));
-    const looked = await service.lookupOrRun(COMMIT_A, runner);
-    if (!looked.ok) throw new Error("lookup failed");
-    const rerun = await service.rerunFiles(looked.value.id, [FILE_X, "packages/x/tests/y.test.ts"], runner);
+    const { service, seed } = build();
+    const runner = fakeRunner();
+    const stored = await seed(COMMIT_A, RED);
+    const rerun = await service.rerunFiles(stored.id, [FILE_X, "packages/x/tests/y.test.ts"], runner);
     expect(rerun.ok).toBe(true);
     expect(runner.fileRuns).toEqual([{ commit: COMMIT_A, files: [FILE_X, "packages/x/tests/y.test.ts"] }]);
-    const listed = await service.listFileRuns(looked.value.id);
+    const listed = await service.listFileRuns(stored.id);
     expect(listed.ok && listed.value.map((r) => [r.file, r.exit_code, r.output_tail, r.commit_sha, r.suite_result_id])).toEqual([
-      [FILE_X, 1, `out ${FILE_X}`, COMMIT_A, looked.value.id],
-      ["packages/x/tests/y.test.ts", 0, "out packages/x/tests/y.test.ts", COMMIT_A, looked.value.id],
+      [FILE_X, 1, `out ${FILE_X}`, COMMIT_A, stored.id],
+      ["packages/x/tests/y.test.ts", 0, "out packages/x/tests/y.test.ts", COMMIT_A, stored.id],
     ]);
-    expect(runner.suiteRuns).toHaveLength(1);
   });
 
   it("AC-AF-2 a re-run for an unknown result id or with no files is refused and runs nothing", async () => {
-    const { service } = build();
-    const runner = fakeRunner(() => ok(GREEN));
+    const { service, seed } = build();
+    const runner = fakeRunner();
     const unknown = await service.rerunFiles("suite-missing", [FILE_X], runner);
     expect(unknown.ok).toBe(false);
-    const looked = await service.lookupOrRun(COMMIT_A, runner);
-    if (!looked.ok) throw new Error("lookup failed");
-    const empty = await service.rerunFiles(looked.value.id, [], runner);
+    const stored = await seed(COMMIT_A, GREEN);
+    const empty = await service.rerunFiles(stored.id, [], runner);
     expect(empty.ok).toBe(false);
     expect(runner.fileRuns).toEqual([]);
   });
 
   it("AC-AF-2 a failing file runner stores no per-file rows", async () => {
-    const { service } = build();
-    const runner = fakeRunner(() => ok(GREEN));
-    const looked = await service.lookupOrRun(COMMIT_A, runner);
-    if (!looked.ok) throw new Error("lookup failed");
-    const failing: CommitSuiteRunnerPort = { ...runner, runFiles: async () => err({ code: "STORE_ERROR", message: "no test:file script" }) };
-    const rerun = await service.rerunFiles(looked.value.id, [FILE_X], failing);
+    const { service, seed } = build();
+    const stored = await seed(COMMIT_A, GREEN);
+    const failing: CommitSuiteRunnerPort = { ...fakeRunner(), runFiles: async () => err({ code: "STORE_ERROR", message: "no test:file script" }) };
+    const rerun = await service.rerunFiles(stored.id, [FILE_X], failing);
     expect(rerun.ok).toBe(false);
-    const listed = await service.listFileRuns(looked.value.id);
+    const listed = await service.listFileRuns(stored.id);
     expect(listed.ok && listed.value).toEqual([]);
   });
 });
 
 /**
- * The real git runner against a throwaway repo whose `test` / `test:file` scripts run a fake suite: a node process that
- * ignores SIGTERM and spawns a grandchild that ignores SIGTERM too and holds stdout open (the shape of the 2026-10-29
- * hang, where a test's hung `lore` child kept `spawnSync` waiting for 10 h).
+ * The real git runner against a throwaway repo whose `test:file` script runs a fake test: a node process that ignores SIGTERM
+ * and spawns a grandchild that ignores SIGTERM too and holds stdout open (the shape of the 2026-10-29 hang, where a test's hung
+ * `lore` child kept `spawnSync` waiting for 10 h).
  */
-describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () => {
+describe("AC-AF-2 the runner's timeout ends the whole process tree", () => {
   const TIMEOUT_MS = 1500;
   const GRACE_MS = 500;
   // timeout + grace + pipe drain (2 s) + slack for git/bun start-up and worktree removal
@@ -406,36 +312,17 @@ describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () =>
 
   const worktreeCount = (repo: string): number => git(repo, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length;
 
-  it("AC-AF-2 a suite whose tree ignores SIGTERM is ended within timeout + grace, stored unrunnable naming the timeout and elapsed ms, no process survives and the worktree is gone", async () => {
-    // (per-test limit below is far above timeout + grace + drain, so load cannot read as a hang)
-    const { repo, commit, pidFile } = makeRepo({ test: "node hang.js" }, {});
-    writeFileSync(join(repo, "hang.js"), hangScript(pidFile));
-    git(repo, "add", "-A");
-    git(repo, "commit", "-q", "-m", "hang");
-    const head = git(repo, "rev-parse", "HEAD").trim();
-    expect(head).not.toBe(commit);
-    const runner = createGitCommitSuiteRunner(repo, process.env, { timeoutMs: TIMEOUT_MS, graceMs: GRACE_MS });
-    const { service, store } = build();
-    const startedMs = Date.now();
-    const looked = await service.lookupOrRun(head, runner);
-    const wallMs = Date.now() - startedMs;
-    expect(wallMs).toBeLessThan(WALL_BOUND_MS);
-    expect(looked.ok && looked.value).toMatchObject({ status: "unrunnable", attempt: 1, commands: [] });
-    const cause = looked.ok ? (looked.value.cause ?? "") : "";
-    expect(cause).toMatch(/timed out after \d+ ms/);
-    expect(cause).toContain("bun run test");
-    const stored = await store.listSuiteResultsForCommit(head);
-    expect(stored.ok && stored.value.map((r) => r.status)).toEqual(["unrunnable"]);
-    expect(await allGone(readPids(pidFile))).toBe(true);
-    expect(worktreeCount(repo)).toBe(1);
-  }, 90_000);
-
-  it("AC-AF-2 a per-file re-run whose tree ignores SIGTERM is ended within the limit, reported as a failed file with the timeout cause, tree gone, worktree gone", async () => {
+  /** A repo whose `test:file` script hangs (tree ignoring SIGTERM), committed on top of a first commit. */
+  function hangingRepo(): { repo: string; head: string; pidFile: string } {
     const { repo, pidFile } = makeRepo({ "test:file": "node hang.js" }, {});
     writeFileSync(join(repo, "hang.js"), hangScript(pidFile));
     git(repo, "add", "-A");
     git(repo, "commit", "-q", "-m", "hang");
-    const head = git(repo, "rev-parse", "HEAD").trim();
+    return { repo, head: git(repo, "rev-parse", "HEAD").trim(), pidFile };
+  }
+
+  it("AC-AF-2 a per-file re-run whose tree ignores SIGTERM is ended within the limit, reported as a failed file with the timeout cause, tree gone, worktree gone", async () => {
+    const { repo, head, pidFile } = hangingRepo();
     const runner = createGitCommitSuiteRunner(repo, process.env, { timeoutMs: TIMEOUT_MS, graceMs: GRACE_MS });
     const startedMs = Date.now();
     const ran = await runner.runFiles(head, ["x.test.ts"]);
@@ -444,50 +331,69 @@ describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () =>
     expect(ran.value[0]).toMatchObject({ file: "x.test.ts", exit_code: 1 });
     expect(ran.value[0]?.output_tail).toMatch(/timed out after \d+ ms/);
     expect(await allGone(readPids(pidFile))).toBe(true);
-    // spec-a-plan-s-regression-reuses-a-stored-suite-that-contains: the commit's prepared worktree is kept for the review's later
-    // runs and removed when the review ends (`disposeWorktrees`), success or not.
+    // the commit's prepared worktree is kept for the review's later runs and removed when the review ends (`disposeWorktrees`).
     expect(worktreeCount(repo)).toBe(2);
     const ended = await runner.disposeWorktrees?.();
     expect(ended?.ok).toBe(true);
     expect(worktreeCount(repo)).toBe(1);
   }, 90_000);
 
-  it("AC-AF-2 a group signal that fails with EPERM while the group still has live members settles the run, recording the failed kill as the unrunnable cause", async () => {
-    const { repo, pidFile } = makeRepo({ test: "node hang.js" }, {});
-    writeFileSync(join(repo, "hang.js"), hangScript(pidFile));
-    git(repo, "add", "-A");
-    git(repo, "commit", "-q", "-m", "hang");
-    const head = git(repo, "rev-parse", "HEAD").trim();
+  it("AC-AF-2 a batched run whose tree ignores SIGTERM is ended within the limit, every file is incomplete with the timeout cause, nothing is stored, tree gone, worktree gone after the review ends", async () => {
+    const { repo, head, pidFile } = hangingRepo();
+    const runner = createGitCommitSuiteRunner(repo, process.env, { timeoutMs: TIMEOUT_MS, graceMs: GRACE_MS });
+    const { service } = build();
+    const startedMs = Date.now();
+    // the runner alone: both files come back incomplete, naming the timeout, and the whole group is gone
+    const together = await runner.runFilesTogether?.(head, ["x.test.ts", "y.test.ts"]);
+    expect(Date.now() - startedMs).toBeLessThan(WALL_BOUND_MS);
+    if (together === undefined || !together.ok) throw new Error(`runFilesTogether failed: ${JSON.stringify(together)}`);
+    expect(together.value.map((o) => o.file)).toEqual(["x.test.ts", "y.test.ts"]);
+    for (const outcome of together.value) {
+      expect(outcome.incomplete).toMatch(/timed out after \d+ ms/);
+    }
+    expect(await allGone(readPids(pidFile))).toBe(true);
+    // through the service: an incomplete batch is refused, so no row is stored and a later review runs it again
+    const stored = await service.runBatch(head, ["x.test.ts", "y.test.ts"], { ...runner, runFilesTogether: async () => together });
+    expect(stored.ok).toBe(false);
+    const rows = await service.listFileRuns(`file-batch@${head}`);
+    expect(rows.ok && rows.value).toEqual([]);
+    const ended = await runner.disposeWorktrees?.();
+    expect(ended?.ok).toBe(true);
+    expect(worktreeCount(repo)).toBe(1);
+  }, 90_000);
+
+  it("AC-AF-2 a group signal that fails with EPERM while the group still has live members settles the run, recording the failed kill as the incomplete cause", async () => {
+    const { repo, head } = hangingRepo();
     const kill = (): void => {
       throw Object.assign(new Error("kill() failed: EPERM: Operation not permitted"), { code: "EPERM" });
     };
     const runner = createGitCommitSuiteRunner(repo, process.env, { timeoutMs: TIMEOUT_MS, graceMs: GRACE_MS, kill });
-    const { service } = build();
     const startedMs = Date.now();
-    const looked = await service.lookupOrRun(head, runner);
+    const ran = await runner.runFilesTogether?.(head, ["x.test.ts"]);
     expect(Date.now() - startedMs).toBeLessThan(WALL_BOUND_MS);
-    expect(looked.ok && looked.value).toMatchObject({ status: "unrunnable" });
-    const cause = looked.ok ? (looked.value.cause ?? "") : "";
-    expect(cause).toContain("EPERM");
-    expect(cause).toContain("live member");
+    if (ran === undefined || !ran.ok) throw new Error(`runFilesTogether failed: ${JSON.stringify(ran)}`);
+    expect(ran.value[0]?.incomplete).toContain("EPERM");
+    expect(ran.value[0]?.incomplete).toContain("live member");
+    await runner.disposeWorktrees?.();
     expect(worktreeCount(repo)).toBe(1);
   }, 90_000);
 
   it("AC-AF-2 a group signal that fails with EPERM when no live member remains counts as ended and the run's own result stands", async () => {
-    const { repo } = makeRepo({ test: "node -e 0" }, {});
-    const head = git(repo, "rev-parse", "HEAD").trim();
+    const { repo, commit } = makeRepo({ "test:file": "node -e 0" }, {});
     const kill = (): void => {
       throw Object.assign(new Error("kill() failed: EPERM: Operation not permitted"), { code: "EPERM" });
     };
     const runner = createGitCommitSuiteRunner(repo, process.env, { timeoutMs: 60_000, graceMs: GRACE_MS, kill });
-    const { service } = build();
-    const looked = await service.lookupOrRun(head, runner);
-    expect(looked.ok && looked.value).toMatchObject({ status: "measured" });
+    const ran = await runner.runFiles(commit, ["x.test.ts"]);
+    if (!ran.ok) throw new Error(`runFiles failed: ${JSON.stringify(ran.error)}`);
+    expect(ran.value[0]).toMatchObject({ file: "x.test.ts", exit_code: 0 });
+    expect(ran.value[0]?.incomplete).toBeUndefined();
+    await runner.disposeWorktrees?.();
     expect(worktreeCount(repo)).toBe(1);
   }, 90_000);
 
-  it("AC-AF-2 work in the same worktree (the landed-criteria attestation) runs in it and the worktree is removed afterwards, also when the work throws", async () => {
-    const { repo, commit } = makeRepo({ test: "true" }, {});
+  it("AC-AF-2 work in the same worktree (the head-bound criteria) runs in it and the worktree is removed afterwards, also when the work throws", async () => {
+    const { repo, commit } = makeRepo({ "test:file": "true" }, {});
     const runner = createGitCommitSuiteRunner(repo, process.env, { timeoutMs: TIMEOUT_MS, graceMs: GRACE_MS });
     if (runner.withWorktree === undefined) throw new Error("runner has no withWorktree");
     let seenRoot = "";
@@ -506,50 +412,19 @@ describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () =>
     expect(worktreeCount(repo)).toBe(1);
   }, 30_000);
 
-  /** A `test` script that behaves like a contended oracle lock for the first `contendedRuns` calls (counted in `counterFile`), then passes. */
-  function contendedRepo(counterFile: string, contendedRuns: number): { repo: string; commit: string } {
-    const script = [
-      'const fs = require("node:fs");',
-      `const file = ${JSON.stringify(counterFile)};`,
-      'const n = (fs.existsSync(file) ? Number(fs.readFileSync(file, "utf8")) : 0) + 1;',
-      "fs.writeFileSync(file, String(n));",
-      `if (n <= ${String(contendedRuns)}) { console.error("oracle-lock: contended — another oracle run holds /x/.git/lore-oracle-test.lock (pid 1, still alive)."); process.exit(5); }`,
-      'console.log("all-green");',
-    ].join("\n");
-    const made = makeRepo({ test: "node contend.js" }, { "contend.js": script });
-    return { repo: made.repo, commit: made.commit };
-  }
-
-  it("AC-AF-2 a suite that finds the oracle lock held waits for it and measures the run that then takes it, never storing the non-run", async () => {
-    const counter = join(mkdtempSync(join(tmpdir(), "suite-lock-count-")), "n");
-    dirs.push(join(counter, ".."));
-    const { repo, commit } = contendedRepo(counter, 2);
-    const run = await createGitCommitSuiteRunner(repo, process.env, { timeoutMs: 20_000, graceMs: GRACE_MS, lockPollMs: 50 }).runSuite(commit);
-    expect(run.ok && run.value).toMatchObject({ status: "measured" });
-    expect(run.ok && run.value.status === "measured" && run.value.commands[0]).toMatchObject({ command: "bun run test", exit_code: 0 });
-    expect(readFileSync(counter, "utf8")).toBe("3");
-  }, 40_000);
-
-  it("AC-AF-2 a suite whose oracle lock stays held past the suite timeout is not measured, naming the lock", async () => {
-    const counter = join(mkdtempSync(join(tmpdir(), "suite-lock-count-")), "n");
-    dirs.push(join(counter, ".."));
-    const { repo, commit } = contendedRepo(counter, 1_000_000);
-    const run = await createGitCommitSuiteRunner(repo, process.env, { timeoutMs: 3000, graceMs: GRACE_MS, lockPollMs: 100 }).runSuite(commit);
-    expect(run.ok && run.value.status === "not_measured" && run.value.reason).toContain("oracle lock");
-  }, 40_000);
-
-  it("AC-AF-2 a normal run is unchanged: a green suite is measured with its exit code, a red one keeps its exit code and tail", async () => {
-    const green = makeRepo({ test: "echo all-green" }, {});
-    const greenRun = await createGitCommitSuiteRunner(green.repo, process.env, { timeoutMs: 20_000, graceMs: GRACE_MS }).runSuite(green.commit);
-    expect(greenRun.ok && greenRun.value).toMatchObject({ status: "measured", commit: green.commit, failing_test_files: [] });
-    if (greenRun.ok && greenRun.value.status === "measured") {
-      expect(greenRun.value.commands).toHaveLength(1);
-      expect(greenRun.value.commands[0]).toMatchObject({ command: "bun run test", exit_code: 0 });
-      expect(greenRun.value.commands[0]?.output_tail).toContain("all-green");
-    }
-    const redRepo = makeRepo({ test: "echo boom; exit 3" }, {});
-    const redRun = await createGitCommitSuiteRunner(redRepo.repo, process.env, { timeoutMs: 20_000, graceMs: GRACE_MS }).runSuite(redRepo.commit);
-    expect(redRun.ok && redRun.value.status === "measured" && redRun.value.commands[0]).toMatchObject({ exit_code: 3 });
+  it("AC-AF-2 a normal run is unchanged: a green file is exit 0 with its tail, a red one keeps its exit code and tail", async () => {
+    const green = makeRepo({ "test:file": "echo all-green" }, {});
+    const greenRunner = createGitCommitSuiteRunner(green.repo, process.env, { timeoutMs: 20_000, graceMs: GRACE_MS });
+    const greenRun = await greenRunner.runFiles(green.commit, ["x.test.ts"]);
+    expect(greenRun.ok && greenRun.value[0]).toMatchObject({ file: "x.test.ts", exit_code: 0 });
+    expect(greenRun.ok && greenRun.value[0]?.output_tail).toContain("all-green");
+    await greenRunner.disposeWorktrees?.();
+    const redRepo = makeRepo({ "test:file": "echo boom; exit 3" }, {});
+    const redRunner = createGitCommitSuiteRunner(redRepo.repo, process.env, { timeoutMs: 20_000, graceMs: GRACE_MS });
+    const redRun = await redRunner.runFiles(redRepo.commit, ["x.test.ts"]);
+    expect(redRun.ok && redRun.value[0]).toMatchObject({ exit_code: 3 });
+    expect(redRun.ok && redRun.value[0]?.output_tail).toContain("boom");
+    await redRunner.disposeWorktrees?.();
     expect(worktreeCount(green.repo)).toBe(1);
   }, 30_000);
 });
@@ -558,7 +433,7 @@ describe("single-file runs are stored once per (commit, file, kind) (#528, BR-14
   /** A runner whose every file run is numbered (the tail and exit code say which run it was) and waits on a gate. */
   function gatedRunner(gate: Promise<void>): { runner: CommitSuiteRunnerPort; calls: () => number } {
     let calls = 0;
-    const base = fakeRunner(() => ok(GREEN));
+    const base = fakeRunner();
     const runner: CommitSuiteRunnerPort = {
       ...base,
       runFiles: async (_commit, files) => {
@@ -621,3 +496,6 @@ describe("single-file runs are stored once per (commit, file, kind) (#528, BR-14
     expect(reruns.ok && reruns.value.map((r) => r.output_tail)).toEqual(["a", "b"]);
   });
 });
+
+/** Keeps the Result type import honest for fixtures that return it. */
+export type _FixtureResult = Result<unknown, LoreError>;

@@ -20,14 +20,13 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ok, type LoreError, type Result } from "@lore/core";
+import { ok } from "@lore/core";
 import { InMemoryStore } from "../../src/store/in-memory-store.js";
 import {
   SuiteResultService,
   type CommitSuiteRunnerPort,
   type FileRunOutcome,
 } from "../../src/service/suite-result-service.js";
-import type { SuiteRun } from "../../src/service/milestone-review-inputs.js";
 import { regressionAtHead, regressionBisectionBudget, type RegressionLandingInput } from "../../src/service/regression-at-head.js";
 import { measureCriteriaAtHead, type AttestationRow, type CriterionScope, type HeadCriteriaRunnerPort } from "../../src/service/milestone-attestation-facts.js";
 import { createGitFileExistsAt, createGitFirstParentCommitContaining, createGitFirstParentHistory } from "../../src/adapters/cli/assess-regression-git.js";
@@ -73,7 +72,6 @@ const stateAt = (cwd: string, commit: string): "red" | "green" | "absent" => {
 
 interface World {
   readonly service: SuiteResultService;
-  readonly suiteRuns: string[];
   readonly fileRuns: { commit: string; file: string }[];
   readonly criteriaRuns: { commit: string; ac: string; worktree: "suite" | "own" }[];
   readonly ownWorktrees: string[];
@@ -87,25 +85,12 @@ function world(cwd: string, shared?: InMemoryStore): World {
   const store = shared ?? new InMemoryStore();
   let n = 0;
   const service = new SuiteResultService({ store, now: () => `2026-10-29T10:00:00.${String(++n).padStart(3, "0")}Z`, newId: () => `suite-cost-${String(++n)}`, clockMs: () => n * 10 });
-  const suiteRuns: string[] = [];
   const fileRuns: World["fileRuns"] = [];
   const criteriaRuns: World["criteriaRuns"] = [];
   const ownWorktrees: string[] = [];
   const rows: AttestationRow[] = [];
   const suiteRunner: CommitSuiteRunnerPort = {
     resolveCommit: async (ref) => ok({ commit: git(cwd, ["rev-parse", ref === "main" ? "main" : ref]), tree: git(cwd, ["rev-parse", `${ref === "main" ? "main" : ref}^{tree}`]) }),
-    runSuite: async (commit, inWorktree): Promise<Result<SuiteRun, LoreError>> => {
-      suiteRuns.push(commit);
-      const red = stateAt(cwd, commit) === "red";
-      if (inWorktree !== undefined) await inWorktree("/fake/suite-worktree", commit);
-      return ok({
-        status: "measured",
-        commit,
-        commands: [{ command: "bun run test", exit_code: red ? 1 : 0, output_tail: "" }],
-        skipped: [],
-        failing_test_files: red ? [{ file: RED_FILE, imports: [] }] : [],
-      });
-    },
     runFiles: async (commit, files) => {
       for (const file of files) fileRuns.push({ commit, file });
       return ok(files.map((file): FileRunOutcome => ({ file, exit_code: stateAt(cwd, commit) === "red" ? 1 : 0, output_tail: "", duration_ms: 1 })));
@@ -132,7 +117,7 @@ function world(cwd: string, shared?: InMemoryStore): World {
       return ok(request.criteria.map((c) => ({ ...c, ran: true as const })));
     },
   };
-  return { service, suiteRuns, fileRuns, criteriaRuns, ownWorktrees, store, suiteRunner, criteriaRunner, rows };
+  return { service, fileRuns, criteriaRuns, ownWorktrees, store, suiteRunner, criteriaRunner, rows };
 }
 
 const scopes: CriterionScope[] = ["AC-1", "AC-2"].map((ac) => ({ doc_slug: "spec-one", ac_id: ac, mode: "script", command: `bun run test:file tests/${ac}.test.ts`, holders: [{ task_slug: "task-one" }] }));
@@ -169,7 +154,7 @@ describe("AC-AO-5 assessment cost is bounded end to end", () => {
     const { regression } = await assess(cwd, w, landingsAt(shas, [2, 3, 4, 5, 6]));
     expect(regression.charged).toEqual([]);
     // false green guarded: per-landing measurement would run at each of the five landings; the selection runs once, at L (the last landing)
-    expect(w.suiteRuns).toEqual([]);
+    // (the runner port has no full-suite verb, so none can run; the one batched run of the selection is the only test run)
     expect(w.fileRuns).toEqual([{ commit: shas[6], file: RED_FILE }]);
     expect(w.criteriaRuns.map((r) => r.ac)).toEqual(["AC-1", "AC-2"]);
     expect(w.criteriaRuns.every((r) => r.commit === shas[7] && r.worktree === "own")).toBe(true);
@@ -182,7 +167,6 @@ describe("AC-AO-5 assessment cost is bounded end to end", () => {
     await assess(cwd, first, landingsAt(shas, [2, 3, 4, 5, 6]));
     const second = world(cwd, first.store);
     await assess(cwd, second, landingsAt(shas, [2, 3, 4, 5, 6]));
-    expect(second.suiteRuns).toEqual([]);
     expect(second.fileRuns).toEqual([]);
     expect(second.ownWorktrees).toEqual([shas[7]]);
     expect(second.criteriaRuns.map((r) => [r.ac, r.worktree])).toEqual([["AC-1", "own"], ["AC-2", "own"]]);
@@ -194,7 +178,6 @@ describe("AC-AO-5 assessment cost is bounded end to end", () => {
     const w = world(cwd);
     const { regression } = await assess(cwd, w, landingsAt(shas, [1, 6]));
     expect(regression.charged).toEqual([{ file: RED_FILE, landing: shas[6] }]);
-    expect(w.suiteRuns).toEqual([]);
     // 3 bisection runs (ceil(log2(8))) plus 4 fixed runs (head, lower bound, first failing commit, its parent) is the whole budget,
     // plus the batched run of the selection at L and the batched recheck at head;
     expect(regressionBisectionBudget(8)).toBe(3 + 4);

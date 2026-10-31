@@ -7,8 +7,7 @@
  *   context only (regression itself is measured at main's head by single-file bisection). (2) The snapshot-accuracy dimension fails only on a cited rule whose state is `contradicted`; `stale`,
  *   `unknown` and `unverified` are n/a with the reason, and stale evidence is re-verified once per batch beforehand.
  * Public surface: SuiteRun, SuiteCommandResult, FailingTestFile, parseFailingTestFiles, touchedFilesOfDiff,
- *   renderSuiteSection, applySnapshotRule, staleCitingAcIds, StaleAcRefresherPort, StaleRefreshReport,
- *   SuiteRunnerPort.
+ *   renderSuiteSection, applySnapshotRule, staleCitingAcIds, StaleAcRefresherPort, StaleRefreshReport.
  * Invariants:
  *   - A suite that was not measured is `status: "not_measured"` with a reason; it is never read as a pass.
  *   - Regression is NOT decided here: `regression-at-head.ts` measures it at the assessed commit (BR-1496); a red file on main's
@@ -54,12 +53,6 @@ export const suiteRunSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("not_measured"), reason: z.string().min(1) }),
 ]);
 export type SuiteRun = z.infer<typeof suiteRunSchema>;
-
-/** The port `lore assess` calls once per batch; `adapters/cli/assess-suite-runner.ts` is the real one. */
-export interface SuiteRunnerPort {
-  /** Runs the plan-close chain and the full test suite on main's HEAD in a throwaway worktree, once. */
-  readonly run: () => Promise<Result<SuiteRun, LoreError>>;
-}
 
 /**
  * The test files a runner's output names as failing.

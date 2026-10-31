@@ -22,8 +22,8 @@
  *     with kind `batch`; a selection holding a declared-spawn test builds first. A later review reuses the stored rows.
  *   - Head recheck (L is not head): every file red at L is run in ONE batched invocation at head; a file green there is run
  *     once alone at head before it is dropped; green alone = `green-at-head` (not looked at), red alone stays.
- *   - Per remaining file: lower bound = the plan's earliest landing's first parent, or a newer commit with a stored
- *     SINGLE-FILE pass (or a measured suite not failing the file); the floor is decided by a single-file run (red = red-before,
+ *   - Per remaining file: upper bound = L (the file was red there); lower bound = the plan's earliest landing's first parent, or a
+ *     newer commit with a stored SINGLE-FILE pass (or a measured suite not failing the file); the floor is decided by a single-file run (red = red-before,
  *     never charged). A stored `batch` row is only used as the result of a search step at a probed commit, never as the floor,
  *     a confirmation or an interval start.
  *   - Search: each round probes the midpoint of every unresolved file's interval; one batched invocation per distinct midpoint
@@ -349,7 +349,9 @@ async function attributeRedFiles(input: AttributionInput): Promise<{ files: File
 
   const actives: Active[] = [];
   for (const file of stillRed) {
-    const bounds = await initialBounds(probeOf(file), history, headIndex, attribution);
+    // reason: the file is red at L (that is how it got here), so its first red commit is at or below L: L is the interval's known-red
+    // end. Searching up to head instead would let a flip between L and head read as the transition and cost runs above L for nothing.
+    const bounds = await initialBounds(probeOf(file), history, attribution.latestIndex, attribution);
     if (bounds.kind === "settled") outcomes.set(file, bounds.outcome);
     else if (bounds.kind === "stop") notMeasured(file, bounds.reason);
     else actives.push({ file, probe: probeOf(file), low: bounds.low, high: bounds.high, failed: false });
@@ -417,11 +419,14 @@ type Bounds =
   | { readonly kind: "settled"; readonly outcome: FileRegression }
   | { readonly kind: "stop"; readonly reason: string };
 
-/** The interval of one file: known-green start (newest stored single-file pass, else the floor decided by a single-file run) to the oldest known red. */
-async function initialBounds(probe: FileProbe, history: readonly string[], headIndex: number, attribution: Attribution): Promise<Bounds> {
+/**
+ * The interval of one file: known-green start (newest stored single-file pass, else the floor decided by a single-file run) to the
+ * oldest known red, which is at most `redIndex` (the selection commit L: the file was red there).
+ */
+async function initialBounds(probe: FileProbe, history: readonly string[], redIndex: number, attribution: Attribution): Promise<Bounds> {
   const floorIndex = attribution.earliestIndex - 1;
   const knownStates = new Map<number, FileState>();
-  for (let index = headIndex - 1; index > floorIndex; index -= 1) {
+  for (let index = redIndex - 1; index > floorIndex; index -= 1) {
     const commit = history[index];
     if (commit === undefined) return { kind: "stop", reason: `history has no commit at position ${String(index)}` };
     const known = await probe.known(commit);
@@ -429,7 +434,7 @@ async function initialBounds(probe: FileProbe, history: readonly string[], headI
     if (known.value !== undefined) knownStates.set(index, known.value);
   }
   let low = floorIndex;
-  for (let index = headIndex - 1; index > floorIndex; index -= 1) {
+  for (let index = redIndex - 1; index > floorIndex; index -= 1) {
     if (knownStates.get(index) === "green") {
       low = index;
       break;
@@ -443,8 +448,8 @@ async function initialBounds(probe: FileProbe, history: readonly string[], headI
     if (floor.value === "red") return { kind: "settled", outcome: { file: probe.file, outcome: "red-before", commit: floorCommit } };
   }
   // reason: floorIndex -1 is "before main's first commit": the file cannot exist there, so it is green without a run.
-  let high = headIndex;
-  for (let index = low + 1; index < headIndex; index += 1) {
+  let high = redIndex;
+  for (let index = low + 1; index < redIndex; index += 1) {
     if (knownStates.get(index) === "red") {
       high = index;
       break;

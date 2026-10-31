@@ -22,13 +22,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ok, type LoreError, type Result } from "@lore/core";
+import { ok } from "@lore/core";
 import { outcomesOfTogetherRun, runTestFilesTogether } from "../../src/adapters/cli/assess-suite-runner.js";
 import { PreparedWorktreeCache } from "../../src/adapters/cli/assess-worktree-cache.js";
 import { InMemoryStore } from "../../src/store/in-memory-store.js";
 import { ReviewLeases } from "../../src/service/review-batch-lease.js";
 import { milestoneFactsFingerprint } from "../../src/service/milestone-review.js";
-import type { SuiteRun } from "../../src/service/milestone-review-inputs.js";
 import { regressionAtHead, type RegressionAtHead, type RegressionAtHeadPorts, type RegressionLandingInput } from "../../src/service/regression-at-head.js";
 import { SuiteResultService, singleFileRunKey, type CommitSuiteRunnerPort, type FileRunOutcome } from "../../src/service/suite-result-service.js";
 
@@ -82,7 +81,6 @@ function build(script: Script) {
   });
   const headIndex = script.commits - 1;
   const modelOf = (file: string): FileModel => script.files[file] ?? { redWhen: () => false };
-  const suiteRuns: string[] = [];
   const invocations: Invocation[] = [];
   const prepared: string[] = [];
   const disposed: string[] = [];
@@ -105,11 +103,6 @@ function build(script: Script) {
     }));
   const runner: CommitSuiteRunnerPort = {
     resolveCommit: async (ref) => ok({ commit: ref === "main" ? sha(headIndex) : ref, tree: sha(0) }),
-    // reason: a close runs no full suite; this stub only records a call so every case can assert there was none.
-    runSuite: async (commit): Promise<Result<SuiteRun, LoreError>> => {
-      suiteRuns.push(commit);
-      return ok({ status: "not_measured", reason: "no suite runs at a close" });
-    },
     runFiles: async (commit, files) => {
       invocations.push({ commit, files: [...files], together: false });
       return cache.use(commit, async () => outcomesOf(commit, files, false));
@@ -145,7 +138,7 @@ function build(script: Script) {
     ]);
     if (!inserted.ok) throw new Error(`could not store the fixture batch row: ${inserted.error.code}`);
   };
-  return { ports, service, store, leases, suiteRuns, invocations, prepared, disposed, runner, storeBatchRow, head: sha(headIndex) };
+  return { ports, service, store, leases, invocations, prepared, disposed, runner, storeBatchRow, head: sha(headIndex) };
 }
 
 type Fixture = ReturnType<typeof build>;
@@ -167,8 +160,7 @@ describe("head recheck of the files red at the selection commit", () => {
     // plan landings 3 and 6 (L = 6); head = 39. A red from 6 (stays red), B red 6..20 (green at head), C red from 25 (turned red after L).
     const f = build({ commits: 40, files: { [A]: redFrom(6), [B]: { redWhen: (i) => i >= 6 && i <= 20 }, [C]: redFrom(25) } });
     const r = await measure(f, [landingAt(3), landingAt(6)]);
-    // false green guarded: a full suite would run at least once
-    expect(f.suiteRuns).toEqual([]);
+    // (the runner port has no full-suite verb, so none can run)
     // the selection ran at L in ONE batch holding all three files
     expect(batchesAt(f, sha(6))).toEqual([{ commit: sha(6), files: [A, B, C], together: true }]);
     // exactly one batched invocation at head, holding exactly the files red at L
@@ -189,7 +181,6 @@ describe("head recheck of the files red at the selection commit", () => {
   it("AC-AC-2 L is main's head: no recheck runs; nothing red at L: no head run at all", async () => {
     const atHead = build({ commits: 12, files: { [A]: redFrom(6) } });
     const r = await measure(atHead, [landingAt(11)]);
-    expect(atHead.suiteRuns).toEqual([]);
     expect(batchesAt(atHead, atHead.head)).toHaveLength(1); // the selection's own batch at L = head
     expect(r.charged).toEqual([]); // red since 6, not at the landing 11: red-before or other commit, never charged
     expect(r.files[0]).toMatchObject({ file: A });
@@ -197,7 +188,6 @@ describe("head recheck of the files red at the selection commit", () => {
 
     const green = build({ commits: 40, files: {} });
     const g = await measure(green, [landingAt(6)]);
-    expect(green.suiteRuns).toEqual([]);
     expect(green.invocations).toEqual([]);
     expect(g.charged).toEqual([]);
   });
@@ -293,11 +283,13 @@ describe("batched attribution", () => {
     expect(b.files.find((x) => x.file === A)).toMatchObject({ outcome: "red-before" });
     expect(singles(before).filter((i) => i.commit === sha(0))).toHaveLength(1);
 
-    // interval start: a lying batch row (green at 25) must not become the interval's known-green start
+    // interval start: a stored batch row (green at 15) must not become the interval's known-green start: the floor (commit 0) is
+    // still decided by a single-file run, which only happens when no single-file knowledge starts the interval higher.
     const start = rangeFixture({ [A]: redFrom(21) });
-    await start.storeBatchRow(25, A, 0);
+    await start.storeBatchRow(15, A, 0);
     const s = await measure(start, [landingAt(1), landingAt(21)]);
     expect(s.charged).toEqual([{ file: A, landing: sha(21) }]);
+    expect(singles(start).filter((i) => i.commit === sha(0))).toHaveLength(1);
 
     // confirmation: a stored batch row (red at 21, green at 20) never stands in for the single-file confirmation runs
     const confirm = rangeFixture({ [A]: redFrom(21) });
@@ -307,12 +299,12 @@ describe("batched attribution", () => {
     expect(c.charged).toEqual([{ file: A, landing: sha(21) }]);
     expect(singles(confirm).filter((i) => i.commit === sha(21) || i.commit === sha(20))).toHaveLength(2);
 
-    // search step: a stored batch row at the first probe (16) answers it without a run
+    // search step: a stored batch row at the first probe (10, the midpoint of (0, 21): the file is red at L = 21) answers it without a run
     const step = rangeFixture({ [A]: redFrom(21) });
-    await step.storeBatchRow(16, A, 0);
+    await step.storeBatchRow(10, A, 0);
     const t = await measure(step, [landingAt(1), landingAt(21)]);
     expect(t.charged).toEqual([{ file: A, landing: sha(21) }]);
-    expect(batchesAt(step, sha(16))).toEqual([]);
+    expect(batchesAt(step, sha(10))).toEqual([]);
   });
 });
 
@@ -367,8 +359,9 @@ describe("build first for a selection holding a declared-spawn test", () => {
     const root = packageWith({ build: "echo built > built.marker", testFile: "test -f built.marker" });
     try {
       const without = await runTestFilesTogether(root, "fixture", [A], cleanEnv());
-      expect(without.map((o) => o.exit_code)).toEqual([1]); // the script fails without the build: it is red here, but with no readable failing file it is incomplete
-      expect(without[0]?.incomplete).toBeDefined();
+      // the script fails without the build: not a green (the exit is whatever the script gave, which is no test result: a runner
+      // exit outside {0, 1} is refused by the service, and exit 1 with no readable failing file is incomplete)
+      expect(without[0]?.exit_code).not.toBe(0);
       const built = await runTestFilesTogether(root, "fixture", [A], cleanEnv(), undefined, { buildFirst: true });
       expect(built.map((o) => [o.exit_code, o.incomplete])).toEqual([[0, undefined]]);
     } finally {
