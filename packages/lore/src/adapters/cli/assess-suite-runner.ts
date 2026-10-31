@@ -5,7 +5,7 @@
  * Purpose: give every plan's regression dimension its measured file runs, without ever running tests in the shared
  *   checkout and without writing the repo's `.lore`.
  * Public surface: createGitCommitSuiteRunner (resolve a commit, re-run named test files one by one or together in one
- *   invocation, `withWorktree`, `disposeWorktrees`), runTestFilesTogether, outcomesOfTogetherRun, suiteChildEnv,
+ *   invocation, `withWorktree`, `disposeWorktrees`), runTestFilesTogether, outcomesOfTogetherRun, finishedTestFiles, suiteChildEnv,
  *   FILE_TEST_SCRIPT, runInThrowawayWorktree, prepareDependencies.
  * Invariants:
  *   - The commands are the project's own package.json scripts (`test:file`, and `build` before a batch with a declared
@@ -438,6 +438,26 @@ export async function runTestFilesTogether(
 }
 
 /**
+ * The test files a runner's output shows as finished: a `✓ <file> (N tests ...)` line is a passed file (exit 0), a
+ * `❯ <file> (N tests | M failed ...)` line a failed one (exit 1). The dot reporter `test:file` uses prints no such line, so
+ * today only a verbose reporter's output yields entries; nothing is guessed for a file with no line.
+ *
+ * @param output - plain (colour-stripped) combined output of an invocation
+ * @returns file path to the exit code its line shows, in first-seen order
+ */
+export function finishedTestFiles(output: string): Map<string, number> {
+  const finished = new Map<string, number>();
+  for (const line of output.split("\n")) {
+    const match = /^\s*(✓|❯)\s+(?:\[[^\]]*\]\s+)?(\S+\.(?:test|spec)\.[cm]?[tj]sx?)\s+\(\d+ tests?(?:\s*\|\s*(\d+) failed)?/.exec(line);
+    if (match?.[2] === undefined) continue;
+    const failed = match[1] === "❯" ? Number(match[3] ?? 0) : 0;
+    if (match[1] === "❯" && failed === 0) continue; // reason: `❯` with no failed count is a file still running (partial), not a result.
+    if (!finished.has(match[2])) finished.set(match[2], failed > 0 ? 1 : 0);
+  }
+  return finished;
+}
+
+/**
  * The per-file outcomes of ONE invocation that ran `files` together (`bun run test:file f1 f2 ...`).
  *
  * reason: exit 0 = every file passed; exit 1 = some failed and the failing files are read from the runner's own output
@@ -459,7 +479,18 @@ export function outcomesOfTogetherRun(
     duration_ms: run.durationMs,
     ...(incomplete !== undefined ? { incomplete } : {}),
   });
-  if (run.incomplete !== undefined) return files.map((file) => outcome(file, 1, run.incomplete));
+  if (run.incomplete !== undefined) {
+    // reason: #568 — a chunk the limit ended keeps the files whose own result line the runner had already printed; every other file is incomplete.
+    const finished = finishedTestFiles(run.output.replace(ANSI_COLOR, ""));
+    const finishedExit = (file: string): number | undefined => {
+      for (const [path, exitCode] of finished) if (path === file || path.endsWith(`/${file}`) || file.endsWith(`/${path}`)) return exitCode;
+      return undefined;
+    };
+    return files.map((file) => {
+      const exitCode = finishedExit(file);
+      return exitCode === undefined ? outcome(file, 1, run.incomplete) : outcome(file, exitCode);
+    });
+  }
   if (run.status === 0) return files.map((file) => outcome(file, 0));
   if (run.status !== 1) return files.map((file) => outcome(file, run.status));
   // reason: a runner that colours its output (FORCE_COLOR) wraps `FAIL` and the path in escape codes; the line pattern needs plain text.

@@ -4,7 +4,7 @@
  * "Accounting"; attribution as `spec-a-plan-s-regression-reuses-a-stored-suite-that-contains` D1-D3).
  *
  * Purpose: decide which test files main has red BECAUSE of a plan, without ever running the full suite. The selection (the
- *   selector's tests for the union of the landings' changed paths, read from L's tree) runs at L in one batched invocation;
+ *   selector's tests for the union of the landings' changed paths, read from L's tree) runs at L in chunks (`selection-run-at-l.ts`);
  *   files red at L are rechecked at main's head in one batched run; the files still red are bisected TOGETHER, one batched
  *   invocation per probed commit, and each charge rests on single-file runs. Only a transition at one of the plan's landing
  *   commits is the plan's regression. A test file the selection did not name is never run and never charged.
@@ -18,8 +18,10 @@
  *     with "no test reaches this plan's changes", never `pass`; a test the plan removed, an alias import resolving to nothing and a
  *     changed path in no tree are named in the stored accounting and change no verdict. The accounting text rides the
  *     selection row ("regression measured on N selected test files of M (selector accounting stored)").
- *   - Selected files run at L in ONE batched invocation (`test:file` routes Bun and Node files itself), stored per (L, file)
- *     with kind `batch`; a selection holding a declared-spawn test builds first. A later review reuses the stored rows.
+ *   - Selected files without a stored result at L run in chunks that fit the time limit (`test:file` routes Bun and Node files itself),
+ *     each chunk stored per (L, file) with kind `batch` when it ends; a selection holding a declared-spawn test builds first. A later
+ *     review or a retry reuses the stored rows and runs only the files without one. Regression is `not-measured` while any selected
+ *     file has no result, naming how many of N remain (#568).
  *   - Head recheck (L is not head): every file red at L is run in ONE batched invocation at head; a file green there is run
  *     once alone at head before it is dropped; green alone = `green-at-head` (not looked at), red alone stays.
  *   - Per remaining file: upper bound = L (the file was red there); lower bound = the plan's earliest landing's first parent, or a
@@ -45,6 +47,7 @@
 import { err, ok, type LoreError, type MilestoneFactRow, type RegressionNotMeasuredCause, type Result } from "@lore/core";
 import type { SuiteFileRunRecord, SuiteResultRecord } from "../store/store-interface.js";
 import { noCodeRegressionRow } from "./corpus-only-task.js";
+import { runSelectionAtL } from "./selection-run-at-l.js";
 import { loreErrorText, singleFileRunKey, type CommitSuiteRunnerPort, type RunBatchOptions, type SingleFileRunKind } from "./suite-result-service.js";
 
 /** One landing of the plan, as `deriveLandingDiffForPlan` reports it. */
@@ -638,10 +641,19 @@ export async function regressionAtHead(
   }
   const selected = selection.selected.map((f) => f.path);
   const summary = `regression measured on ${String(selected.length)} selected test files of ${String(selection.totalTestFiles)} (selector accounting stored)`;
-  const run = await ports.suites.runBatch(selectionCommit, selected, ports.runner, { buildFirst: selection.selected.some((f) => f.needsCompiledBinary) });
-  if (!run.ok) return unmeasured(selectionCommit, `the selected tests could not be run at ${selectionCommit}: ${loreErrorText(run.error)}`);
-  const singleFileRunIds: { key: string; id: string }[] = run.value.map((row) => ({ key: `${row.file}@${selectionCommit}:batch`, id: runIdOf(row) }));
-  const redFiles = run.value.filter((row) => stateOfExit(row.exit_code) === "red").map((row) => row.file).sort();
+  const chunked = await runSelectionAtL(selectionCommit, selection.selected, history, {
+    listFileRuns: (key) => ports.suites.listFileRuns(key),
+    runBatch: (commit, files, runner, options) => ports.suites.runBatch(commit, files, runner, options),
+    runner: ports.runner,
+  });
+  if (!chunked.ok) return unmeasured(selectionCommit, `the selected tests could not be run at ${selectionCommit}: ${loreErrorText(chunked.error)}`);
+  // reason: #568 — regression is not measured only while some selected file has no result; the text names how many remain and why, so a retry (which runs only those) is the next step.
+  if (chunked.value.remaining.length > 0) {
+    const why = chunked.value.failures.length === 0 ? "" : `: ${chunked.value.failures.join("; ")}`;
+    return unmeasured(selectionCommit, `the selected tests could not be run at ${selectionCommit}: ${String(chunked.value.remaining.length)} of ${String(selected.length)} selected test files have no result yet${why}`);
+  }
+  const singleFileRunIds: { key: string; id: string }[] = chunked.value.rows.map((stored) => ({ key: `${stored.row.file}@${selectionCommit}:${stored.kind}`, id: runIdOf(stored.row) }));
+  const redFiles = chunked.value.rows.filter((stored) => stateOfExit(stored.row.exit_code) === "red").map((stored) => stored.row.file).sort();
   const selectionRow: MilestoneFactRow = {
     subject: `selection@${selectionCommit}`,
     verdict: "pass",
