@@ -97,6 +97,8 @@ export type AliasMap = Readonly<Record<string, string>>;
 export interface ImportGraph {
   readonly forward: ReadonlyMap<string, ReadonlySet<string>>;
   readonly reverse: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Imports that matched a tsconfig alias rule but resolved to no file (always empty without `aliasRules`). */
+  readonly unresolvedAliases: readonly UnresolvedAlias[];
 }
 
 /**
@@ -144,6 +146,10 @@ export interface SelectionResult {
    * for the loud-zero decision (`isLoudZero`): an EMPTY list is the one legitimate silent zero.
    */
   readonly changedFiles: readonly string[];
+  /** Imports that matched a tsconfig alias rule but named no file (commit mode); empty otherwise. */
+  readonly unresolvedAliases?: readonly UnresolvedAlias[];
+  /** Test files whose declaration block could not be parsed (only filled with `onMalformedDeclaration: "collect"`; otherwise parsing throws). */
+  readonly unparseable?: readonly { readonly path: string; readonly message: string }[];
 }
 
 const FROM_IMPORT_RE = /\b(?:import|export)\b[^;'"()]*?\bfrom\s*["']([^"']+)["']/g;
@@ -173,16 +179,13 @@ export function extractImportSpecifiers(content: string): string[] {
   return [...specifiers];
 }
 
-/** Resolve a relative specifier (`"./foo"` / `"../bar.js"`) against the importing file's directory, applying this repo's `.js`-import→`.ts`-file convention. Returns `undefined` if no candidate exists in `fileMap`. */
-function resolveRelativeSpecifier(specifier: string, fromFile: string, fileMap: FileMap): string | undefined {
-  const fromDir = posix.dirname(fromFile);
-  const raw = posix.normalize(posix.join(fromDir, specifier));
-
+/** Resolve a repo-relative raw path (extension possibly absent, `.js` or `.jsx`) to a file present in `fileMap`, applying this repo's `.js`-import→`.ts`-file convention. */
+function resolveRepoPath(raw: string, fileMap: FileMap): string | undefined {
   const candidates: string[] = [];
   if (/\.tsx?$/.test(raw)) {
     candidates.push(raw);
   } else if (raw.endsWith(".jsx")) {
-    candidates.push(raw.replace(/\.jsx$/, ".tsx"));
+    candidates.push(raw.replace(/\.jsx$/, ".tsx"), raw);
   } else if (raw.endsWith(".js")) {
     candidates.push(raw.replace(/\.js$/, ".ts"), raw.replace(/\.js$/, ".tsx"));
   } else {
@@ -191,12 +194,72 @@ function resolveRelativeSpecifier(specifier: string, fromFile: string, fileMap: 
   return candidates.find((c) => fileMap.has(c));
 }
 
+/** Resolve a relative specifier (`"./foo"` / `"../bar.js"`) against the importing file's directory. Returns `undefined` if no candidate exists in `fileMap`. */
+function resolveRelativeSpecifier(specifier: string, fromFile: string, fileMap: FileMap): string | undefined {
+  return resolveRepoPath(posix.normalize(posix.join(posix.dirname(fromFile), specifier)), fileMap);
+}
+
+/**
+ * One tsconfig `compilerOptions.paths` entry, scoped to the files that config governs. `scope` is the
+ * repo-relative directory the config lives in (`""` = repository root); `pattern` is the paths key
+ * (`"@/*"` or an exact `"@lore/core"`); `targets` are repo-relative, `*` standing for the text the
+ * pattern's `*` captured.
+ */
+export interface AliasRule {
+  readonly scope: string;
+  readonly pattern: string;
+  readonly targets: readonly string[];
+}
+
+/** An import that matched an {@link AliasRule} pattern yet resolved to no file in the tree — counted and named, never silently dropped. */
+export interface UnresolvedAlias {
+  readonly from: string;
+  readonly specifier: string;
+}
+
+/** The rules of the closest scope that contains `fromFile` and has any rule (a package's own tsconfig replaces the root one for its files). */
+function rulesFor(fromFile: string, rules: readonly AliasRule[]): readonly AliasRule[] {
+  let bestScope: string | undefined;
+  for (const rule of rules) {
+    const contains = rule.scope === "" || fromFile.startsWith(`${rule.scope}/`);
+    if (contains && (bestScope === undefined || rule.scope.length > bestScope.length)) bestScope = rule.scope;
+  }
+  return bestScope === undefined ? [] : rules.filter((rule) => rule.scope === bestScope);
+}
+
+/** What `pattern` captured from `specifier` (`""` for an exact match, `undefined` for no match). */
+function captureAliasPattern(pattern: string, specifier: string): string | undefined {
+  const star = pattern.indexOf("*");
+  if (star === -1) return pattern === specifier ? "" : undefined;
+  const prefix = pattern.slice(0, star);
+  const suffix = pattern.slice(star + 1);
+  if (specifier.length < prefix.length + suffix.length || !specifier.startsWith(prefix) || !specifier.endsWith(suffix)) return undefined;
+  return specifier.slice(prefix.length, specifier.length - suffix.length);
+}
+
+/** `resolved`: a rule matched and a file exists; `unresolved`: a rule matched, no file; `none`: no rule matches (an external package or builtin). */
+type AliasResolution = { readonly kind: "resolved"; readonly path: string } | { readonly kind: "unresolved" } | { readonly kind: "none" };
+
+function resolveAliasRule(specifier: string, fromFile: string, fileMap: FileMap, rules: readonly AliasRule[]): AliasResolution {
+  let matched = false;
+  for (const rule of rulesFor(fromFile, rules)) {
+    const captured = captureAliasPattern(rule.pattern, specifier);
+    if (captured === undefined) continue;
+    matched = true;
+    for (const target of rule.targets) {
+      const found = resolveRepoPath(posix.normalize(target.replace("*", captured)), fileMap);
+      if (found !== undefined) return { kind: "resolved", path: found };
+    }
+  }
+  return matched ? { kind: "unresolved" } : { kind: "none" };
+}
+
 /**
  * Resolve one import specifier from `fromFile` to a repo-relative path
  * present in `fileMap` — relative specifiers via directory-relative
  * resolution, `aliasMap`-listed bare specifiers (`@lore/core`,
- * `@lore/core/node`) via exact-match lookup. Any other bare specifier (an
- * external package, a Node builtin) resolves to `undefined` — it is outside
+ * `@lore/core/node`) via exact-match lookup, then (commit mode) tsconfig `aliasRules`. Any other
+ * bare specifier (an external package, a Node builtin) resolves to `undefined` — it is outside
  * this repo's own import graph by definition.
  */
 export function resolveImportSpecifier(
@@ -204,6 +267,7 @@ export function resolveImportSpecifier(
   fromFile: string,
   fileMap: FileMap,
   aliasMap: AliasMap,
+  aliasRules: readonly AliasRule[] = [],
 ): string | undefined {
   if (specifier.startsWith(".")) {
     return resolveRelativeSpecifier(specifier, fromFile, fileMap);
@@ -212,33 +276,44 @@ export function resolveImportSpecifier(
   if (aliasTarget !== undefined && fileMap.has(aliasTarget)) {
     return aliasTarget;
   }
-  return undefined;
+  const byRule = resolveAliasRule(specifier, fromFile, fileMap, aliasRules);
+  return byRule.kind === "resolved" ? byRule.path : undefined;
 }
 
-/** Build the resolved forward/reverse import graph over every file in `fileMap`. Pure — no IO. */
-export function buildImportGraph(fileMap: FileMap, aliasMap: AliasMap): ImportGraph {
+/**
+ * Build the resolved forward/reverse import graph over every file in `fileMap`. Pure — no IO.
+ * `unresolvedAliases` lists every import that matched a tsconfig alias rule yet named no file.
+ */
+export function buildImportGraph(fileMap: FileMap, aliasMap: AliasMap, aliasRules: readonly AliasRule[] = []): ImportGraph {
   const forward = new Map<string, Set<string>>();
   const reverse = new Map<string, Set<string>>();
+  const unresolvedAliases: UnresolvedAlias[] = [];
   for (const file of fileMap.keys()) {
     forward.set(file, new Set());
   }
 
   for (const [file, content] of fileMap) {
     for (const specifier of extractImportSpecifiers(content)) {
-      const resolved = resolveImportSpecifier(specifier, file, fileMap, aliasMap);
-      if (resolved === undefined || resolved === file) continue;
+      const resolved = resolveImportSpecifier(specifier, file, fileMap, aliasMap, aliasRules);
+      if (resolved === undefined) {
+        if (!specifier.startsWith(".") && aliasMap[specifier] === undefined && resolveAliasRule(specifier, file, fileMap, aliasRules).kind === "unresolved") {
+          unresolvedAliases.push({ from: file, specifier });
+        }
+        continue;
+      }
+      if (resolved === file) continue;
       forward.get(file)!.add(resolved);
       if (!reverse.has(resolved)) reverse.set(resolved, new Set());
       reverse.get(resolved)!.add(file);
     }
   }
 
-  return { forward, reverse };
+  return { forward, reverse, unresolvedAliases };
 }
 
 /** `true` iff `path` is a test file under this repo's `*.test.ts` / `*.test.tsx` naming convention (covers `.bun.test.ts` too — it ends in `.test.ts`). */
 export function isTestFile(path: string): boolean {
-  return /\.test\.tsx?$/.test(path);
+  return /\.test\.(?:tsx?|jsx)$/.test(path);
 }
 
 /** `true` iff `path` follows the `.bun.test.ts` bun-runner naming convention. */
@@ -297,9 +372,15 @@ export function selectAffectedTests(params: {
   readonly changedFiles: readonly string[];
   readonly fileMap: FileMap;
   readonly aliasMap: AliasMap;
+  /** tsconfig-derived alias rules (commit mode). Omitted = only `aliasMap` resolves bare specifiers. */
+  readonly aliasRules?: readonly AliasRule[];
+  /** `"throw"` (default): a malformed declaration block throws. `"collect"`: name the file in `unparseable` and go on. */
+  readonly onMalformedDeclaration?: "throw" | "collect";
 }): SelectionResult {
   const { changedFiles, fileMap, aliasMap } = params;
-  const graph = buildImportGraph(fileMap, aliasMap);
+  const collectMalformed = params.onMalformedDeclaration === "collect";
+  const unparseable: { path: string; message: string }[] = [];
+  const graph = buildImportGraph(fileMap, aliasMap, params.aliasRules ?? []);
   const knownChanged = changedFiles.filter((f) => fileMap.has(f));
 
   const reasonByPath = new Map<string, SelectionReason>();
@@ -319,7 +400,14 @@ export function selectAffectedTests(params: {
   // declared read may name a file outside the traced universe (a doc, an asset, a hook).
   for (const [path, content] of fileMap) {
     if (!isTestFile(path)) continue;
-    const declared = declarationsOf(path, content);
+    let declared: DeclaredInputs;
+    try {
+      declared = declarationsOf(path, content);
+    } catch (error) {
+      if (!collectMalformed || !(error instanceof ChangedTestsError)) throw error;
+      unparseable.push({ path, message: error.message });
+      continue;
+    }
     if (declared.spawns.includes(COMPILED_BINARY_INPUTS.declaration)) needsBinary.add(path);
     if (reasonByPath.has(path)) continue;
     const spawnHit = declared.spawns.some((pattern) => {
@@ -361,6 +449,8 @@ export function selectAffectedTests(params: {
     selected,
     zeroSelectionWarning: knownChanged.length > 0 && selected.length === 0,
     changedFiles,
+    unresolvedAliases: graph.unresolvedAliases,
+    unparseable,
   };
 }
 
@@ -380,6 +470,21 @@ export function isLoudZero(selection: SelectionResult): boolean {
  * the loud-zero FAIL block when it applies.
  */
 export function formatAccounting(selection: SelectionResult): string {
+  const lines = formatSelectionLines(selection);
+
+  if (isLoudZero(selection)) {
+    lines.push(
+      `FAIL: 0 tests selected despite ${selection.changedFiles.length} changed file(s) — refusing to report ` +
+        "this as a passing run. Unselected changed path(s):",
+    );
+    for (const f of selection.changedFiles) lines.push(`  ${f}`);
+  }
+
+  return lines.join("\n");
+}
+
+/** The accounting lines every mode prints: per-runner count and reasons, build-first, zero-selection warning. No loud-zero verdict. */
+function formatSelectionLines(selection: SelectionResult): string[] {
   const vitestFiles = selection.selected.filter((f) => f.runner === "vitest");
   const bunFiles = selection.selected.filter((f) => f.runner === "bun");
   const compiledBinaryTests = selection.selected.filter((f) => f.needsCompiledBinary === true);
@@ -402,15 +507,7 @@ export function formatAccounting(selection: SelectionResult): string {
     );
   }
 
-  if (isLoudZero(selection)) {
-    lines.push(
-      `FAIL: 0 tests selected despite ${selection.changedFiles.length} changed file(s) — refusing to report ` +
-        "this as a passing run. Unselected changed path(s):",
-    );
-    for (const f of selection.changedFiles) lines.push(`  ${f}`);
-  }
-
-  return lines.join("\n");
+  return lines;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -581,7 +678,7 @@ export function loadFileMap(repoRoot: string): FileMap {
       walkDir(repoRoot, srcDir, (p) => /\.tsx?$/.test(p), files);
     }
     if (existsSync(osJoin(repoRoot, testsDir))) {
-      walkDir(repoRoot, testsDir, (p) => /\.ts$/.test(p), files);
+      walkDir(repoRoot, testsDir, (p) => /\.(?:tsx?|jsx)$/.test(p), files);
     }
   }
 
@@ -639,6 +736,327 @@ export function loadCoreAliasMap(repoRoot: string): AliasMap {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Commit mode: select from a commit's TREE (git objects), never the working tree
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Commit mode answers "which tests can the changes of these landings reach, at commit C?" — the
+ * question a plan close asks (SPEC a-plan-s-close-runs-only-the-tests-its-changes-can-reach, AC-SC-1).
+ *
+ * Everything is read from git objects at C: the file universe (`git ls-tree -r` + ONE
+ * `git cat-file --batch`; a `git show` per file measured 33-39 s), the tsconfig `paths` aliases, the
+ * declarations. The working tree is never read, so a dirty checkout cannot change the answer.
+ *
+ * Deleted paths: a changed path absent at C was deleted by one of the landings. The caller passes
+ * `landingParents` (each landing's first parent, e.g. `git rev-parse <landing>^1`, in landing order);
+ * the path is looked up in those trees and selects the tests that imported or declared it THERE.
+ * Such a test still present at C is selected; one absent at C goes to `removedTests` (the plan
+ * removed it; it is not run and not a measurement failure). A path found in no tree at all is
+ * `unknownPaths` — named, never silently dropped.
+ */
+export interface CommitSelectionInput {
+  readonly repoRoot: string;
+  /** Commit whose tree is selected from (any rev git resolves; resolved to a sha once). */
+  readonly commit: string;
+  /** Union of the landings' changed paths (`git diff --name-only <landing>^1 <landing>`). */
+  readonly changedPaths: readonly string[];
+  /** First parent of each landing, used to read paths a landing deleted. Optional only when nothing was deleted. */
+  readonly landingParents?: readonly string[];
+  readonly spawn?: GitBytesSpawn;
+}
+
+/** Output of {@link selectForCommit}: the normal selection plus what the selector could not see or chose not to run. */
+export interface CommitSelectionResult extends SelectionResult {
+  /** The resolved commit sha the selection was computed at. */
+  readonly commit: string;
+  readonly unresolvedAliases: readonly UnresolvedAlias[];
+  readonly unparseable: readonly { readonly path: string; readonly message: string }[];
+  /** Selected tests the changes removed (selected through a parent tree, absent at `commit`). Not run. */
+  readonly removedTests: readonly { readonly path: string; readonly reason: SelectionReason }[];
+  /** Changed paths absent at `commit` and present in none of `landingParents`. */
+  readonly unknownPaths: readonly string[];
+}
+
+/** Bytes-level `spawnSync` slice for `git`; injectable for tests of lost-answer handling. */
+export type GitBytesSpawn = (
+  args: readonly string[],
+  cwd: string,
+  input?: Buffer,
+) => { status: number | null; stdout: Buffer | null; stderr: Buffer | null; error?: Error | undefined };
+
+const DEFAULT_GIT_BYTES_SPAWN: GitBytesSpawn = (args, cwd, input) =>
+  spawnSync("git", [...args], { cwd, input, maxBuffer: 1024 * 1024 * 1024 });
+
+function runGitBytes(spawn: GitBytesSpawn, args: readonly string[], cwd: string, input?: Buffer): Buffer {
+  const result = spawn(args, cwd, input);
+  if (result.error) throw new ChangedTestsError("git", `git ${args.join(" ")} failed to spawn: ${result.error.message}`, { args, cwd });
+  if (result.status !== 0 || result.stdout === null) {
+    throw new ChangedTestsError("git", `git ${args.join(" ")} exited ${String(result.status)}: ${result.stderr?.toString("utf8") ?? ""}`, { args, cwd });
+  }
+  return result.stdout;
+}
+
+/** `true` iff `path` is part of the selector's universe: packages/*\/src ts(x), packages/*\/tests ts(x)/jsx, scripts ts; never under node_modules or a dot directory. */
+export function isUniversePath(path: string): boolean {
+  const segments = path.split("/");
+  if (segments.some((s) => s === "node_modules" || (s.startsWith(".") && s.length > 1))) return false;
+  if (segments[0] === "scripts") return /\.ts$/.test(path);
+  if (segments[0] !== "packages" || segments.length < 4) return false;
+  if (segments[2] === "src") return /\.tsx?$/.test(path);
+  if (segments[2] === "tests") return /\.(?:tsx?|jsx)$/.test(path);
+  return false;
+}
+
+const TSCONFIG_PATH_RE = /(?:^|\/)tsconfig[^/]*\.json$/;
+
+/** What commit mode reads out of one tree. */
+interface CommitTree {
+  readonly sha: string;
+  /** Every blob path in the tree (universe or not): the "present at the commit" test. */
+  readonly allPaths: ReadonlySet<string>;
+  readonly files: FileMap;
+  /** `tsconfig*.json` text by path. */
+  readonly configs: ReadonlyMap<string, string>;
+}
+
+/** Parse `git cat-file --batch` output for `shas` in order, failing loud on a short, missing or mismatched answer (a lost answer is never a result). */
+function parseCatFileBatch(out: Buffer, shas: readonly string[]): string[] {
+  const texts: string[] = [];
+  let offset = 0;
+  for (const sha of shas) {
+    const newline = out.indexOf(0x0a, offset);
+    if (newline === -1) throw new ChangedTestsError("git", `git cat-file --batch output ended before object ${sha}`, { sha });
+    const header = out.subarray(offset, newline).toString("utf8").split(" ");
+    if (header[0] !== sha || header[1] !== "blob" || header[2] === undefined) {
+      throw new ChangedTestsError("git", `git cat-file --batch answered "${header.join(" ")}" for ${sha}`, { sha });
+    }
+    const size = Number(header[2]);
+    const end = newline + 1 + size;
+    if (!Number.isInteger(size) || end > out.length) throw new ChangedTestsError("git", `git cat-file --batch truncated object ${sha}`, { sha });
+    texts.push(out.subarray(newline + 1, end).toString("utf8"));
+    offset = end + 1;
+  }
+  return texts;
+}
+
+function resolveCommitSha(repoRoot: string, rev: string, spawn: GitBytesSpawn): string {
+  const sha = runGitBytes(spawn, ["rev-parse", "--verify", `${rev}^{commit}`], repoRoot).toString("utf8").trim();
+  if (!/^[0-9a-f]{40,64}$/.test(sha)) throw new ChangedTestsError("git", `git rev-parse ${rev} printed "${sha}", not a commit sha`, { rev });
+  return sha;
+}
+
+/** Read one commit's tree: universe files and tsconfigs in a single `cat-file --batch`. */
+function loadCommitTree(repoRoot: string, rev: string, spawn: GitBytesSpawn): CommitTree {
+  const sha = resolveCommitSha(repoRoot, rev, spawn);
+  const listing = runGitBytes(spawn, ["ls-tree", "-r", "-z", sha], repoRoot).toString("utf8");
+  const allPaths = new Set<string>();
+  const wanted: { path: string; blob: string; config: boolean }[] = [];
+  for (const entry of listing.split("\0")) {
+    if (entry.length === 0) continue;
+    const tab = entry.indexOf("\t");
+    const [, type, blob] = entry.slice(0, tab).split(" ");
+    const path = entry.slice(tab + 1);
+    if (type !== "blob" || blob === undefined) continue;
+    allPaths.add(path);
+    const segments = path.split("/");
+    const underNodeModules = segments.includes("node_modules");
+    const config = !underNodeModules && TSCONFIG_PATH_RE.test(path);
+    if (config || isUniversePath(path)) wanted.push({ path, blob, config });
+  }
+  if (allPaths.size === 0) throw new ChangedTestsError("git", `git ls-tree -r ${sha} listed no files (lost answer or empty tree)`, { sha });
+
+  const texts = parseCatFileBatch(
+    runGitBytes(spawn, ["cat-file", "--batch"], repoRoot, Buffer.from(wanted.map((w) => `${w.blob}\n`).join(""))),
+    wanted.map((w) => w.blob),
+  );
+  const files = new Map<string, string>();
+  const configs = new Map<string, string>();
+  wanted.forEach((w, i) => (w.config ? configs : files).set(w.path, texts[i]!));
+  return { sha, allPaths, files, configs };
+}
+
+/** Strip `//` and block comments and trailing commas from JSONC, leaving string contents alone. */
+export function stripJsonComments(text: string): string {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i]!;
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j + 1;
+    } else if (ch === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+    } else if (ch === "/" && text[i + 1] === "*") {
+      const close = text.indexOf("*/", i + 2);
+      i = close === -1 ? text.length : close + 2;
+    } else {
+      out += ch;
+      i++;
+    }
+  }
+  return out.replace(/,(\s*[}\]])/g, "$1");
+}
+
+const TsconfigSchema = z.object({
+  extends: z.string().optional(),
+  compilerOptions: z
+    .object({ baseUrl: z.string().optional(), paths: z.record(z.string(), z.array(z.string())).optional() })
+    .optional(),
+});
+
+/** `{baseDir, paths}` a tsconfig effectively declares after following `extends`: the nearest `paths` wins (a child REPLACES the base's), resolved against the effective `baseUrl` else the declaring config's directory. */
+function effectivePaths(configPath: string, configs: ReadonlyMap<string, string>, seen: readonly string[] = []): { baseDir: string; paths: Record<string, string[]> } | undefined {
+  if (seen.includes(configPath)) throw new ChangedTestsError("graph", `tsconfig extends cycle at ${configPath}`, { chain: [...seen, configPath] });
+  const text = configs.get(configPath);
+  if (text === undefined) throw new ChangedTestsError("graph", `tsconfig ${configPath} is extended but absent from the tree`, { configPath });
+  let json: unknown;
+  try {
+    json = JSON.parse(stripJsonComments(text));
+  } catch (error) {
+    throw new ChangedTestsError("graph", `${configPath} is not valid JSONC: ${error instanceof Error ? error.message : String(error)}`, { configPath });
+  }
+  const parsed = TsconfigSchema.safeParse(json);
+  if (!parsed.success) throw new ChangedTestsError("graph", `${configPath} failed tsconfig validation`, { configPath, issues: parsed.error.issues });
+  const dir = posix.dirname(configPath);
+  const own = parsed.data.compilerOptions;
+
+  let inherited: { baseDir: string; paths: Record<string, string[]> } | undefined;
+  let inheritedBaseUrl: string | undefined;
+  if (parsed.data.extends !== undefined) {
+    if (!parsed.data.extends.startsWith(".")) {
+      throw new ChangedTestsError("graph", `${configPath} extends the package "${parsed.data.extends}"; only relative extends are resolvable from git objects`, { configPath });
+    }
+    const withExt = parsed.data.extends.endsWith(".json") ? parsed.data.extends : `${parsed.data.extends}.json`;
+    const parentPath = posix.normalize(posix.join(dir, withExt));
+    inherited = effectivePaths(parentPath, configs, [...seen, configPath]);
+    inheritedBaseUrl = inherited?.baseDir;
+  }
+  const baseUrl = own?.baseUrl !== undefined ? posix.normalize(posix.join(dir, own.baseUrl)) : undefined;
+  if (own?.paths !== undefined) return { baseDir: baseUrl ?? inheritedBaseUrl ?? dir, paths: own.paths };
+  if (inherited !== undefined) return { baseDir: baseUrl ?? inherited.baseDir, paths: inherited.paths };
+  return undefined;
+}
+
+/**
+ * The alias rules of a tree: for the root `tsconfig.json` and every `packages/<pkg>/tsconfig.json`,
+ * its effective `compilerOptions.paths` (following `extends`), scoped to that directory. The tsconfig
+ * is the SSOT for what TypeScript resolves, so no alias is transcribed here.
+ */
+export function buildAliasRulesFromConfigs(configs: ReadonlyMap<string, string>): AliasRule[] {
+  const rules: AliasRule[] = [];
+  for (const configPath of configs.keys()) {
+    const scope = posix.dirname(configPath) === "." ? "" : posix.dirname(configPath);
+    const isScopeConfig = posix.basename(configPath) === "tsconfig.json" && (scope === "" || /^packages\/[^/]+$/.test(scope));
+    if (!isScopeConfig) continue;
+    const effective = effectivePaths(configPath, configs);
+    if (effective === undefined) continue;
+    for (const [pattern, targets] of Object.entries(effective.paths)) {
+      rules.push({ scope, pattern, targets: targets.map((t) => posix.normalize(posix.join(effective.baseDir, t))) });
+    }
+  }
+  return rules;
+}
+
+/**
+ * Select the tests that `changedPaths` can reach, in `commit`'s tree. IO (git). Pure otherwise; the
+ * working tree is never read. See {@link CommitSelectionInput} for the deleted-path contract.
+ * @throws ChangedTestsError git/graph failures (a lost git answer fails loud). A malformed
+ *   `@reads`/`@spawns` block does NOT throw: the file lands in `unparseable`.
+ */
+export function selectForCommit(input: CommitSelectionInput): CommitSelectionResult {
+  const spawn = input.spawn ?? DEFAULT_GIT_BYTES_SPAWN;
+  const tree = loadCommitTree(input.repoRoot, input.commit, spawn);
+  const present = input.changedPaths.filter((p) => tree.allPaths.has(p));
+  const absent = input.changedPaths.filter((p) => !tree.allPaths.has(p));
+
+  const base = selectAffectedTests({
+    changedFiles: present,
+    fileMap: tree.files,
+    aliasMap: {},
+    aliasRules: buildAliasRulesFromConfigs(tree.configs),
+    onMalformedDeclaration: "collect",
+  });
+
+  const selectedByPath = new Map<string, SelectedFile>(base.selected.map((f) => [f.path, f]));
+  const removedTests = new Map<string, SelectionReason>();
+  let unassigned = absent;
+  for (const parent of input.landingParents ?? []) {
+    if (unassigned.length === 0) break;
+    const parentTree = loadCommitTree(input.repoRoot, parent, spawn);
+    const here = unassigned.filter((p) => parentTree.allPaths.has(p));
+    if (here.length === 0) continue;
+    unassigned = unassigned.filter((p) => !parentTree.allPaths.has(p));
+    const viaParent = selectAffectedTests({
+      changedFiles: here,
+      fileMap: parentTree.files,
+      aliasMap: {},
+      aliasRules: buildAliasRulesFromConfigs(parentTree.configs),
+      onMalformedDeclaration: "collect",
+    });
+    for (const file of viaParent.selected) {
+      if (tree.files.has(file.path)) {
+        if (!selectedByPath.has(file.path)) selectedByPath.set(file.path, file);
+      } else if (!removedTests.has(file.path)) {
+        removedTests.set(file.path, file.reason);
+      }
+    }
+  }
+
+  // reason: a parent-selected test may declare `@spawns dist/lore`; at the commit it must still carry the
+  // build-first flag computed from ITS declarations at the commit, so recompute from the commit's selection.
+  const selected = [...selectedByPath.values()]
+    .map((file): SelectedFile => {
+      const declared = declarationsOfOrNone(file.path, tree.files.get(file.path)!);
+      return declared.spawns.includes(COMPILED_BINARY_INPUTS.declaration) ? { ...file, needsCompiledBinary: true } : stripBinaryFlag(file);
+    })
+    .sort((a, b) => a.path.localeCompare(b.path));
+
+  return {
+    selected,
+    zeroSelectionWarning: base.zeroSelectionWarning && selected.length === 0,
+    changedFiles: input.changedPaths,
+    // selectAffectedTests always fills both (empty when none); the optional type only keeps pre-existing SelectionResult literals valid.
+    unresolvedAliases: base.unresolvedAliases ?? [],
+    unparseable: base.unparseable ?? [],
+    commit: tree.sha,
+    removedTests: [...removedTests.entries()].map(([path, reason]) => ({ path, reason })).sort((a, b) => a.path.localeCompare(b.path)),
+    unknownPaths: unassigned,
+  };
+}
+
+function declarationsOfOrNone(path: string, content: string): DeclaredInputs {
+  try {
+    return declarationsOf(path, content);
+  } catch (error) {
+    if (error instanceof ChangedTestsError) return { reads: [], spawns: [] };
+    throw error;
+  }
+}
+
+function stripBinaryFlag(file: SelectedFile): SelectedFile {
+  return { path: file.path, reason: file.reason, runner: file.runner };
+}
+
+/**
+ * Accounting for a commit-mode selection: the standard per-runner block plus what the selector could
+ * not see. An empty selection is NOT a failure here (the caller decides what it means); it is stated.
+ */
+export function formatCommitAccounting(selection: CommitSelectionResult): string {
+  const lines = [`commit: ${selection.commit}`, ...formatSelectionLines(selection), `selected total: ${selection.selected.length}`];
+  lines.push(`alias imports resolving to no file: ${selection.unresolvedAliases.length}`);
+  for (const alias of selection.unresolvedAliases) lines.push(`  ${alias.from} -> ${alias.specifier}`);
+  lines.push(`unparseable test files: ${selection.unparseable.length}`);
+  for (const file of selection.unparseable) lines.push(`  ${file.path}: ${file.message}`);
+  lines.push(`removed by the changes (selected via a parent tree, absent at the commit): ${selection.removedTests.length}`);
+  for (const file of selection.removedTests) lines.push(`  ${file.path} (${file.reason})`);
+  lines.push(`changed paths in no tree: ${selection.unknownPaths.length}`);
+  for (const path of selection.unknownPaths) lines.push(`  ${path}`);
+  return lines.join("\n");
+}
+
 /** Spawns `bunx [--bun] vitest run [-c <config>] <files>` from the repo root; returns the exit code. */
 function spawnVitest(repoRoot: string, files: readonly string[], node: boolean): number {
   if (files.length === 0) return 0;
@@ -679,8 +1097,40 @@ function runBuild(repoRoot: string): number {
   return result.status ?? 1;
 }
 
+/**
+ * Commit-mode CLI: `--at <commit> --paths-from <file> [--parent <rev>]...`. `<file>` lists one
+ * changed path per line; each `--parent` is a landing's first parent (for paths the landing deleted).
+ * Prints the commit accounting; selects only, never runs. Returns 0 (an empty selection is stated, not failed).
+ */
+export function runCommitCli(argv: readonly string[], cwd: string): number {
+  let commit: string | undefined;
+  let pathsFrom: string | undefined;
+  const parents: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const flag = argv[i]!;
+    const value = argv[i + 1];
+    if (flag !== "--at" && flag !== "--paths-from" && flag !== "--parent") throw new ChangedTestsError("cli", `unknown or misplaced argument in commit mode: ${flag}`, { arg: flag });
+    if (value === undefined || value.startsWith("--")) throw new ChangedTestsError("cli", `${flag} needs a value`, { arg: flag });
+    if (flag === "--at") commit = value;
+    else if (flag === "--paths-from") pathsFrom = value;
+    else parents.push(value);
+    i++;
+  }
+  if (commit === undefined || pathsFrom === undefined) {
+    throw new ChangedTestsError("cli", "commit mode needs both --at <commit> and --paths-from <file>");
+  }
+  const changedPaths = readFileSync(pathsFrom, "utf8")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  const selection = selectForCommit({ repoRoot: getRepoRoot(cwd), commit, changedPaths, landingParents: parents });
+  console.log(formatCommitAccounting(selection));
+  return 0;
+}
+
 /** CLI entrypoint — orchestrates git → graph → selection → accounting → (optionally) execution. Returns the process exit code. */
 export function runCli(argv: readonly string[], cwd: string): number {
+  if (argv.includes("--at")) return runCommitCli(argv, cwd);
   const args = parseArgs(argv);
   const repoRoot = getRepoRoot(cwd);
   const baseRef = resolveBaseRef(repoRoot, args.base);
