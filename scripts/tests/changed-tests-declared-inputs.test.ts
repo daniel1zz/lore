@@ -43,7 +43,7 @@ function fileMapOf(entries: Record<string, string>): FileMap {
 }
 
 function select(changedFiles: string[], entries: Record<string, string>) {
-  return selectAffectedTests({ changedFiles, fileMap: fileMapOf(entries), aliasMap: ALIAS_MAP });
+  return selectAffectedTests({ changedFiles, fileMap: fileMapOf(entries), aliasMap: ALIAS_MAP, vitestConfigSources: new Map() }); // synthetic map: no vitest configs
 }
 
 function reasonsOf(changedFiles: string[], entries: Record<string, string>): Record<string, string> {

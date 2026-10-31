@@ -466,8 +466,8 @@ export function selectAffectedTests(params: {
   readonly aliasRules?: readonly AliasRule[];
   /** `"throw"` (default): a malformed declaration block throws. `"collect"`: name the file in `unparseable` and go on. */
   readonly onMalformedDeclaration?: "throw" | "collect";
-  /** Root vitest config texts ({@link isVitestConfigPath}). Omitted = no run-config rule (callers of the CLI/commit modes always supply it). */
-  readonly vitestConfigSources?: FileMap;
+  /** Root vitest config texts ({@link isVitestConfigPath}). Required so no caller silently loses the run-config rule; pass an empty map only for a synthetic tree that has no vitest configs. */
+  readonly vitestConfigSources: FileMap;
 }): SelectionResult {
   const { changedFiles, fileMap, aliasMap } = params;
   const collectMalformed = params.onMalformedDeclaration === "collect";
@@ -489,8 +489,8 @@ export function selectAffectedTests(params: {
   }
 
   // run-config — a change to run-wide configuration is a change to an input of every test.
-  const runConfig = params.vitestConfigSources ? findRunConfigHits(changedFiles, params.vitestConfigSources, graph) : undefined;
-  if (runConfig && runConfig.hits.length > 0) {
+  const runConfig = findRunConfigHits(changedFiles, params.vitestConfigSources, graph);
+  if (runConfig.hits.length > 0) {
     for (const path of fileMap.keys()) {
       if (isTestFile(path) && !reasonByPath.has(path)) reasonByPath.set(path, "run-config");
     }
@@ -551,7 +551,7 @@ export function selectAffectedTests(params: {
     changedFiles,
     unresolvedAliases: graph.unresolvedAliases,
     unparseable,
-    ...(runConfig ? { runConfig } : {}),
+    runConfig,
   };
 }
 
