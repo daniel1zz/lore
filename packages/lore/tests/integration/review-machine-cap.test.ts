@@ -164,7 +164,7 @@ class Batches {
     return ok(coverFailedDimensions(failed, entries));
   };
 
-  trigger(batchLease?: ReviewLeases, spawn: (handoff: BatchHandoff) => Result<{ pid: number | undefined }, LoreError> = () => ok({ pid: 4242 })): ReviewTriggerService {
+  trigger(batchLease?: ReviewLeases, spawn: (handoff: BatchHandoff | undefined) => Result<{ pid: number | undefined }, LoreError> = () => ok({ pid: 4242 })): ReviewTriggerService {
     return new ReviewTriggerService({
       listPlans: async () => ok([...this.plans.values()].filter((p) => !p.archived).map((p) => p.bundle.plan)),
       getPlanBundle: async (ref) => ok(this.find(ref).bundle),
