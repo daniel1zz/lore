@@ -1,6 +1,7 @@
 // @reads assets/dispatch-standing-rules.md
 // @reads packages/lore/src/service/dispatch-service.ts
 // @spawns dist/lore
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * done-contract-dispatch-compiled.bun.test.ts — `lore dispatch <code task>` prints the whole subagent prompt from the stored
  * contract and the shipped standing rules (spec-integrate-proves-and-lands-evidence-at-landing-the-merge), observed through the
@@ -23,11 +24,13 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { makeDoneContractFixture, seedApprovedTaskWithoutContract, type DoneContractFixture } from "../helpers/done-contract-fixture";
+import { makeDoneContractFixture, type DoneContractFixture } from "../helpers/done-contract-fixture";
 import { FIXTURE_HOME_OUTSIDE_REPO } from "../helpers/clean-tree-repo";
 import { citeSpecViaAsyncCli } from "../helpers/cli-live-rule";
 import { patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { createApp } from "../../src/app";
+import { liveAmbient, liveWriteContext } from "../live-invocation";
 
 vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });
 
@@ -103,6 +106,31 @@ async function approvedTask(planSlug: string, kind: "code" | "check" | "corpus",
   return slug;
 }
 
+/** Leaves an approved task with no kind and no contract (the shape of a task approved before kinds), through the service layer: approve refuses it now. */
+async function stripKindAndContractThroughStore(slug: string): Promise<void> {
+  const app = createApp(join(fixture.dir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
+  try {
+    const found = await app.corpusService.get(slug);
+    if (!found.ok) throw new Error(`seed: ${slug} not found: ${JSON.stringify(found.error)}`);
+    const doc = found.value.doc;
+    const { kind: _kind, done_contract: _contract, ...rest } = doc.extra as Record<string, unknown>;
+    const written = await app.corpusService.writeDoc({
+      doc,
+      patch: { extra: rest },
+      action: "update",
+      changeSummary: "fixture: a task approved before kinds existed",
+      auditAction: "update",
+      auditDetails: { operation: "fixture-kindless" },
+      lock: "none",
+      by: doc.created_by,
+      now: new Date().toISOString(),
+    });
+    if (!written.ok) throw new Error(`seed: strip failed: ${JSON.stringify(written.error)}`);
+  } finally {
+    app.close();
+  }
+}
+
 const rulesText = (): string => readFileSync(RULES_PATH, "utf8");
 
 interface StoredContract {
@@ -166,7 +194,8 @@ describe("lore dispatch prints the whole subagent prompt from the stored contrac
   });
 
   it("AC-DCS2-6: a code task with no stored contract exits 4 naming the missing contract, never a recompiled one", async () => {
-    const slug = await seedApprovedTaskWithoutContract(fixture, plan, "Dispatch without contract");
+    const slug = await approvedTask(plan, "code");
+    await stripKindAndContractThroughStore(slug);
     const out = await loreIn(["dispatch", slug]);
     expect(out.exitCode, out.text).toBe(4);
     expect(out.text).toMatch(/contract/);
