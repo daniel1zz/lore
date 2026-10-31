@@ -13,7 +13,16 @@ import { parseTemplate } from "@lore/core";
 
 const TEMPLATES_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..", "assets", "templates");
 
-const EXPECTED_FILES = ["adr.json", "prd.json", "spec-design.json", "spec-domain-overview.json", "spec-feature.json", "spec-tech.json"];
+const EXPECTED_FILES = [
+  "adr.json",
+  "plan.json",
+  "prd.json",
+  "spec-design.json",
+  "spec-domain-overview.json",
+  "spec-feature.json",
+  "spec-tech.json",
+  "task.json",
+];
 
 describe("seed templates", () => {
   it("ships exactly the expected seed files", () => {
