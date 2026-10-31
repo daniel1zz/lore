@@ -115,7 +115,7 @@ describe("AC-TG-7: selection by declared inputs (pure selector, injected file ma
   });
 
   it("AC-TG-7 REGRESSION: no tree-scan-oracle (or binary-consumer) selection reason exists, and no selection ever carries one", () => {
-    expect([...SELECTION_REASONS].sort()).toEqual(["changed-test", "declared-read", "declared-spawn", "transitive"]);
+    expect([...SELECTION_REASONS].sort()).toEqual(["changed-test", "declared-read", "declared-spawn", "run-config", "transitive"]);
     const everything = select(
       ["assets/data.json", "packages/lore/src/lib.ts", "packages/lore/src/cmd.ts", "docs/a.md", "hooks/pre-push"],
       FIXTURE_TREE,
