@@ -107,12 +107,19 @@ function installJudge(pass: string, fail: string): void {
   });
 }
 
-/** An approved plan under the PRD with one task holding attested evidence. */
+/**
+ * An approved plan under the PRD with one task holding attested evidence. The task is a CODE task: it declares a file anchor,
+ * so it is not corpus-only (BR-1509) and the plan's regression and security gates are judged / not-measured as for a plan that
+ * changes code, never `na`. The plan lands no commit in this suite, so those gates are not-measured (see `closeAccepted`).
+ */
 function makePlan(title: string): { plan: string; task: string } {
   counter += 1;
   const plan = slugOf(runLore(["create", "plan", "--title", `${title} ${counter}`, "--parent", prdSlug, "--content", "x", "--no-ai"], tmpDir).stdout);
   const task = slugOf(
-    runLore(["create", "task", "--title", `Work ${title} ${counter}`, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"], tmpDir).stdout,
+    runLore(
+      ["create", "task", "--title", `Work ${title} ${counter}`, "--parent", plan, "--plan-id", plan, "--content", "x", "--anchor", "src/shell-runner.ts", "--no-ai"],
+      tmpDir,
+    ).stdout,
   );
   addPass(task);
   expect(runLore(["set", plan, "--status", "approved"], tmpDir).exitCode).toBe(0);
