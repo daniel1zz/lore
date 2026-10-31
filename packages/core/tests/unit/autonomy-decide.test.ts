@@ -216,10 +216,12 @@ describe("AC-AU-1 seeded registry (spec class table)", () => {
     for (const id of ["governance-loosen", "push-force", "archive-ref-prune"]) {
       expect(r[id]?.tier).toBe("human-always");
     }
-    for (const id of ["override-judgment", "override-attestation", "ac-exempt"]) {
+    for (const id of ["override-judgment", "ac-exempt"]) {
       expect(r[id]?.tier).toBe("milestone");
     }
     expect(r["report-issue"]).toBeUndefined();
+    // retired with `lore done --override-attestation` (D45): a class with no producer is not kept
+    expect(r["override-attestation"]).toBeUndefined();
     const normal: Array<[string, string, number, number]> = [
       ["stash-drop", "loss-free-by-proof", 0.8, 0.95],
       ["worktree-remove", "loss-free-by-proof", 0.8, 0.97],
@@ -264,7 +266,7 @@ describe("AC-AU-1 seeded registry (spec class table)", () => {
   });
 
   it("milestone classes answer milestone even with every factor 1.0 (never auto, never escalate)", () => {
-    for (const id of ["override-judgment", "override-attestation", "ac-exempt"]) {
+    for (const id of ["override-judgment", "ac-exempt"]) {
       expect(decide(id, "s", ALL_ONE).verdict).toBe("milestone");
     }
   });

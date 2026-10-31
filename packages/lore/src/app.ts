@@ -1049,7 +1049,7 @@ function buildAppFromSqlite(
   );
   corpusService.setApprovalPort({ approve: (id, o) => reviewService.approve(id, o) });
   corpusService.setDoneFloorPort({ checkDoneFloors: (id) => taskWorkflowService.checkDoneFloors(id) });
-  // reason: AC-AU-7 — the self-grantable overrides (approve --override-*, done --override-attestation) ask decide();
+  // reason: AC-AU-7 — the self-grantable overrides (approve --override-*, ac exempt, verify new command) ask decide();
   // both composition roots wire it (a root that forgets leaves those overrides granted to whoever types them).
   const overrideDecisionPort = buildOverrideDecisionPort(store);
   // reason: built before the retired-AC service because that service's deprecation-rejection revival reuses this one instance.
@@ -1059,7 +1059,6 @@ function buildAppFromSqlite(
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
   reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
-  taskWorkflowService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
   // `lore rule` verbs so a claim-scoped authoring guard armed on it covers both.
@@ -1498,7 +1497,7 @@ function buildAppFromTurso(
   );
   corpusService.setApprovalPort({ approve: (id, o) => reviewService.approve(id, o) });
   corpusService.setDoneFloorPort({ checkDoneFloors: (id) => taskWorkflowService.checkDoneFloors(id) });
-  // reason: AC-AU-7 — the self-grantable overrides (approve --override-*, done --override-attestation) ask decide();
+  // reason: AC-AU-7 — the self-grantable overrides (approve --override-*, ac exempt, verify new command) ask decide();
   // both composition roots wire it (a root that forgets leaves those overrides granted to whoever types them).
   const overrideDecisionPort = buildOverrideDecisionPort(store);
   // reason: built before the retired-AC service because that service's deprecation-rejection revival reuses this one instance.
@@ -1508,7 +1507,6 @@ function buildAppFromTurso(
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
   reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
-  taskWorkflowService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
   // `lore rule` verbs so a claim-scoped authoring guard armed on it covers both.

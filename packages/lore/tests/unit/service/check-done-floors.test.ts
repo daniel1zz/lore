@@ -6,20 +6,19 @@
  * `Result<{ floor, error } | null>`: the first failing floor in `_doneImpl`'s order
  * (not-landed, attested-pass, red-first, unfiltered-test-file, contract-oracles — the floors of
  * the contract stored at approve, AC-DCS1-7) or `null`. `error` is the exact LoreError `done()`
- * returns, plus `details.floor`. The `--override-attestation` branch stays inside `_doneImpl`.
+ * returns, plus `details.floor`. No floor has an escape (the attestation override is retired).
  *
  * A task here is a landed `code` task holding a stored contract (done-contract-unit-fixture.ts):
  * the floors come from that contract, never from the task's live fields (the retired
  * `extra.red_first` / `ac_scope` declarations are not read).
  *
  * Dimensions: NEGATIVE (a-d, not-landed), HAPPY (e), STATE (no writes on refusal), BOUNDARY (g
- * order), REGRESSION (f override stays in done).
+ * order), REGRESSION (f no escape from the attested floor).
  *
  * @spec_ref spec-approval-and-plan-closure-go-through-the-same-checks-on
  */
 
 import { describe, it, expect } from "vitest";
-import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
@@ -42,11 +41,10 @@ interface WithCheckDoneFloors {
   checkDoneFloors(taskIdOrSlug: string): Promise<Result<{ floor: DoneFloorId; error: LoreError } | null, LoreError>>;
 }
 
-function makeServices(wireOverridePort = true) {
+function makeServices() {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
-  if (wireOverridePort) taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   const floors = taskWorkflowService as unknown as WithCheckDoneFloors;
   return { store, corpusService, taskWorkflowService, floors };
 }
@@ -205,56 +203,25 @@ describe("AC-AP-9 checkDoneFloors contract and byte-identical done refusals", ()
     expect(done.value.transitions).toEqual(["approved", "active", "archived"]);
   });
 
-  it("override port required: --override-attestation with NO override port wired is refused loudly and nothing is archived", async () => {
-    const s = makeServices(false);
-    // reason: the override port is consulted when the override is consumed, after every floor that follows the attested-pass
-    // floor has passed, so the contract here holds no oracle for those floors to judge.
-    const taskId = await createTask(s, "Floor F no port", { done_contract: { ...unitDoneContract(), oracles: [] } });
-    await addEvidence(s, taskId, runnerCapturedPass());
-    const done = await s.taskWorkflowService.done(taskId, { by: "alice", overrideReason: "manual browser check: verified in staging" });
-    expect(done.ok).toBe(false);
-    if (!done.ok) expect(done.error).toMatchObject({ code: "VALIDATION_ERROR", field: "autonomy" });
-    const after = await s.store.find(taskId as never);
-    expect(after.ok && after.value?.status).not.toBe("archived");
-  });
-
-  it("(f) REGRESSION: --override-attestation with a reason still archives an unattested task with the audited reason", async () => {
+  it("(f) NEGATIVE, mutation check: the attested floor refuses an unattested task with NO escape, even on a contract holding no oracle", async () => {
     const s = makeServices();
-    // reason: the override waives only the attested-pass floor; the oracle floors still judge every contract oracle, so the
-    // archive path is exercised with a contract that holds no oracle (see the refusal case below).
+    // reason: a contract with no oracle leaves the attested-pass floor as the only thing between this task and the archive, so a
+    // bypass re-added to evaluateDoneFloors turns this red. The retired `overrideReason` option is not part of DoneOpts any more.
     const taskId = await createTask(s, "Floor F", { done_contract: { ...unitDoneContract(), oracles: [] } });
     await addEvidence(s, taskId, runnerCapturedPass());
 
-    // checkDoneFloors never reads the override: the unattested task still reports the floor.
     const checked = await s.floors.checkDoneFloors(taskId);
     expect(checked.ok).toBe(true);
     if (!checked.ok) return;
     expect(checked.value?.floor).toBe("attested-pass");
 
-    const REASON = "manual browser check: verified in staging";
-    const done = await s.taskWorkflowService.done(taskId, { by: "alice", overrideReason: REASON });
-    expect(done.ok).toBe(true);
-    if (!done.ok) return;
-    expect(done.value.task.status).toBe("archived");
-
-    const audit = await s.store.queryAudit({ doc_id: taskId as never });
-    expect(audit.ok).toBe(true);
-    if (!audit.ok) return;
-    const doneSteps = audit.value.filter((e) => e.details?.["done"] === true);
-    expect(doneSteps.length).toBeGreaterThan(0);
-    expect(doneSteps.every((e) => e.details?.["override_reason"] === REASON)).toBe(true);
-  });
-
-  it("(f2) NEGATIVE: --override-attestation never waives a contract oracle -> refused [floor: contract-oracles], nothing archived", async () => {
-    const s = makeServices();
-    const taskId = await createTask(s, "Floor F2");
-    await addEvidence(s, taskId, runnerCapturedPass());
-
-    const done = await s.taskWorkflowService.done(taskId, { by: "alice", overrideReason: "manual browser check: verified in staging" });
+    // a stray, retired option smuggled past the type system is still not honoured
+    const done = await s.taskWorkflowService.done(taskId, { by: "alice", overrideReason: "manual browser check" } as never);
     expect(done.ok).toBe(false);
     if (done.ok) return;
-    expect(detailsFloor(done.error)).toBe("contract-oracles");
+    expect(detailsFloor(done.error)).toBe("attested-pass");
     expect(done.error).toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(JSON.stringify(done.error)).not.toContain("--override-attestation");
     const after = await s.store.find(taskId as never);
     expect(after.ok && after.value?.status).not.toBe("archived");
   });

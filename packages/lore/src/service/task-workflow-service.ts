@@ -222,24 +222,9 @@
  *   independent" contract) but AFTER the already-terminal idempotent short-circuit
  *   (AC-4: idempotency must never regress retroactively against evidence authored
  *   before this floor armed).
- * @invariant `done()`'s audited escape hatch (`DoneOpts.overrideReason`) bypasses
- *   ONLY the attestation floor immediately above — never the red-first or
- *   unfiltered-test-file-run floors, which read `result`/`command` and are
- *   attestation-agnostic already. For verification `lore verify` structurally
- *   cannot perform (`--oracle manual` browser/visual checks; any oracle with no
- *   script-mode AC to bind to) — mirrors this repo's `lore approve
- *   --override-judgment`/`lore outline exempt --reason` shape: an explicit,
- *   mandatory free-text justification, written VERBATIM onto every lifecycle
- *   step's audit entry as `details.override_reason` (+ `details
- *   .attestation_overridden: true`) this call produces — never silent, never
- *   defaulted, no env-var form. A blank/whitespace-only reason is refused
- *   VALIDATION_ERROR here too (belt-and-suspenders — `commands/done.ts` already
- *   refuses it as a CLI usage error, exit 2, before this service is ever called;
- *   this second check protects any OTHER caller, e.g. a test or a future adapter,
- *   that constructs `DoneOpts` directly). `overrideReason` is silently IGNORED
- *   (never checked, never persisted) when an attested pass already satisfies the
- *   floor above — the escape hatch is for tasks that structurally cannot attest,
- *   not a blanket "always audit" switch.
+ * @invariant `done()` has NO override: the attestation floor above cannot be waived
+ *   (the `--override-attestation` escape hatch was retired, decision D45). A task that
+ *   cannot meet its stored contract goes through a contract amendment.
  * @invariant `done()` judges a task ONLY by its stored contract (AC-DCS1-7): the red
  *   requirement is the contract's `red_required` (waived at approve, never at done),
  *   the whole-file runs are the contract's `test:<path>` oracles (plus `added_oracles`),
@@ -282,7 +267,6 @@
  *         silence/opt-in review this fix answers)
  */
 
-import { requireOverrideAuto, type OverrideDecisionPort } from "./override-decision.js";
 import { spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute, relative } from "node:path";
@@ -572,27 +556,9 @@ export interface DoneOpts {
   /** See {@link ClaimOpts.source}. */
   source?: string;
   /**
-   * Audited escape hatch for the attested-pass floor (adr-lore-done-requires-a-
-   * runner-attested-pass-the-sixth-false) — a mandatory free-text justification
-   * for archiving WITHOUT a runner-attested `result: "pass"` evidence row, for
-   * verification `lore verify` structurally cannot perform (`--oracle manual`
-   * browser/visual checks; any oracle with no script-mode AC to bind to).
-   * Written VERBATIM to every lifecycle step's audit entry as
-   * `details.override_reason` (+ `details.attestation_overridden: true`) — never
-   * silent, never defaulted, no env-var form (mirrors `lore approve
-   * --override-judgment`/`lore outline exempt --reason`'s audited-escape shape).
-   * `commands/done.ts` refuses a blank/whitespace-only value as a CLI usage
-   * error (exit 2) before this service is ever called; `done()` refuses it too
-   * (VALIDATION_ERROR) as a belt-and-suspenders check for any OTHER caller that
-   * constructs `DoneOpts` directly (see `done()`'s own JSDoc). IGNORED entirely
-   * when an attested pass already satisfies the floor — this does not relax the
-   * independent red-first / unfiltered-test-file-run floors below it.
-   */
-  overrideReason?: string;
-  /**
    * Free-text justification for this close (`lore bulk done --reason`, spec-lean-governance-batch-verbs-judgment-only-at-
-   * milestones BR-1366): written verbatim to every lifecycle step's audit entry as `details.reason`. Unlike
-   * {@link overrideReason} it relaxes NO floor — it is a note, never an escape hatch. Absent adds no key.
+   * milestones BR-1366): written verbatim to every lifecycle step's audit entry as `details.reason`. It relaxes NO floor —
+   * it is a note, never an escape hatch. Absent adds no key.
    */
   reason?: string;
   /**
@@ -697,7 +663,6 @@ type FloorStep = Result<{ refusal: DoneFloorRefusal }, LoreError> | undefined;
 interface ContractJudgement {
   readonly refusal: DoneFloorRefusal | null;
   readonly removed: DoneContractRemovedOracle[];
-  readonly overrideReason?: string;
   readonly landing: LandingMeasure;
 }
 
@@ -1416,14 +1381,13 @@ function isRunnerCaptured(entry: EvidenceEntry): boolean {
  * — do NOT "fix" that gap by weakening this floor.
  */
 const ATTESTATION_FLOOR_REPAIRS =
-  "Three repairs: (1) `lore verify <plan>` runs the plan's declared script-mode acceptance " +
+  "Two repairs: (1) `lore verify <plan>` runs the plan's declared script-mode acceptance " +
   "criteria itself and attests the pass; for an `--adhoc` task (no plan) the equivalent is " +
   "`lore verify --task <task>`, which needs a NON-EMPTY `extra.ac_scope` to resolve a governing " +
   'spec from. (2) `lore evidence <task> --oracle <kind> --command "<cmd>" --result pass --capture` ' +
   "— the runner spawns YOUR command and attests its exit code; the route for a task declaring an " +
-  "EMPTY `ac_scope`, which `lore verify` cannot reach. (3) " +
-  '`lore done --override-attestation "<reason>"`, the audited escape hatch for verification ' +
-  "neither route can perform (a manual/browser oracle).";
+  "EMPTY `ac_scope`, which `lore verify` cannot reach. There is no waiver: a task that cannot " +
+  "meet its contract goes through a contract amendment.";
 
 /**
  * The ONE sentence every evidence-floor refusal carries (DCL-1 (g), SSOT): the two routes that make a
@@ -2745,16 +2709,6 @@ export class TaskWorkflowService {
   }
 
   private planCloseTrigger: PlanCloseTrigger | undefined;
-
-  /**
-   * Wires the decide() seam of `done --override-attestation(-cite)` (AC-AU-7). Set by the composition root;
-   * absent = a requested override is refused loudly (never granted).
-   */
-  setOverrideDecisionPort(port: OverrideDecisionPort): void {
-    this.overrideDecisions = port;
-  }
-
-  private overrideDecisions: OverrideDecisionPort | undefined;
 
   // ── addEvidence ───────────────────────────────────────────────────────────
 
@@ -4211,12 +4165,7 @@ export class TaskWorkflowService {
    *     of them exist; a SELF-REPORTED-ONLY pass (`attestation === undefined` — the
    *     shape every CLI/MCP `lore evidence` write produces) does not count either. The
    *     refusal message names both repairs: `lore verify <plan>` (attests a pass), or
-   *     `opts.overrideReason` (the audited escape hatch below, for verification `lore
-   *     verify` structurally cannot perform). This floor bypasses via `overrideReason`
-   *     ONLY — never via a red-first or unfiltered-file-run row, which are independent;
-   *   - `opts.overrideReason` IS supplied but is blank/whitespace-only — refused here
-   *     as a defense-in-depth check (`commands/done.ts` already refuses this shape as a
-   *     CLI usage error, exit 2, before this service is ever called);
+   *     `lore evidence --capture`. This floor has no bypass;
    *   - the stored contract's floors are unmet, in the order of {@link DONE_FLOOR_ORDER}:
    *     not-landed, missing-oracle-file, attested-pass (counted by the evidence rule of
    *     the contract's kind), latest-attested-fail, red-first (`red_required`, waivable
@@ -4244,8 +4193,7 @@ export class TaskWorkflowService {
    * the freshly-read `task.status` each call).
    *
    * @param idOrSlug - Task document ULID or slug
-   * @param opts - `{ by, source?, overrideReason? }` — see {@link
-   *   DoneOpts.overrideReason} for the audited attestation-floor escape hatch
+   * @param opts - `{ by, source?, ... }` — see {@link DoneOpts}
    * @param now - Time seam (D10) — ONE reading shared by every step's timestamp
    * @returns `DoneResult` — see that type's own JSDoc
    * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / an unmet floor of the stored
@@ -4289,30 +4237,20 @@ export class TaskWorkflowService {
    * wins. The floors before (not-landed, missing-oracle-file) and after (foreign-claim) are
    * decided by the callers that own their facts.
    *
-   * `escapes` carries the audited override reason: an absent one means "not requested". A
-   * blank-but-present reason is a usage error returned as `err` (NOT a floor refusal). It
-   * waives the attested-pass floor only. {@link checkDoneFloors} always passes `{}`.
+   * No floor can be waived: the attested-pass floor refuses an unattested task with no escape.
    *
    * @returns `ok({refusal})` — the first failing floor with its exact LoreError
-   *   (`details.floor` set) or `null`, plus the override reason actually consumed;
-   *   `err` only for a blank override reason
+   *   (`details.floor` set) or `null`
    */
   private evaluateDoneFloors(
     task: DocRecord,
     contract: DoneContract,
     oracles: readonly EvaluatedOracle[],
     evidence: EvidenceEntry[],
-    escapes: { overrideReason?: string },
     stampBinding: StampBindingContext,
     binding: ReadonlyMap<EvidenceEntry, RowBinding>,
     bindingNote: string | undefined,
-  ): Result<
-    {
-      refusal: DoneFloorRefusal | null;
-      overrideReason?: string;
-    },
-    LoreError
-  > {
+  ): Result<{ refusal: DoneFloorRefusal | null }, LoreError> {
     // ⛔ WHAT SATISFIES THIS FLOOR CHANGED 2026-08-23 (SPEC-143 AC-CT-2), and the
     // comment that used to sit below asserted the opposite — it called a self-report
     // "the ONLY shape any CLI/MCP `lore evidence` write can produce", which stopped
@@ -4342,27 +4280,11 @@ export class TaskWorkflowService {
       const reading = stampReadings[index];
       return e.result === "pass" && reading?.stamp === "unbound" ? [reading.reason] : [];
     });
-    let overrideReason: string | undefined;
     const attestedPassFloor = (): FloorStep => {
     if (!hasAttestedPass) {
       // reason: adr-lore-done-requires-a-runner-attested-pass-the-sixth-false — a
-      // self-reported result:pass is not sufficient to archive. `escapes.overrideReason`
-      // is the ONE audited bypass — checked here, not before this branch, so a task
-      // that already holds an attested pass never even looks at it (never "always
-      // audit"). A zero-length trimmed reason is refused identically to an absent
-      // one, never silently treated as "no override requested".
-      if (escapes.overrideReason === undefined || escapes.overrideReason.trim() === "") {
-        if (escapes.overrideReason !== undefined) {
-          return err({
-            code: "VALIDATION_ERROR",
-            field: "overrideReason",
-            message:
-              "--override-attestation requires a non-empty, non-whitespace reason — " +
-              "the CLI usage-error check (exit 2) should have caught this before " +
-              "reaching the service; a direct caller must supply a real reason too",
-            value: escapes.overrideReason,
-          });
-        }
+      // self-reported result:pass is not sufficient to archive, and nothing waives it (D45).
+      {
         // reason: the message is built by ONE pure function over the SAME rows
         // this predicate just read (task-lore-done-s-attestation-refusal-calls-a-
         // capture-source). `code`/`field`/`value` are the predicate's identity and
@@ -4379,7 +4301,7 @@ export class TaskWorkflowService {
                 `UNBOUND (${[...new Set(unboundPassReasons)].join(", ")}): recorded after state-binding was ` +
                 `armed without a valid state stamp, so it certifies no named state. Re-run \`lore verify\` ` +
                 `or \`lore evidence ${task.slug} --oracle <kind> --command "<cmd>" --result pass --capture\` ` +
-                `on a committed tree to record a stamped row (or use --override-attestation with a reason).`
+                `on a committed tree to record a stamped row.`
               : excludedByLanding
                 ? `Task "${task.slug}" holds ${attestedRows.length} runner-attested pass row(s), but none counts: ${bindingNote ?? "no row is bound to the code the task lands"}. ` +
                   `Re-run the oracle on a clean, committed tree whose content is the landed content: ` +
@@ -4392,15 +4314,13 @@ export class TaskWorkflowService {
           })),
         });
       }
-      overrideReason = escapes.overrideReason;
     }
     return undefined;
     };
 
     // reason: DCL-1 (e) — per criterion the LATEST runner-produced result decides. An attested pass
     // followed by an attested fail (a regression caught by a later `lore verify` / `--capture` run) must
-    // not archive just because the earlier pass still sits in the log. Not bypassable by
-    // `--override-attestation`: that escape covers "no runner-attested pass exists", not "a runner saw it fail".
+    // not archive just because the earlier pass still sits in the log. Nothing bypasses it.
     const latestFailFloor = (): FloorStep => {
     const failedCriteria = findCriteriaWithLatestRunFailed(evidence);
     if (failedCriteria.length > 0) {
@@ -4494,10 +4414,7 @@ export class TaskWorkflowService {
       if (verdict === undefined) continue;
       return verdict;
     }
-    return ok({
-      refusal: null,
-      ...(overrideReason !== undefined ? { overrideReason } : {}),
-    });
+    return ok({ refusal: null });
   }
 
   /**
@@ -4531,7 +4448,7 @@ export class TaskWorkflowService {
    * @returns the first unmet floor, or `null` when every floor before foreign-claim is met
    */
   private async evaluateStoredContractFloors(task: DocRecord, evidence: EvidenceEntry[]): Promise<Result<DoneFloorRefusal | null, LoreError>> {
-    const judged = await this.judgeStoredContract(task, evidence, {});
+    const judged = await this.judgeStoredContract(task, evidence);
     if (!judged.ok) return judged;
     return ok(judged.value.refusal);
   }
@@ -4731,7 +4648,6 @@ export class TaskWorkflowService {
   private async judgeStoredContract(
     task: DocRecord,
     evidence: EvidenceEntry[],
-    escapes: { overrideReason?: string },
   ): Promise<Result<ContractJudgement, LoreError>> {
     const contractResult = this.readStoredContract(task);
     if (!contractResult.ok) return contractResult;
@@ -4823,9 +4739,9 @@ export class TaskWorkflowService {
     }
     const bindingNote = describeBindingFailures([...binding.values()].reverse());
 
-    const floors = this.evaluateDoneFloors(task, contract, evaluated, evidence, escapes, stampBinding.value, binding, bindingNote);
+    const floors = this.evaluateDoneFloors(task, contract, evaluated, evidence, stampBinding.value, binding, bindingNote);
     if (!floors.ok) return floors;
-    return ok({ refusal: floors.value.refusal, removed, landing, ...(floors.value.overrideReason !== undefined ? { overrideReason: floors.value.overrideReason } : {}) });
+    return ok({ refusal: floors.value.refusal, removed, landing });
   }
 
   /** Stamps `details.floor` on a refusal built outside {@link evaluateDoneFloors}. */
@@ -5203,23 +5119,10 @@ export class TaskWorkflowService {
       return ok({ task, already_done: true, transitions: [] });
     }
 
-    const judged = await this.judgeStoredContract(task, readEvidence(task), opts.overrideReason !== undefined ? { overrideReason: opts.overrideReason } : {});
+    const judged = await this.judgeStoredContract(task, readEvidence(task));
     if (!judged.ok) return judged;
     if (judged.value.refusal !== null) return err(judged.value.refusal.error);
-    const { overrideReason, removed, landing } = judged.value;
-
-    // reason: AC-AU-7 — the attestation override is DECIDED (class override-attestation), not granted. `overrideReason`
-    // is set here only when the attested-pass floor actually failed and the escape was consumed, so a task that
-    // already holds an attested pass never asks. Runs before any write; the refusal is exit 4 with a pending decision.
-    if (overrideReason !== undefined) {
-      const decided = await requireOverrideAuto(this.overrideDecisions, {
-        classId: "override-attestation",
-        subject: { id: task.slug, version: `v${task.version}` },
-        summary: `done ${task.slug} --override-attestation`,
-        change: { document: task.slug, override: "attestation", reason: overrideReason },
-      });
-      if (!decided.ok) return decided;
-    }
+    const { removed, landing } = judged.value;
 
     const nowIso = now();
     const claim = readClaimRecord(task);
@@ -5287,13 +5190,7 @@ export class TaskWorkflowService {
         opts.by,
         `lore done: ${task.status} → ${nextStatus}`,
         {
-          // reason: exactOptionalPropertyTypes — conditionally spread rather than
-          // pass `undefined` verbatim, since `overrideReason`
-          // is a local typed `string | undefined` while writeTaskStatus's own
-          // optional fields reject an explicit `undefined` under this tsconfig
-          // (mirrors the pre-existing `additionalCwds`/`corpusRoot` spread
-          // precedent in evidence-precheck.ts).
-          ...(overrideReason !== undefined ? { overrideReason } : {}),
+          // reason: exactOptionalPropertyTypes — conditionally spread rather than pass `undefined` verbatim.
           ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
           ...(landingExtra !== undefined && transitions.length === 0 ? { landing: landingExtra } : {}),
           // reason: AC-DCS1-30 — the removed oracles are written in the SAME write as the first step of the done.
@@ -7009,14 +6906,6 @@ export class TaskWorkflowService {
    * `corpus-service.ts` for why the versions-row action and the audit-entry action can
    * diverge under this exact-version join.
    *
-   * `escapes.overrideReason` (adr-lore-done-requires-a-runner-attested-pass-the-sixth-
-   * false) — present iff this `done()` call used the audited attestation-floor escape
-   * hatch; merged verbatim onto EVERY step's audit `details` this call produces as
-   * `override_reason` + `attestation_overridden: true`, so a multi-step walk
-   * (draft -> approved -> active -> archived) leaves the justification attached to
-   * each individual audited step, not just the first. `undefined` (the common case —
-   * an attested pass already satisfied the floor) adds neither key.
-   *
    * `escapes.removedOracles` (AC-DCS1-30) — the test-file oracles this task's landing deleted; they are written to
    * `done_contract.removed_oracles` in this same write (the first step of the walk).
    */
@@ -7026,7 +6915,7 @@ export class TaskWorkflowService {
     nowIso: string,
     actor: string,
     changeSummary: string,
-    escapes: { overrideReason?: string; reason?: string; landing?: Record<string, unknown>; removedOracles?: DoneContractRemovedOracle[] } = {},
+    escapes: { reason?: string; landing?: Record<string, unknown>; removedOracles?: DoneContractRemovedOracle[] } = {},
   ): Promise<Result<DocRecord, LoreError>> {
     // reason: the landing and the removed oracles ride the same write as the status (one CAS), so a rival closer cannot see one without the other.
     let extraPatch: Record<string, unknown> = { ...task.extra };
@@ -7064,9 +6953,6 @@ export class TaskWorkflowService {
         status_from: task.status,
         status_to: newStatus,
         done: true,
-        ...(escapes.overrideReason !== undefined
-          ? { override_reason: escapes.overrideReason, attestation_overridden: true }
-          : {}),
         ...(escapes.reason !== undefined ? { reason: escapes.reason } : {}),
         ...(escapes.landing !== undefined ? { landing: escapes.landing } : {}),
       },
