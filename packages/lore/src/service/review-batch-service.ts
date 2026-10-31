@@ -471,7 +471,7 @@ export class ReviewBatchRunner {
     if (failed.length > 0) {
       if (!(await fenced())) return lostRow(reviewed);
       if (ports.filing === undefined) {
-        return fail("filing", fingerprint, { code: "VALIDATION_ERROR", field: "feedback.upstream", message: "the review failed and needs issues filed, but no issue tracker is configured (feedback.upstream.repo)", rule: "BR-1379" }, reviewed, latest.doc.slug);
+        return fail("filing", fingerprint, { code: "VALIDATION_ERROR", field: "file-issues", message: "the review failed and needs issues filed, but this run does not file issues; run `lore assess` with --file-issues to file them", rule: "BR-1379" }, reviewed, latest.doc.slug);
       }
       const findings: FailedFinding[] = failed.map((dimension) => ({
         plan: planSlug,
