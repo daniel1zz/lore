@@ -1,0 +1,24 @@
+{
+  "doc_type": "baseline",
+  "kind": "debt-registry",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["summary", "triage_policy"],
+    "properties": {
+      "summary": { "type": "string", "minLength": 1, "title": "Summary", "description": "What this registry tracks. Its AD-n debt entries are NOT a field here: they stay in the structured extra.rules." },
+      "triage_policy": { "type": "string", "minLength": 1, "title": "Triage policy", "description": "What qualifies as debt worth an entry, and how entries are ordered for paying down." },
+      "closing_policy": { "type": "string", "title": "Closing policy", "description": "What must be true before an entry is retired (the code change, the standard it unblocks)." },
+      "standard_refs": { "type": "array", "title": "Standards it serves", "x-ref-list": true, "items": { "type": "string", "minLength": 1 }, "description": "AS-n ids of the standards whose exceptions this registry lists." }
+    }
+  },
+  "dimensions": [
+    { "id": "triage", "question": "What makes one debt entry more urgent than another, and who decides?" }
+  ],
+  "checks": ["refs-resolve"],
+  "render": [
+    { "heading": "Summary", "fields": ["summary"] },
+    { "heading": "Policy", "fields": ["triage_policy", "closing_policy"] },
+    { "heading": "Standards it serves", "fields": ["standard_refs"] }
+  ]
+}

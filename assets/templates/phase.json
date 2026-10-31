@@ -1,0 +1,55 @@
+{
+  "doc_type": "phase",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["goal", "kind", "exit_criteria"],
+    "properties": {
+      "goal": {
+        "type": "object",
+        "title": "Goal",
+        "x-goal": true,
+        "required": ["statement", "measure"],
+        "properties": {
+          "statement": { "type": "string", "minLength": 1, "description": "What this phase delivers." },
+          "measure": { "type": "string", "minLength": 1, "description": "The observable outcome that proves it, such as a command and its output." }
+        }
+      },
+      "kind": { "type": "string", "title": "Kind", "enum": ["backend", "frontend", "fullstack", "infra", "docs"] },
+      "ac_scope": {
+        "type": "array",
+        "title": "Acceptance criteria in scope",
+        "x-ref-list": true,
+        "items": { "type": "string", "minLength": 1 },
+        "description": "AC ids of the governing spec that this phase delivers."
+      },
+      "exit_criteria": {
+        "type": "array",
+        "title": "Exit criteria",
+        "minItems": 1,
+        "description": "What must be true before the next phase starts.",
+        "items": {
+          "type": "object",
+          "required": ["statement", "bind"],
+          "properties": {
+            "statement": { "type": "string", "minLength": 1 },
+            "bind": { "type": "string", "enum": ["script", "manual"], "description": "script = an oracle command proves it; manual = a person attests it." },
+            "oracle": { "type": "string", "enum": ["tsc", "test", "lint", "build", "e2e", "other"] },
+            "command": { "type": "string" }
+          }
+        }
+      },
+      "why_this_order": { "type": "string", "title": "Why this order", "description": "Why this phase is here and not earlier or later." }
+    }
+  },
+  "dimensions": [
+    { "id": "ordering", "question": "What does this phase depend on, and what depends on it?" },
+    { "id": "exit-condition", "question": "How will anyone tell, without asking you, that this phase is done?" }
+  ],
+  "checks": ["goal-has-measure", "refs-resolve"],
+  "render": [
+    { "heading": "Goal", "fields": ["goal", "kind"] },
+    { "heading": "Scope", "fields": ["ac_scope", "why_this_order"] },
+    { "heading": "Exit criteria", "fields": ["exit_criteria"] }
+  ]
+}

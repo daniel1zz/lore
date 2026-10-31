@@ -1,0 +1,49 @@
+{
+  "doc_type": "issue-report",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["title", "description", "expected", "actual", "severity", "category"],
+    "properties": {
+      "title": { "type": "string", "minLength": 1, "title": "Title", "description": "Short report title: one defect, one root cause." },
+      "description": { "type": "string", "minLength": 1, "title": "Description", "description": "What is wrong, where, and what you were doing when you saw it." },
+      "expected": { "type": "string", "minLength": 1, "title": "Expected", "description": "The behaviour you expected." },
+      "actual": { "type": "string", "minLength": 1, "title": "Actual", "description": "The behaviour you observed, with the exact output." },
+      "repro_command": { "type": "string", "title": "Reproduction command", "description": "One line that reproduces the issue. Use repro_steps for anything longer." },
+      "repro_steps": { "type": "string", "title": "Reproduction steps", "description": "Several steps, when one command cannot hold them." },
+      "suggested_fix": { "type": "string", "title": "Suggested fix", "description": "Your proposed fix. Keep expected to the behaviour." },
+      "severity": {
+        "type": "string",
+        "title": "Severity",
+        "enum": ["critical", "high", "medium", "low"],
+        "description": "Ordering-only label; it never changes whether a report is accepted."
+      },
+      "category": {
+        "type": "string",
+        "title": "Category",
+        "minLength": 1,
+        "maxLength": 48,
+        "description": "Ordering-only free-text label, at most 48 characters."
+      },
+      "refs": {
+        "type": "array",
+        "title": "References",
+        "items": { "type": "string", "minLength": 1 },
+        "description": "A spec, criterion, commit or issue this report relates to."
+      }
+    }
+  },
+  "dimensions": [
+    { "id": "reproducibility", "question": "Can someone else reproduce this from the report alone, and what did you run to see it?" },
+    { "id": "single-root-cause", "question": "Is this one defect with one root cause that can be closed on its own, or several reports bundled together?" }
+  ],
+  "checks": [],
+  "render": [
+    { "heading": "Description", "fields": ["description"] },
+    { "heading": "Expected", "fields": ["expected"] },
+    { "heading": "Actual", "fields": ["actual"] },
+    { "heading": "Reproduction", "fields": ["repro_command", "repro_steps"] },
+    { "heading": "Suggested fix", "fields": ["suggested_fix"] },
+    { "heading": "Triage", "fields": ["severity", "category", "refs"] }
+  ]
+}

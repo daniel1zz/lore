@@ -1,0 +1,44 @@
+{
+  "doc_type": "baseline",
+  "kind": "root",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["summary", "boundary"],
+    "properties": {
+      "summary": { "type": "string", "minLength": 1, "title": "Summary", "description": "What the whole tree covers, in the project's own language. Business root: the business. Architecture root: the system." },
+      "boundary": {
+        "type": "object",
+        "title": "Boundary",
+        "required": ["inside", "outside"],
+        "properties": {
+          "inside": { "type": "string", "minLength": 1, "description": "What this tree owns." },
+          "outside": { "type": "string", "minLength": 1, "description": "What it deliberately does not, and who owns that." }
+        }
+      },
+      "glossary": {
+        "type": "array",
+        "title": "Ubiquitous language",
+        "description": "Business root only. Terms that mean exactly one thing everywhere below.",
+        "items": {
+          "type": "object",
+          "required": ["term", "meaning"],
+          "properties": {
+            "term": { "type": "string", "minLength": 1 },
+            "meaning": { "type": "string", "minLength": 1 },
+            "note": { "type": "string", "description": "What it is not to be confused with." }
+          }
+        }
+      }
+    }
+  },
+  "dimensions": [
+    { "id": "boundary", "question": "What would a reader assume this tree covers that it does not?" }
+  ],
+  "checks": [],
+  "render": [
+    { "heading": "Summary", "fields": ["summary"] },
+    { "heading": "Boundary", "fields": ["boundary"] },
+    { "heading": "Ubiquitous language", "fields": ["glossary"] }
+  ]
+}

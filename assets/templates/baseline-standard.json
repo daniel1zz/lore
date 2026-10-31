@@ -1,0 +1,26 @@
+{
+  "doc_type": "baseline",
+  "kind": "standard",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["summary", "scope", "rationale"],
+    "properties": {
+      "summary": { "type": "string", "minLength": 1, "title": "Summary", "description": "The engineering standard this node holds, in one sentence. The standard's AS-n rules are NOT a field here: they stay in the structured extra.rules, each with the four parts current_reality, target_rule, current_exceptions and migration." },
+      "scope": { "type": "string", "minLength": 1, "title": "Scope", "description": "Which code the standard governs, and which it does not." },
+      "rationale": { "type": "string", "minLength": 1, "title": "Rationale", "description": "The failure this standard prevents." },
+      "enforcement": { "type": "string", "title": "Enforcement", "description": "What checks the standard today (a test, a linter, a gate), or that nothing does." },
+      "debt_refs": { "type": "array", "title": "Known debt", "x-ref-list": true, "items": { "type": "string", "minLength": 1 }, "description": "AD-n ids of debt entries that still violate it." }
+    }
+  },
+  "dimensions": [
+    { "id": "enforcement", "question": "What fails when someone violates this standard, and is that a machine check or only a review comment?" },
+    { "id": "exceptions", "question": "Where does the code violate this standard today, and is each place listed as debt?" }
+  ],
+  "checks": ["refs-resolve"],
+  "render": [
+    { "heading": "Summary", "fields": ["summary", "scope"] },
+    { "heading": "Rationale", "fields": ["rationale"] },
+    { "heading": "Enforcement", "fields": ["enforcement", "debt_refs"] }
+  ]
+}

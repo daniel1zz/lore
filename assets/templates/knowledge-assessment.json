@@ -1,0 +1,35 @@
+{
+  "doc_type": "knowledge",
+  "kind": "assessment",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["subject", "verdict", "findings"],
+    "properties": {
+      "subject": { "type": "string", "minLength": 1, "title": "Subject", "description": "What was assessed (a plan, a spec, a module)." },
+      "subject_ref": { "type": "string", "title": "Subject document", "x-ref": true, "description": "Slug of the assessed document, when it is one." },
+      "verdict": { "type": "string", "title": "Verdict", "enum": ["pass", "fail", "inconclusive"] },
+      "findings": {
+        "type": "array",
+        "title": "Findings",
+        "items": {
+          "type": "object",
+          "required": ["finding", "evidence"],
+          "properties": {
+            "finding": { "type": "string", "minLength": 1 },
+            "evidence": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    }
+  },
+  "dimensions": [
+    { "id": "evidence", "question": "What did you run or read to reach each finding, so a reader can repeat it?" }
+  ],
+  "checks": ["refs-resolve"],
+  "render": [
+    { "heading": "Subject", "fields": ["subject", "subject_ref"] },
+    { "heading": "Verdict", "fields": ["verdict"] },
+    { "heading": "Findings", "fields": ["findings"] }
+  ]
+}
