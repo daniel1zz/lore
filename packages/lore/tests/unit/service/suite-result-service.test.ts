@@ -256,11 +256,11 @@ describe("AC-AF-2 the runner's timeout ends the whole process tree", () => {
       expect(outcome.incomplete).toMatch(/timed out after \d+ ms/);
     }
     expect(await allGone(readPids(pidFile))).toBe(true);
-    // through the service: an incomplete batch is refused, so no row is stored and a later review runs it again
+    // through the service (BR-1533): a batch the time limit ended is stored as INCONCLUSIVE (cause timeout), which is no result, so a later review runs it again
     const stored = await service.runBatch(head, ["x.test.ts", "y.test.ts"], { ...runner, runFilesTogether: async () => together });
-    expect(stored.ok).toBe(false);
+    expect(stored.ok && stored.value.map((r) => [r.classification, r.inconclusive_cause])).toEqual([["inconclusive", "timeout"], ["inconclusive", "timeout"]]);
     const rows = await service.listFileRuns(`file-batch@${head}`);
-    expect(rows.ok && rows.value).toEqual([]);
+    expect(rows.ok && rows.value.every((r) => r.classification === "inconclusive")).toBe(true);
     const ended = await runner.disposeWorktrees?.();
     expect(ended?.ok).toBe(true);
     expect(worktreeCount(repo)).toBe(1);
@@ -389,7 +389,7 @@ describe("single-file runs are stored once per (commit, file, kind) (#528, BR-14
 
   it("AC-AF-2 the store ignores a second row for a single-file key but still appends re-runs under a suite result id", async () => {
     const store = new InMemoryStore();
-    const base = { commit_sha: COMMIT_A, file: FILE_X, duration_ms: 1, measured_at: "2026-10-28T10:00:00.000Z" };
+    const base = { commit_sha: COMMIT_A, file: FILE_X, duration_ms: 1, measured_at: "2026-10-28T10:00:00.000Z", classification: "green" as const, inconclusive_cause: null };
     const key = `file-bisect@${COMMIT_A}`;
     await store.insertSuiteFileRuns([{ ...base, suite_result_id: key, exit_code: 0, output_tail: "first" }]);
     await store.insertSuiteFileRuns([{ ...base, suite_result_id: key, exit_code: 1, output_tail: "second" }]);

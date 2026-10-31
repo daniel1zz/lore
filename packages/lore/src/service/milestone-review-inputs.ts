@@ -6,7 +6,7 @@
  *   ONCE for a whole `lore assess` batch on main's HEAD (`SuiteRun`), recorded as main's red/green state and shown to the judge as
  *   context only (regression itself is measured at main's head by single-file bisection). (2) The snapshot-accuracy dimension fails only on a cited rule whose state is `contradicted`; `stale`,
  *   `unknown` and `unverified` are n/a with the reason, and stale evidence is re-verified once per batch beforehand.
- * Public surface: SuiteRun, SuiteCommandResult, FailingTestFile, parseFailingTestFiles, touchedFilesOfDiff,
+ * Public surface: SuiteRun, SuiteCommandResult, FailingTestFile, touchedFilesOfDiff,
  *   renderSuiteSection, applySnapshotRule, staleCitingAcIds, StaleAcRefresherPort, StaleRefreshReport.
  * Invariants:
  *   - A suite that was not measured is `status: "not_measured"` with a reason; it is never read as a pass.
@@ -53,23 +53,6 @@ export const suiteRunSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("not_measured"), reason: z.string().min(1) }),
 ]);
 export type SuiteRun = z.infer<typeof suiteRunSchema>;
-
-/**
- * The test files a runner's output names as failing.
- *
- * @param output - combined stdout/stderr of the test command
- * @returns unique repo-relative paths, in first-seen order (a vitest `FAIL  <file> > <test>` line names one)
- * @example
- * parseFailingTestFiles(" FAIL  packages/x/tests/a.test.ts > a > b\n"); // => ["packages/x/tests/a.test.ts"]
- */
-export function parseFailingTestFiles(output: string): string[] {
-  const found = new Set<string>();
-  for (const line of output.split("\n")) {
-    const match = /^\s*(?:FAIL|✗|×)\s+(?:\[[^\]]*\]\s+)?(\S+\.(?:test|spec)\.[cm]?[tj]sx?)\b/.exec(line);
-    if (match?.[1] !== undefined) found.add(match[1]);
-  }
-  return [...found];
-}
 
 /** The files a unified diff touches (`diff --git a/<p> b/<p>`), unique, new path for a rename. */
 export function touchedFilesOfDiff(diffText: string): Set<string> {

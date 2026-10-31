@@ -55,9 +55,17 @@ export function planGroups(
   passthrough: readonly string[],
   nodeFiles: ReadonlySet<string>,
   reportFile: (r: Runner) => string,
+  outcomeReporter?: string,
 ): Group[] {
   const { bun, node } = splitByRunner(paths, nodeFiles);
-  const report = (r: Runner): string[] => ["--reporter=dot", "--reporter=json", `--outputFile.json=${reportFile(r)}`];
+  // reason: BR-1533 — when a caller asked for per-file outcomes (TEST_FILE_OUTCOME_DIR), vitest also runs the outcome reporter that records each
+  // file's errors; the review runner reads them to tell a timeout from an assertion. The default output is unchanged.
+  const report = (r: Runner): string[] => [
+    "--reporter=dot",
+    "--reporter=json",
+    `--outputFile.json=${reportFile(r)}`,
+    ...(outcomeReporter === undefined ? [] : [`--reporter=${outcomeReporter}`]),
+  ];
   const groups: Group[] = [];
   if (bun.length > 0) groups.push({ runner: "bun", files: bun, argv: ["--bun", "vitest", "run", ...report("bun"), ...passthrough, ...bun] });
   if (node.length > 0) {
@@ -122,7 +130,9 @@ export function main(
   const reportFile = (r: Runner): string => join(reportDir, `${r}.json`);
   let code = 0;
   try {
-    for (const g of planGroups(paths, passthrough, nodeFiles, reportFile)) {
+    const outcomeDir = process.env["TEST_FILE_OUTCOME_DIR"];
+    const outcomeReporter = outcomeDir === undefined || outcomeDir === "" ? undefined : join(REPO_ROOT, "scripts", "test-outcome-reporter.ts");
+    for (const g of planGroups(paths, passthrough, nodeFiles, reportFile, outcomeReporter)) {
       const res = run(g, reportFile(g.runner));
       const empty = judgeCollected(g.files, res.report, root);
       console.log(`test:file: ${g.runner} runner exit ${res.exit}; ${g.files.length - empty.length}/${g.files.length} path(s) collected tests`);

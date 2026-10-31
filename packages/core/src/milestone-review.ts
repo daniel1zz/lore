@@ -137,8 +137,12 @@ export function judgmentAnswerSchema(dimensions: readonly JudgedDimension[]) {
  *   - `unmappable`: a landing (or the history) cannot be placed on main, so a transition cannot be attributed; a retry reads the same git.
  *   - `flaky-bisection`: the confirmation runs disagree with the bisection; single-file runs are stored per commit and reused, so a retry
  *     at the same head reads the same stored runs and reaches the same disagreement.
+ *   - `timeout`: the file's runs at a point ended only in test or hook timeouts (inconclusive, BR-1533): no conclusive run decides
+ *     there, the file is never charged, and the next review runs the point again.
+ *   - `no-report`: the file's run wrote no readable outcome report, so nothing reliable says how it went (the console text is never read as a
+ *     result); like `timeout` it is never charged and the next review runs the point again.
  */
-export const NOT_MEASURED_CAUSES = ["unrunnable", "unlanded", "unmappable", "flaky-bisection"] as const;
+export const NOT_MEASURED_CAUSES = ["unrunnable", "unlanded", "unmappable", "flaky-bisection", "timeout", "no-report"] as const;
 export type RegressionNotMeasuredCause = (typeof NOT_MEASURED_CAUSES)[number];
 
 /**
@@ -146,11 +150,11 @@ export type RegressionNotMeasuredCause = (typeof NOT_MEASURED_CAUSES)[number];
  * only "a plan whose gate is not measured because the suite could not complete" is retried).
  *
  * @param causes - the stored `regression_causes` of the review (absent: none recorded)
- * @returns `true` iff some cause is `unrunnable`; every other cause waits for the plan's own landing, a landing touching its
- *   failing facts, or a manual `lore assess`
+ * @returns `true` iff some cause is `unrunnable`, `timeout` or `no-report` (a retry runs the point again, BR-1533); every other cause
+ *   waits for the plan's own landing, a landing touching its failing facts, or a manual `lore assess`
  */
 export function regressionRetryCanChange(causes: readonly RegressionNotMeasuredCause[] | undefined): boolean {
-  return causes?.includes("unrunnable") ?? false;
+  return causes?.some((cause) => cause === "unrunnable" || cause === "timeout" || cause === "no-report") === true;
 }
 
 /** One row of the facts table: a criterion's attestation, or one landing's regression. */
