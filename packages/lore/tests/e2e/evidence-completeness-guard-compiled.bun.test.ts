@@ -182,6 +182,7 @@ beforeAll(async () => {
     [
       "create", "task",
       "--title", "AC-061-16 Task",
+      "--kind", "code",
       "--plan-id", parseSlug(plan.stdout),
       "--content", "## Task\n\nbody",
       "--no-ai",

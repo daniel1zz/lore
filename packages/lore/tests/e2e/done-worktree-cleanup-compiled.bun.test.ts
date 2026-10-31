@@ -24,7 +24,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSyn
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installShippedGuard } from "../integration/support/main-guard-repo.js";
+import { FIXTURE_DONE_CONTRACT_CONFIG, landCodeTask } from "../helpers/landed-code-task";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -44,6 +44,8 @@ interface Case {
 
 let parent = "";
 let repo = "";
+/** The spec every fixture task is governed by (an ad-hoc task has no plan, so it names its spec). */
+let spec = "";
 
 function envFor(session: string, extra: Record<string, string> = {}): Record<string, string> {
   const env: Record<string, string> = {};
@@ -77,24 +79,21 @@ function mustOk(run: Run, what: string): Run {
 async function makeCase(agent: string, session: string, claimValue: "path" | "branch" = "path"): Promise<Case> {
   const branch = `agent-${agent}`;
   const path = join(parent, branch);
-  const created = mustOk(
-    await lore(["create", "task", "--adhoc", "--title", `Done cleanup ${agent}`, "--content", "Throwaway task.", "--no-ai", "--ac-scope", "", "--json"], session),
-    `create ${agent}`,
+  // an approved code task claimed on its own branch (the dispatch protocol claims with `--worktree "$(git branch --show-current)"`,
+  // i.e. the BRANCH name, CL-1), landed on main with the landing record, and holding a runner pass for each oracle of its stored
+  // contract: the state `lore done` judges by the contract compiled at approve
+  const landed = await landCodeTask(
+    {
+      dir: repo,
+      git: (args) => mustOk(git(repo, ...args), `git ${args.join(" ")}`).stdout.trim(),
+      lore: async (args, as) => {
+        const run = await lore([...args], as);
+        return { exitCode: run.status, stdout: run.stdout, stderr: run.stderr };
+      },
+    },
+    { title: `Done cleanup ${agent}`, branch, worktree: path, claimValue, session, spec },
   );
-  const slug = (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
-  mustOk(git(repo, "worktree", "add", "-q", "-b", branch, path), `worktree add ${agent}`);
-  // the dispatch protocol claims with `--worktree "$(git branch --show-current)"`, i.e. the BRANCH name (CL-1)
-  mustOk(await lore(["claim", slug, "--worktree", claimValue === "branch" ? branch : path], session), `claim ${agent}`);
-  writeFileSync(join(path, `${agent}.txt`), `${agent}\n`);
-  mustOk(git(path, "add", "-A"), `add ${agent}`);
-  mustOk(git(path, "commit", "-q", "-m", `own commit ${agent}`), `commit ${agent}`);
-  // landed through `lore integrate`, which records the landing `lore done` requires on the claiming task (BR-1291)
-  // integrate refuses to run without the main-ref guard; the shared checkout is a detached view of main (BR-1273)
-  mustOk(git(repo, "checkout", "-q", "--detach", "main"), `detach shared checkout for ${agent}`);
-  installShippedGuard(repo, join(repo, ".git", "guard-hooks"));
-  mustOk(await lore(["integrate", branch, "--session", session], session), `integrate ${agent}`);
-  mustOk(await lore(["evidence", slug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"], session), `evidence ${agent}`);
-  return { slug, path, branch };
+  return { slug: landed.slug, path, branch };
 }
 
 async function registerAgentRun(session: string, agent: string): Promise<void> {
@@ -103,7 +102,7 @@ async function registerAgentRun(session: string, agent: string): Promise<void> {
 }
 
 const done = async (c: Case, session: string, extra: Record<string, string> = {}): Promise<Run> =>
-  await lore(["done", c.slug, "--declare-no-new-tests", "fixture: throwaway task"], session, extra);
+  await lore(["done", c.slug], session, extra);
 
 const worktreeLine = (run: Run): string => /^worktree:.*$/m.exec(run.stdout)?.[0] ?? "";
 const branchExists = (branch: string): boolean => git(repo, "branch", "--list", branch).stdout.trim() !== "";
@@ -119,13 +118,22 @@ beforeAll(async () => {
   mustOk(git(repo, "add", "-A"), "git add");
   mustOk(git(repo, "commit", "-q", "-m", "base"), "git commit");
   mustOk(await lore(["init"], "init-0"), "lore init");
-  // `lore integrate` keeps its own worktree under `.claude/` and needs the floor key; neither may dirty the tree
-  appendFileSync(join(repo, ".git", "info", "exclude"), ".claude/\n.lore/integrate-attempts/\n.lore/integrate-losses/\n");
-  patchLoreConfig(repo, 'workflow:\n  integrate:\n    floor_command: "true"\n');
+  // approve compiles the contract of each fixture task from these three commands (a code task needs all of them)
+  appendFileSync(join(repo, ".git", "info", "exclude"), ".claude/\n");
+  // reason: the claim gate wants an approved spec and a spec approval wants a review judgment; neither is this file's subject.
+  patchLoreConfig(repo, {
+    workflow: {
+      done_contract: { ...FIXTURE_DONE_CONTRACT_CONFIG },
+      gates: { "task-claim": { enabled: false } },
+      review: { judgment_required_types: [] },
+    },
+  });
   // reason: `lore init` arms state binding (AC-CT-3); evidence captured on a dirty tree is unbound and refused by `lore done`.
   mustOk(git(repo, "add", "-A"), "git add corpus");
   mustOk(git(repo, "commit", "-q", "-m", "lore corpus"), "git commit corpus");
   mustOk(await lore(["create", "prd", "--title", "Root", "--content", "Root PRD.", "--no-ai", "--json"], "init-0"), "create prd");
+  const createdSpec = mustOk(await lore(["create", "spec", "--title", "Cleanup spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai", "--json"], "init-0"), "create spec");
+  spec = (JSON.parse(createdSpec.stdout) as { data: { slug: string } }).data.slug;
 }, 300_000);
 
 afterAll(() => {
@@ -138,7 +146,7 @@ describe("AC-WS-3 lore done removes its worktree through the single removal test
     const c = await makeCase("AAA", "S1");
     mustOk(await lore(["run", "end", "cc:S1:AAA", "--reason", "agent stopped"], "S1"), "end AAA");
     const r = await done(c, "S1");
-    expect(r.status).toBe(0);
+    expect(r.status, r.out).toBe(0);
     expect(worktreeLine(r)).toBe(`worktree: removed ${c.path}`);
     expect(existsSync(c.path)).toBe(false);
     expect(branchExists(c.branch)).toBe(false);
@@ -148,7 +156,7 @@ describe("AC-WS-3 lore done removes its worktree through the single removal test
     await registerAgentRun("S1", "BBB");
     const c = await makeCase("BBB", "S1");
     const r = await done(c, "S1");
-    expect(r.status).toBe(0);
+    expect(r.status, r.out).toBe(0);
     expect(worktreeLine(r)).toBe(`worktree: kept ${c.path}: run-not-ended`);
     expect(existsSync(c.path)).toBe(true);
     expect(branchExists(c.branch)).toBe(true);
@@ -159,7 +167,7 @@ describe("AC-WS-3 lore done removes its worktree through the single removal test
     const c = await makeCase("CCC", "S6"); // the task is claimed (and done) by S6; the worktree's agent belongs to S5
     mustOk(await lore(["run", "end", "cc:S5:CCC", "--reason", "agent stopped"], "S5"), "end CCC");
     const r = await done(c, "S6"); // S5's main run (cc:S5) is open
-    expect(r.status).toBe(0);
+    expect(r.status, r.out).toBe(0);
     expect(worktreeLine(r)).toBe(`worktree: kept ${c.path}: foreign-live-session`);
     expect(existsSync(c.path)).toBe(true);
   });
@@ -178,7 +186,7 @@ describe("AC-WS-3 lore done removes its worktree through the single removal test
     const c = await makeCase("FFF", "S10", "branch");
     mustOk(await lore(["run", "end", "cc:S10:FFF", "--reason", "agent stopped"], "S10"), "end FFF");
     const r = await done(c, "S10");
-    expect(r.status).toBe(0);
+    expect(r.status, r.out).toBe(0);
     expect(worktreeLine(r)).toBe(`worktree: removed ${c.path}`);
     expect(existsSync(c.path)).toBe(false);
     expect(branchExists(c.branch)).toBe(false);
@@ -191,7 +199,7 @@ describe("AC-WS-3 lore done removes its worktree through the single removal test
     const occupant = Bun.spawn(["sleep", "120"], { cwd: c.path, env: envFor("S11") });
     try {
       const r = await done(c, "S11");
-      expect(r.status).toBe(0);
+      expect(r.status, r.out).toBe(0);
       expect(worktreeLine(r)).toBe(`worktree: kept ${c.path}: process-inside`);
       expect(existsSync(c.path)).toBe(true);
       expect(branchExists(c.branch)).toBe(true);
@@ -207,7 +215,7 @@ describe("AC-WS-3 lore done removes its worktree through the single removal test
     mustOk(git(repo, "worktree", "remove", c.path), "remove HHH worktree");
     mustOk(git(repo, "branch", "-d", c.branch), "delete HHH branch");
     const r = await done(c, "S12");
-    expect(r.status).toBe(0);
+    expect(r.status, r.out).toBe(0);
     expect(worktreeLine(r)).toBe(`worktree: gone ${c.branch}: ${c.branch} is not an absolute path; no worktree has branch ${c.branch}`);
   });
 
@@ -229,7 +237,7 @@ describe("AC-WS-3 lore done removes its worktree through the single removal test
     const c = await makeCase("DDD", "S7");
     mustOk(await lore(["run", "end", "cc:S7:DDD", "--reason", "agent stopped"], "S7"), "end DDD");
     const r = await done(c, "S7", { LORE_WORKTREE_QUIET_MINUTES: "9999" });
-    expect(r.status).toBe(0);
+    expect(r.status, r.out).toBe(0);
     expect(r.out).not.toContain("recent-activity");
     expect(worktreeLine(r)).toBe(`worktree: removed ${c.path}`);
   });

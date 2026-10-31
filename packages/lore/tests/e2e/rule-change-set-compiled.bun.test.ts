@@ -133,7 +133,7 @@ class World {
 
   async plan(spec: string, acId: string): Promise<{ plan: string; task: string }> {
     const plan = await this.slug(["create", "plan", "--title", `Plan of ${spec}`, "--parent", spec, "--content", "## Plan\n\nbody", "--no-ai"]);
-    const task = await this.slug(["create", "task", "--title", `Task of ${spec}`, "--plan-id", plan, "--ac-scope", acId, "--content", "## Task\n\nbody", "--no-ai"]);
+    const task = await this.slug(["create", "task", "--title", `Task of ${spec}`, "--kind", "code", "--plan-id", plan, "--ac-scope", acId, "--content", "## Task\n\nbody", "--no-ai"]);
     return { plan, task };
   }
 

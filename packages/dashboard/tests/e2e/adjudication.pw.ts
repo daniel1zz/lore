@@ -128,7 +128,7 @@ test.describe("SPEC-075 dashboard adjudication workbench", () => {
 
     const taskRes = await page.request.post(`${API_ORIGIN}/api/dashboard/docs`, {
       headers: { "Content-Type": "application/json" },
-      data: { type: "task", title: taskTitle, parent_id: planId, extra: { plan_id: planId } },
+      data: { type: "task", kind: "code", title: taskTitle, parent_id: planId, extra: { plan_id: planId } },
     });
     expect(taskRes.ok()).toBe(true);
     const taskBody = (await taskRes.json()) as { ok: true; data: { doc: { id: string; version: number } } };

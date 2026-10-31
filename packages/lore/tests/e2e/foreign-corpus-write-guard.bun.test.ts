@@ -89,6 +89,7 @@
  * history of this file; the assertions and the throwaway-corpus rule are unchanged.
  */
 
+import { Database } from "bun:sqlite";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -266,6 +267,8 @@ async function seedTask(dir: string, titleSuffix: string): Promise<string> {
       "task",
       "--title",
       `FCWG E2E Task ${titleSuffix}`,
+      "--kind",
+      "code",
       "--parent",
       planSlug,
       "--plan-id",
@@ -423,8 +426,17 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
       // the guard is inert regardless of --worktree — this legitimately
       // lands a claim lease with NO worktree field, the exact precondition
       // cell (2b) needs.
-      const primaryClaimResult = await runLore(["claim", taskSlug], repoRoot);
+      // A code task can no longer be claimed without a branch (and a check or corpus task is never claimed), so the lease
+      // with no `worktree` field, the shape an older claim left, is built by claiming on a branch and then dropping the field
+      // from the stored claim.
+      const primaryClaimResult = await runLore(["claim", taskSlug, "--worktree", "fcwg-cell2b-branch"], repoRoot);
       expect(primaryClaimResult.exitCode).toBe(0);
+      const db = new Database(join(repoRoot, ".lore", "lore.db"));
+      try {
+        db.query("UPDATE docs SET extra = json_remove(extra, '$.claim.worktree') WHERE slug = ?").run(taskSlug);
+      } finally {
+        db.close();
+      }
 
       const precondition = await runLore(["get", taskSlug, "--json"], repoRoot);
       const preParsed = JSON.parse(precondition.stdout) as {

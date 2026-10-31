@@ -293,15 +293,19 @@ async function createPlan(dir: string, specSlug: string, title: string): Promise
   return parseSlug(r.stdout);
 }
 
-async function createTask(dir: string, planSlug: string, title: string): Promise<string> {
+async function createTask(dir: string, planSlug: string, title: string, kind: "code" | "check" | "corpus", acId: string): Promise<string> {
   const r = await runLore(
     [
       "create",
       "task",
       "--title",
       title,
+      "--kind",
+      kind,
       "--plan-id",
       planSlug,
+      "--ac-scope",
+      acId,
       "--content",
       "## Task\n\nbody",
       "--no-ai",
@@ -364,13 +368,12 @@ async function archivePlan(dir: string, planSlug: string): Promise<RunResult> {
  * output too, which tasks the cascade archived and which it left open and why.
  *
  * Its OWN throwaway corpus. The `plan-close` gate is switched OFF here (BR-214) so
- * the plan itself closes regardless of attestation scope: task A declares no
- * `ac_scope` (a declared scope with no red run would trip the no-new-tests floor,
- * and an undeclared scope with evidence would trip the plan-close scope conjunct,
- * which is a different checkpoint from the one under test). The cascade's per-task
+ * the plan itself closes regardless of attestation scope. Both tasks are `check`
+ * tasks owning the spec's script AC, approved with the contract compiled at approve
+ * (a check task needs no red run and no branch to land). The cascade's per-task
  * floors are NOT switched off by that config, so the only thing that differs
- * between A and B is the evidence: A holds a runner-attested pass (`lore verify`),
- * B holds none.
+ * between A and B is the evidence: A holds a runner-attested pass (`lore verify`)
+ * for its contract oracle, B holds none.
  */
 function writeConfigPlanCloseGateOff(dir: string): void {
   const config: LoreConfig = {
@@ -410,8 +413,13 @@ describe("AC-AP-6: compiled plan close prints the cascade in human output and ca
   /** One plan, attested task A, evidence-less task B, plan approved and ready to close. */
   async function seedPlan(label: string): Promise<{ planSlug: string; a: string; b: string }> {
     const planSlug = await createPlan(dir, specSlug, `AP-6 Plan ${label}`);
-    const a = await createTask(dir, planSlug, `AP-6 Task A ${label}`);
-    const b = await createTask(dir, planSlug, `AP-6 Task B ${label}`);
+    // check tasks: they hold the AC's script oracle in the contract compiled at approve, and need no branch to land
+    const a = await createTask(dir, planSlug, `AP-6 Task A ${label}`, "check", AC_ID);
+    const b = await createTask(dir, planSlug, `AP-6 Task B ${label}`, "check", AC_ID);
+    for (const slug of [a, b]) {
+      const approvedTask = await runLore(["approve", slug], dir);
+      if (approvedTask.exitCode !== 0) throw new Error(`approve task failed (setup): ${approvedTask.stdout}${approvedTask.stderr}`);
+    }
     const verified = await verifyAttested(dir, planSlug, a, AC_ID);
     if (verified.exitCode !== 0) throw new Error(`verify A failed (setup): ${verified.stdout}${verified.stderr}`);
     const approved = await approvePlan(dir, planSlug);

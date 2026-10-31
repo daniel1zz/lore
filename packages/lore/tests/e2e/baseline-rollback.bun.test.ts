@@ -135,7 +135,7 @@ async function buildControlCorpus(label: string): Promise<Corpus> {
   );
   const planSlug = parseSlug(plan.stdout);
   await mustRun(
-    ["create", "task", "--title", "Rollback Task", "--plan-id", planSlug, "--parent", planSlug, "--content", "## Task", "--ac-scope", "AC-RB-1", "--no-ai"],
+    ["create", "task", "--title", "Rollback Task", "--kind", "code", "--plan-id", planSlug, "--parent", planSlug, "--content", "## Task", "--ac-scope", "AC-RB-1", "--no-ai"],
     dir,
   );
   return { dir, specSlug, prdSlug };

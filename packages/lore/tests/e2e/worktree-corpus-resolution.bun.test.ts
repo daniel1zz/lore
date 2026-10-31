@@ -203,6 +203,8 @@ async function seedTask(dir: string): Promise<string> {
       "task",
       "--title",
       "WCR E2E Task",
+      "--kind",
+      "code",
       "--parent",
       planSlug,
       "--plan-id",

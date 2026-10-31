@@ -25,7 +25,7 @@ import type { DoneContractFixture } from "./done-contract-fixture";
  * @returns the landing commit (the merge commit now at the tip of main)
  * @throws Error when git or the landing record fails (a fixture fault, never silent)
  */
-export async function landWithoutIntegrate(fixture: DoneContractFixture, branch: string): Promise<string> {
+export async function landWithoutIntegrate(fixture: Pick<DoneContractFixture, "dir" | "git">, branch: string): Promise<string> {
   fixture.git(["checkout", "-q", "--detach", "main"]);
   const before = fixture.git(["rev-parse", "HEAD"]);
   const tip = fixture.git(["rev-parse", branch]);

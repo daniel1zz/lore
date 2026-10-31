@@ -4,15 +4,17 @@
  * predicate, proved through the COMPILED `dist/lore` on a throwaway repo and corpus (`mkdtemp` + `lore init`; never this repo's
  * own `.lore/`).
  *
- * One task claims a branch, records a clean captured pass, is released, and its branch and worktree vanish (the unchanged-work
- * shape). Then, all through the binary:
- *   - `lore done` through the CLI archives it (exactly `archived`);
- *   - `lore get` prints `Landing: no-change`;
- *   - `lore set <plan> --status archived` (plan close) of the plan whose ONLY task has that landing exits 0;
+ * One corpus task (commitless work: it changes no file, so it has no branch and no landing) is approved with its contract and
+ * finished by `lore finish` at main's head (the retired route, a code task on a vanished branch closed by `lore done` with a
+ * `no-change` landing, no longer exists: `lore done` demands a landing record of a code task). Then, all through the binary:
+ *   - `lore finish` through the CLI archives it (exactly `archived`) and stores no landing;
+ *   - `lore get` prints no landing line;
+ *   - `lore set <plan> --status archived` (plan close) of the plan whose tasks are that one and the control exits 0;
  *   - the plan's milestone-review input adds no commit range for the task: the review fingerprint's landed-commit part is `none`
  *     and assess's recorded ranges are empty, both computed from the document the binary stored.
- * A second task, whose branch really carries a commit that reached main, is the control: its landing is `commits`, it prints
- * `Landing: commits <tip>`, and it DOES count (a reader that ignored the kind would pass the first half only).
+ * A second task, a code task whose branch really carries a commit that reached main through `lore integrate`, is the control: its
+ * landing is `commits`, it prints `Landing: commits <tip>`, and it DOES count (a reader that ignored the kind would pass the first
+ * half only).
  *
  * False green guarded: a service-only test passes while a caller keeps its own landing logic; here each caller is run through
  * the binary, and `landing-predicate-census.test.ts` proves no other computation exists.
@@ -98,18 +100,23 @@ function worktreeOf(branch: string): string {
 
 /** A task claimed on a fresh worktree/branch, with a clean captured pass recorded from inside the worktree. */
 function claimWithPass(plan: string, title: string, branch: string, declareEmptyScope: boolean): { task: string; wt: string } {
-  const task = slugOf(mustLore(["create", "task", "--title", title, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", ...(declareEmptyScope ? ["--ac-scope", ""] : [])]));
+  const task = slugOf(mustLore(["create", "task", "--title", title, "--kind", "code", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", ...(declareEmptyScope ? ["--ac-scope", ""] : [])]));
+  // the contract is compiled at approve; the red run is not this file's subject (AC-DCS1-5)
+  mustLore(["approve", task, "--red-waiver", "the red run is not the subject of this test"]);
   mkdirSync(join(dir, ".claude", "wt"), { recursive: true });
   git(["worktree", "add", "-q", "-b", branch, worktreeOf(branch), "main"]);
   git(["config", "user.email", "fixture@example.invalid"], worktreeOf(branch));
   git(["config", "user.name", "fixture"], worktreeOf(branch));
   mustLore(["claim", task, "--worktree", branch]);
   const wt = worktreeOf(branch);
-  const proc = Bun.spawnSync(
-    [DIST_LORE, "evidence", task, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"],
-    { cwd: wt, env: loreEnv() },
-  );
-  if ((proc.exitCode ?? -1) !== 0) throw new Error(`capture failed: ${proc.stdout.toString()}${proc.stderr.toString()}`);
+  // a clean runner pass for every oracle of the contract stored at approve, taken inside the worktree (its head is the branch tip)
+  const oracles = ((docOf(task).extra["done_contract"] as { oracles: { id: string; command: string }[] }).oracles);
+  for (const oracle of oracles) {
+    const args = ["evidence", task, "--oracle", "test", "--command", oracle.command, "--result", "pass", "--capture"];
+    if (oracle.id.startsWith("ac:")) args.push("--ac", oracle.id.slice("ac:".length));
+    const proc = Bun.spawnSync([DIST_LORE, ...args], { cwd: wt, env: loreEnv() });
+    if ((proc.exitCode ?? -1) !== 0) throw new Error(`capture failed: ${proc.stdout.toString()}${proc.stderr.toString()}`);
+  }
   return { task, wt };
 }
 
@@ -117,6 +124,7 @@ let plan = "";
 let noChangeTask = "";
 let commitsTask = "";
 let integrateOutput = "";
+let finishResult: Run = { exitCode: -1, stdout: "", stderr: "", text: "finish never ran" };
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-landing-compiled-"));
@@ -126,11 +134,24 @@ beforeAll(async () => {
   appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n");
   patchLoreConfig(
     dir,
-    ["workflow:", "  gates:", '    "plan-close":', "      enabled: false", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"', ""].join("\n"),
+    [
+      "workflow:", "  gates:", '    "plan-close":', "      enabled: false", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"',
+      // approve compiles each task's contract from these commands (a code task needs all three)
+      "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"', "",
+    ].join("\n"),
   );
   const prd = slugOf(mustLore(["create", "prd", "--title", "Landing PRD", "--content", "root", "--no-ai"]));
   plan = slugOf(mustLore(["create", "plan", "--title", "Landing Plan", "--parent", prd, "--content", "x", "--no-ai"]));
   mustLore(["set", plan, "--status", "approved"]);
+
+  // the commitless work: a corpus task (it changes no file, so it has no branch to land), approved with its contract and finished
+  // at main's head by `lore finish`, in the shared checkout detached at main's tip and still clean (a landing moves main's ref
+  // under the checkout, so the finish comes first). The retired route was a code task claimed on a branch whose worktree vanished,
+  // closed by `lore done` with a `no-change` landing (AC-DCS1-19: a check or corpus task finishes with no claim and no landing record)
+  noChangeTask = slugOf(mustLore(["create", "task", "--title", "Unchanged work", "--kind", "corpus", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", "--ac-scope", ""]));
+  mustLore(["approve", noChangeTask]);
+  git(["checkout", "-q", "--detach", "main"]);
+  finishResult = lore(["finish", noChangeTask], { LORE_HARNESS_RUN: DONE_RUN });
 
   // the commits control: its branch carries one commit, and that commit reaches main
   const control = claimWithPass(plan, "Commits control", "nd8-commits", false);
@@ -145,13 +166,6 @@ beforeAll(async () => {
   const landed = lore(["integrate", "nd8-commits", "--session", "nd8-s1"]);
   if (landed.exitCode !== 0) throw new Error(`integrate failed: ${landed.text}`);
   integrateOutput = landed.text;
-
-  // the unchanged work: released, branch and worktree gone
-  const unchanged = claimWithPass(plan, "Unchanged work", "nd8-nochange", true);
-  noChangeTask = unchanged.task;
-  mustLore(["release", noChangeTask]);
-  git(["worktree", "remove", "--force", unchanged.wt]);
-  git(["branch", "-D", "nd8-nochange"]);
 }, 600_000);
 
 afterAll(() => {
@@ -173,14 +187,12 @@ describe("AC-ND-8 every closer and reader uses the one landing predicate (compil
     expect(mustLore(["get", commitsTask])).toContain(`Landing: commits ${String(landing["tip"])}`);
   }, 300_000);
 
-  it("AC-ND-8 lore done through the CLI archives the no-change task, and lore get shows `Landing: no-change`", () => {
-    const result = lore(["done", noChangeTask, "--declare-no-new-tests", "read-only"], { LORE_HARNESS_RUN: DONE_RUN });
-
-    expect(result.exitCode, result.text).toBe(0);
+  it("AC-ND-8 lore finish archives the commitless corpus task with no landing record, and lore get prints no landing line", () => {
+    expect(finishResult.exitCode, finishResult.text).toBe(0);
     const doc = docOf(noChangeTask);
     expect(doc.status).toBe("archived"); // exact: a deprecated task would be a false green
-    expect((doc.extra["landing"] as Record<string, unknown>)["kind"]).toBe("no-change");
-    expect(mustLore(["get", noChangeTask])).toContain("Landing: no-change");
+    expect(doc.extra["landing"]).toBeUndefined(); // a corpus task has no branch to land: no landing of any kind is stored
+    expect(mustLore(["get", noChangeTask])).not.toContain("Landing:");
   }, 300_000);
 
   it("AC-ND-8 plan close passes: every task of the plan is landed and archived", () => {

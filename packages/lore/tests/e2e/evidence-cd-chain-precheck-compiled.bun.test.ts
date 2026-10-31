@@ -219,6 +219,7 @@ beforeAll(async () => {
     [
       "create", "task",
       "--title", "Cd Chain Precheck Task",
+      "--kind", "code",
       "--plan-id", parseSlug(plan.stdout),
       "--content", "## Task\n\nbody",
       "--no-ai",

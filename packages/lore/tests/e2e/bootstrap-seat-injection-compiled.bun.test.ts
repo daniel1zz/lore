@@ -24,15 +24,20 @@ import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-t
 import { installShippedGuard } from "../integration/support/main-guard-repo.js";
 import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { execFileSync } from "child_process";
-import { join } from "path";
+import { basename, join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { FIXTURE_DONE_CONTRACT_CONFIG } from "../helpers/landed-code-task";
 
-/** A directory that is a git repository: a claim recording it as its worktree is measured through `git worktree list` (BR-1353). */
+/**
+ * A directory that is a git repository: a claim recording it as its worktree is measured through `git worktree list` (BR-1353).
+ * Each directory sits on its own branch (named after the directory): one unlanded task holds a branch, so two seat directories
+ * on `main` would make the second claim refuse with `shared-branch`.
+ */
 function makeRepoDir(path: string): void {
   mkdirSync(path);
-  execFileSync("git", ["init", "-q", path], { stdio: "ignore" });
+  execFileSync("git", ["init", "-q", "-b", `seat-${basename(path)}`, path], { stdio: "ignore" });
   // reason: a claim on a branch needs a start commit (the claim schema requires `start_head`), so the seat repo is not unborn.
   execFileSync("git", ["-c", "user.email=fixture@example.invalid", "-c", "user.name=fixture", "commit", "-q", "--allow-empty", "-m", "seat base"], { cwd: path, stdio: "ignore" });
 }
@@ -100,15 +105,17 @@ function sessionFor(slug: string): string {
 }
 
 /** Creates a fresh task under `plan` and claims it as its own simulated session with `--worktree <worktree>`; returns its slug. */
-async function claimTask(dir: string, plan: string, worktree: string): Promise<string> {
+async function claimTask(dir: string, plan: string, worktree: string, approve = false): Promise<string> {
   taskCounter += 1;
   const session = `c1a1${taskCounter.toString(16).padStart(4, "0")}-seat-e2e-claimant`;
   const slug = parseSlug(
     (await mustRun(
-      ["create", "task", "--title", `Seat task ${taskCounter}`, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"],
+      ["create", "task", "--title", `Seat task ${taskCounter}`, "--kind", "code", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"],
       dir,
     )).stdout,
   );
+  // a task that will be landed and archived holds the contract compiled at approve; the red run is not this file's subject
+  if (approve) await mustRun(["approve", slug, "--red-waiver", "the red run is not the subject of this test"], dir);
   await mustRun(["claim", slug, "--worktree", worktree], dir, session);
   claimantSessions.set(slug, session);
   return slug;
@@ -202,19 +209,20 @@ describe("AC-SI-2: compiled dist/lore bootstrap --injection is seat-only", () =>
     // the claimed branch really exists and is landed through `lore integrate`, the only way `lore done` accepts (BR-1291)
     const git = (...args: string[]): void => void execFileSync("git", args, { cwd: dir, stdio: "ignore" });
     appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n");
-    patchLoreConfig(dir, 'workflow:\n  integrate:\n    floor_command: "true"\n');
+    patchLoreConfig(dir, { workflow: { integrate: { floor_command: "true" }, done_contract: { ...FIXTURE_DONE_CONTRACT_CONFIG } } });
     git("checkout", "-q", "-b", "feat-done");
     writeFileSync(join(dir, "feat-done.txt"), "work\n");
     git("add", "feat-done.txt");
     git("commit", "-q", "-m", "work on feat-done");
     git("checkout", "-q", "main");
-    const slug = await claimTask(dir, seeded.plan, "feat-done");
+    const slug = await claimTask(dir, seeded.plan, "feat-done", true);
     expect(claimSlugs(await injection(dir, "feat-done", scratch))).toEqual([slug]);
     git("checkout", "-q", "--detach", "main"); // the shared checkout is a detached view of main
     installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
-    await mustRun(["integrate", "feat-done", "--session", "seat-done-session"], dir);
-    await mustRun(["evidence", slug, "--oracle", "test", "--command", "echo ok", "--result", "pass", "--capture"], dir, sessionFor(slug));
-    await mustRun(["done", slug], dir, sessionFor(slug));
+    // integrate runs the contract oracles on the landed tree, records the landing and the rows, and archives the task
+    await mustRun(["integrate", "feat-done", "--session", "seat-done-session"], dir, sessionFor(slug));
+    const archived = JSON.parse((await mustRun(["get", slug, "--json"], dir)).stdout) as { data: { doc?: { status: string }; status?: string } };
+    expect(archived.data.doc?.status ?? archived.data.status).toBe("archived");
     const r = await injection(dir, "feat-done", scratch);
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toBe("");
