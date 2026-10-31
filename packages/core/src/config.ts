@@ -646,6 +646,12 @@ const WorkflowConfigSchema = z
          * judgments (BR-1369). `[]` disables the gate entirely. Default: ["spec","adr"].
          */
         judgment_required_types: z.array(z.string()).default(["spec", "adr"]),
+        /**
+         * How many review test runs (selection chunks, head rechecks, bisection runs, criteria runs) may run at once on one
+         * machine (BR-1532, #574). A positive integer; 0, a negative number or a non-number is a config load error naming
+         * `workflow.review.machine_test_slots`. Default: 1.
+         */
+        machine_test_slots: z.number().int().positive().default(1),
       })
       .strict()
       .default({}),
@@ -1488,6 +1494,18 @@ export function resolveJudgmentRequiredTypes(config: LoreConfig | undefined): st
     config?.workflow?.review?.judgment_required_types ??
     WorkflowConfigSchema.parse({}).review.judgment_required_types
   );
+}
+
+/**
+ * Resolve the effective `workflow.review.machine_test_slots` (BR-1532): how many review test runs run at once per machine.
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns A positive integer; 1 when the key is absent
+ * @example
+ *   resolveMachineTestSlots(undefined) // => 1
+ */
+export function resolveMachineTestSlots(config: LoreConfig | undefined): number {
+  return config?.workflow?.review?.machine_test_slots ?? WorkflowConfigSchema.parse({}).review.machine_test_slots;
 }
 
 /**
