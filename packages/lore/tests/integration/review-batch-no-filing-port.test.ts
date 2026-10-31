@@ -15,6 +15,7 @@ import { MILESTONE_DIMENSIONS, ok, type DocRecord, type MilestoneDimension, type
 import { InMemoryStore } from "../../src/store/in-memory-store.js";
 import { coverFailedDimensions } from "../../src/service/milestone-review-inputs.js";
 import { ReviewLeases, planLeaseKey } from "../../src/service/review-batch-lease.js";
+import { noDecisionLog } from "../helpers/gate-acceptance-log.js";
 import { ReviewBatchRunner, type BatchErrorRecord, type BatchRunPorts } from "../../src/service/review-batch-service.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint } from "../../src/service/milestone-review.js";
 import type { MilestoneReviewResult } from "../../src/service/milestone-review-service.js";
@@ -44,6 +45,7 @@ async function runWithoutFiling(slug: string, failing: MilestoneDimension | unde
     getPlanBundle: async () => ok(bundle),
     listReviewDocs: async () => ok(docs),
     issueCoverage: async (_planId, failed) => ok(coverFailedDimensions(failed, [])),
+    acceptanceLog: noDecisionLog(),
   });
   const ports: BatchRunPorts = {
     acquirePlanLease: (planId) => lease.acquire(planLeaseKey(planId)),
