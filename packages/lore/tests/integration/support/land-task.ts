@@ -56,6 +56,8 @@ export interface TaskLandingOptions {
    * Default: a fixed fixture reason, because the red run is rarely a landing test's subject.
    */
   readonly redWaiver?: string | false;
+  /** `false` skips the approve (the task was approved by the test, so its contract is already stored). Default `true`. */
+  readonly approve?: boolean;
   /** `false` leaves the task landed with no runner pass of any contract oracle. Default `true`. */
   readonly recordPasses?: boolean;
   /** `false` stops after the claim: nothing is committed or landed. Default `true`. */
@@ -119,7 +121,9 @@ export async function recordContractPasses(world: TaskWorld, slug: string, sessi
 export async function landTask(world: TaskWorld, options: TaskLandingOptions): Promise<LandedTask> {
   const { slug, branch, worktree, session } = options;
   const waiver = options.redWaiver ?? "the red run is not the subject of this fixture";
-  await mustLore(world, waiver === false ? ["approve", slug] : ["approve", slug, "--red-waiver", waiver], session);
+  if (options.approve !== false) {
+    await mustLore(world, waiver === false ? ["approve", slug] : ["approve", slug, "--red-waiver", waiver], session);
+  }
 
   world.git(["worktree", "add", "-q", "-b", branch, worktree, "main"]);
   await mustLore(world, ["claim", slug, "--worktree", options.claimValue === "branch" ? branch : worktree], session);

@@ -403,10 +403,33 @@ const PRODUCERS: readonly ProducerRow[] = [
     verdict: "milestone",
     label: "lore done --override-attestation",
     drive: (corpus) => {
-      mustOk(corpus, ["create", "prd", "--title", "Root PRD", "--content", "x", "--json"]);
-      const task = (JSON.parse(mustOk(corpus, ["create", "task", "--kind", "code", "--title", "Manual Task", "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"])) as { data: { slug: string } }).data.slug;
+      const prd = (JSON.parse(mustOk(corpus, ["create", "prd", "--title", "Root PRD", "--content", "x", "--json"])) as { data: { slug: string } }).data.slug;
+      const plan = slugOf(mustOk(corpus, ["create", "plan", "--title", "Manual Plan", "--parent", prd, "--content", "x", "--no-ai"]));
+      const task = slugOf(
+        mustOk(corpus, ["create", "task", "--kind", "corpus", "--title", "Manual Task", "--parent", plan, "--plan-id", plan, "--ac-scope", "", "--content", "body", "--no-ai"]),
+      );
       mustOk(corpus, ["evidence", task, "--oracle", "manual", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"]);
-      expectAppliedWithoutPendingDecision(lore(corpus, ["done", task, "--override-attestation", "verified by hand in staging", "--declare-no-new-tests", "this task adds no test"]));
+      // reason: the attestation override waives only the attested-pass floor (AC-DCS1-7), and every contract oracle still needs its own
+      // counted pass, so it is reachable only on a task whose stored contract holds NO oracle. `lore approve` never compiles one (a corpus
+      // task always holds `corpus:files-unchanged`), so that contract is stored straight into the corpus database, the way the
+      // attribution matrix seeds its done-kind task: the subject here is the decision's recorded detail, not the compile.
+      const db = new Database(corpus.dbPath);
+      try {
+        const contract = {
+          compiled_at_commit: "0000000000000000000000000000000000000000",
+          kind: "corpus",
+          base_branch: "main",
+          oracles: [],
+          red_required: false,
+          landing_route: "none",
+          new_symbols: [],
+          added_oracles: [],
+        };
+        db.run("UPDATE docs SET extra = json_set(extra, '$.done_contract', json(?)) WHERE slug = ?", [JSON.stringify(contract), task]);
+      } finally {
+        db.close();
+      }
+      expectAppliedWithoutPendingDecision(lore(corpus, ["done", task, "--override-attestation", "verified by hand in staging"]));
       return { document: task };
     },
     summaryWords: (e) => [e["document"] as string],

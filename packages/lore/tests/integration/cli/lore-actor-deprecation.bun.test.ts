@@ -21,12 +21,15 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AuditEntry } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { FIXTURE_HOME_OUTSIDE_REPO } from "../../helpers/clean-tree-repo";
+import { patchLoreConfig } from "../../helpers/patch-lore-config";
 import { sessionActorFor, sessionIdFor } from "../../helpers/session-actor";
+import { FIXTURE_DONE_CONTRACT_CONFIG, landTask } from "../support/land-task";
 import { actedStore } from "../../live-invocation.js";
 
 import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
@@ -49,7 +52,8 @@ interface RunResult {
 
 /** `actorEnv` is the (ignored) retired variable's value; `sessionLabel` names the writer through the session tier. */
 function lore(args: string[], cwd: string, actorEnv: string | null, sessionLabel: string | null = null): RunResult {
-  const env: NodeJS.ProcessEnv = { ...process.env, CLAUDECODE: "1", HOME: cwd };
+  // reason: HOME lies outside the fixture repository, so bun/lore caches never dirty the tree a captured pass is stamped against
+  const env: NodeJS.ProcessEnv = { ...process.env, CLAUDECODE: "1", HOME: FIXTURE_HOME_OUTSIDE_REPO };
   delete env["CLAUDE_CODE_SESSION_ID"];
   delete env["CLAUDE_SESSION_ID"];
   if (sessionLabel !== null) env["CLAUDE_CODE_SESSION_ID"] = sessionIdFor(sessionLabel);
@@ -71,8 +75,11 @@ const loreActorMentions = (stderr: string): string[] => stderr.split("\n").filte
 const scratch: string[] = [];
 let dir = "";
 
+/** The spec an ad-hoc task names (`--spec`): approve and `lore done` resolve an ad-hoc task's criteria through it. */
+let spec = "";
+
 function newTask(title: string): string {
-  return JSON.parse(mustLore(["create", "task", "--kind", "code", "--adhoc", "--title", title, "--ac-scope", "", "--json"], dir, SETUP).stdout).data.slug as string;
+  return JSON.parse(mustLore(["create", "task", "--kind", "code", "--adhoc", "--spec", spec, "--title", title, "--ac-scope", "", "--json"], dir, SETUP).stdout).data.slug as string;
 }
 
 async function auditSince(since: string): Promise<AuditEntry[]> {
@@ -97,8 +104,14 @@ beforeAll(async () => {
   writeFileSync(join(dir, "README.md"), "fixture\n");
   git(["add", "."]);
   git(["commit", "-q", "-m", "init"]);
+  mkdirSync(FIXTURE_HOME_OUTSIDE_REPO, { recursive: true });
+  // the corpus and the linked worktree directory never dirty the tree a captured pass is stamped against
+  appendFileSync(join(dir, ".git", "info", "exclude"), ".lore/\n.claude/\n");
   mustLore(["init"], dir, SETUP);
+  // reason: approve compiles each fixture task's done contract from these commands (a code task needs all three)
+  patchLoreConfig(dir, { workflow: { done_contract: { ...FIXTURE_DONE_CONTRACT_CONFIG }, gates: { "task-claim": { enabled: false } }, review: { judgment_required_types: [] } } });
   mustLore(["create", "prd", "--title", "Deprecation Root", "--content", "root", "--no-ai"], dir, SETUP);
+  spec = JSON.parse(mustLore(["create", "spec", "--title", "Deprecation Spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai", "--json"], dir, SETUP).stdout).data.slug as string;
   // AU-T7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
   // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
 });
@@ -116,18 +129,16 @@ describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-2 (CLI):
 
   it("ONE process that performs several writes (lore done) prints no line naming it", async () => {
     const task = newTask("Retired multi write");
-    mustLore(["claim", task], dir, null, ACTOR_Y);
-    mustLore(["evidence", task, "--oracle", "test", "--command", "echo red fixture", "--result", "expected-fail", "--output-tail", "red fixture row"], dir, null, ACTOR_Y);
+    scratch.push(join(FIXTURE_HOME_OUTSIDE_REPO, `deprecation-multi-${process.pid}`));
+    // the task is approved (its contract compiled, the red run waived: not this test's subject), claimed on a branch as writer Y,
+    // landed on main, and holds a runner pass for every contract oracle, so `lore done` has a whole archive walk to write
+    await landTask(
+      { dir, git: (args) => execFileSync("git", [...args], { cwd: dir, encoding: "utf8" }).trim(), lore: (args) => lore([...args], dir, null, ACTOR_Y) },
+      { slug: task, branch: "deprecation-multi", worktree: join(FIXTURE_HOME_OUTSIDE_REPO, `deprecation-multi-${process.pid}`), claimValue: "branch", session: ACTOR_Y },
+    );
     const since = new Date().toISOString();
     // the session names the holder; the decoy env value (Z) must not take part in resolution.
-    // the no-new-tests floor wants a runner-produced red run; a hand-typed row never counts, so the audited declaration
-    // clears it, and `--override-attestation` clears the attested-pass floor (the two floors are independent).
-    const r = lore(
-      ["done", task, "--declare-no-new-tests", "retired-variable fixture: a throwaway task adds no test", "--override-attestation", "retired-variable fixture: no runner-attested pass exists for this throwaway task"],
-      dir,
-      ACTOR_Z,
-      ACTOR_Y,
-    );
+    const r = lore(["done", task], dir, ACTOR_Z, ACTOR_Y);
     expect(r.exitCode, r.stderr + r.stdout).toBe(0);
     const rows = await auditSince(since);
     // the process really did several writes, so "no mention" is not just "one write -> no mention"
@@ -166,7 +177,7 @@ describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-2 (CLI):
 describe("spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-2 (CLI): nothing about $LORE_ACTOR when it is not set", () => {
   it("naming the writer through the session tier and no $LORE_ACTOR prints no deprecation line", () => {
     const task = newTask("Deprecation by session");
-    const r = lore(["claim", task], dir, null, ACTOR_Y);
+    const r = lore(["claim", task, "--worktree", "wt-deprecation-session"], dir, null, ACTOR_Y);
     expect(r.exitCode).toBe(0);
     expect(loreActorMentions(r.stderr)).toEqual([]);
   });
