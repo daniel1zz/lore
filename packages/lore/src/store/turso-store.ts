@@ -180,6 +180,7 @@ import type {
   PendingAskInput,
   PendingAskRecord,
   LeaseAcquisition,
+  LeaseTakeover,
   LeaseRecord,
   ReadDayCount,
   TraceEventInput,
@@ -4357,6 +4358,21 @@ export class TursoStore implements StoreInterface {
       const live = await this.readLeaseRow(name);
       if (live === null) return err({ code: "STORE_ERROR", message: `review lease ${name} vanished during acquire` });
       return ok({ acquired: false, holder: live.holder, expires_at: live.expires_at });
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async takeOverLease(name: string, expectedHolder: string, newHolder: string, expiresAtIso: string): Promise<Result<LeaseTakeover, LoreError>> {
+    try {
+      await this.ensureReady();
+      // reason: ONE conditional UPDATE (BR-1514) — the compare-and-set on the expected holder; outcome from RETURNING rows.
+      const rs = await this.client.execute({
+        sql: "UPDATE review_leases SET holder = ?, expires_at = ? WHERE name = ? AND holder = ? RETURNING name",
+        args: [newHolder, expiresAtIso, name, expectedHolder],
+      });
+      if (rs.rows.length > 0) return ok({ acquired: true });
+      return ok({ acquired: false, current: await this.readLeaseRow(name) });
     } catch (e) {
       return wrapStoreError(e);
     }

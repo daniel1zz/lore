@@ -96,6 +96,7 @@ import type {
   PendingAskInput,
   PendingAskRecord,
   LeaseAcquisition,
+  LeaseTakeover,
   LeaseRecord,
   ReadDayCount,
   TraceEventInput,
@@ -3873,6 +3874,21 @@ export class SQLiteStore implements StoreInterface {
       if (taken.length > 0) return ok({ acquired: true, tookOver: prior !== null && prior.holder !== holder });
       const live = this.db.query("SELECT name, holder, expires_at FROM review_leases WHERE name = ?").get(name) as LeaseRecord;
       return ok({ acquired: false, holder: live.holder, expires_at: live.expires_at });
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async takeOverLease(name: string, expectedHolder: string, newHolder: string, expiresAtIso: string): Promise<Result<LeaseTakeover, LoreError>> {
+    try {
+      // reason: ONE conditional UPDATE (BR-1514) — the WHERE on the expected holder is the compare-and-set that gives
+      // exactly one of two takers of a dead holder's lease the row; outcome from RETURNING rows, never the change count.
+      const rows = this.db
+        .query("UPDATE review_leases SET holder = ?, expires_at = ? WHERE name = ? AND holder = ? RETURNING name")
+        .all(newHolder, expiresAtIso, name, expectedHolder);
+      if (rows.length > 0) return ok({ acquired: true });
+      const current = this.db.query("SELECT name, holder, expires_at FROM review_leases WHERE name = ?").get(name) as LeaseRecord | null;
+      return ok({ acquired: false, current: current ?? null });
     } catch (e) {
       return wrapStoreError(e);
     }

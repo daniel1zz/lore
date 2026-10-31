@@ -19,16 +19,26 @@
  *   - The atomic acquire/renew lives in the store (`acquireLease`/`renewLease`); this class owns the policy only.
  *   - A renewal that finds the lease no longer the holder's (it expired and was taken over) marks the handle `lost`:
  *     the holder can see it and stop instead of racing the new holder.
+ *   - A busy lease whose holder is provably a dead process of this machine is taken over at once (BR-1514): see
+ *     `review-lease-liveness.ts` for what "provably dead" means; the swap is a compare-and-set in the store
+ *     (`takeOverLease`), and the old holder's next renewal fails, so its handle goes `lost` (fencing, BR-1511).
  *   - The renewal timer, clock and sleep are injected so tests drive them without real time.
  * Side-effect class: IO through the store port; a timer while a handle is open.
  */
 
 import { randomBytes } from "node:crypto";
 import { ok, type LoreError, type Result } from "@lore/core";
-import type { LeaseAcquisition, LeaseRecord } from "../store/store-shared.js";
+import type { AuditEntry } from "@lore/core";
+import type { LeaseAcquisition, LeaseRecord, LeaseTakeover } from "../store/store-shared.js";
+import { defaultLeaseLiveness, formatHolder, isHolderProvablyDead, type LeaseLiveness, type LocalProcessIdentity } from "./review-lease-liveness.js";
 
-/** The lease verbs of the store. */
+/** The audit action of a takeover of a dead holder's lease (BR-1514). */
+export const REVIEW_LEASE_TAKEOVER_ACTION = "review_lease_takeover";
+
+/** The lease verbs of the store, plus the audit append a takeover owes. */
 export interface LeaseStorePort {
+  takeOverLease(name: string, expectedHolder: string, newHolder: string, expiresAtIso: string): Promise<Result<LeaseTakeover, LoreError>>;
+  appendAuditEntry(entry: AuditEntry): Promise<Result<void, LoreError>>;
   acquireLease(name: string, holder: string, nowIso: string, expiresAtIso: string): Promise<Result<LeaseAcquisition, LoreError>>;
   renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>>;
   releaseLease(name: string, holder: string): Promise<Result<void, LoreError>>;
@@ -99,15 +109,24 @@ export class ReviewLeases {
     private readonly clock: () => number = Date.now,
     private readonly schedule: Schedule = intervalSchedule,
     private readonly sleep: Sleep = timerSleep,
+    private readonly liveness: LeaseLiveness = defaultLeaseLiveness,
   ) {}
 
   /** Takes the lease of `key` (a live lease of another holder is `busy`; an expired one is taken over) and starts the renewal timer. */
   async acquire(key: string): Promise<Result<LeaseOutcome, LoreError>> {
-    const holder = `${this.holder}#${randomBytes(4).toString("hex")}`;
+    const identity = await this.liveness.identity();
+    const holder = formatHolder(this.holder, identity, randomBytes(4).toString("hex"));
     const now = this.clock();
-    const taken = await this.store.acquireLease(key, holder, new Date(now).toISOString(), new Date(now + REVIEW_LEASE_EXPIRY_MS).toISOString());
+    const expiresAtIso = new Date(now + REVIEW_LEASE_EXPIRY_MS).toISOString();
+    const taken = await this.store.acquireLease(key, holder, new Date(now).toISOString(), expiresAtIso);
     if (!taken.ok) return taken;
-    if (!taken.value.acquired) return ok({ state: "busy", holder: taken.value.holder, expires_at: taken.value.expires_at });
+    let tookOver = taken.value.acquired && taken.value.tookOver;
+    if (!taken.value.acquired) {
+      const seized = await this.takeOverFromDeadHolder(key, holder, identity, taken.value, expiresAtIso);
+      if (!seized.ok) return seized;
+      if (seized.value.state === "busy") return ok(seized.value);
+      tookOver = true;
+    }
     let lost = false;
     let lastError: LoreError | undefined;
     const renewNow = async (): Promise<Result<boolean, LoreError>> => {
@@ -131,7 +150,47 @@ export class ReviewLeases {
         return this.store.releaseLease(key, holder);
       },
     };
-    return ok({ state: "held", tookOver: taken.value.tookOver, handle });
+    return ok({ state: "held", tookOver, handle });
+  }
+
+  /**
+   * A busy key whose holder is provably a dead process of this machine (BR-1514) is taken over by compare-and-set on
+   * that exact holder name, with one audit row. Anything else (live, other machine, old form, probe error) stays busy
+   * naming the stored holder; a lost race stays busy naming the winner; a row that vanished meanwhile is acquired plainly.
+   */
+  private async takeOverFromDeadHolder(
+    key: string,
+    holder: string,
+    identity: LocalProcessIdentity | null,
+    busy: { readonly holder: string; readonly expires_at: string },
+    expiresAtIso: string,
+  ): Promise<Result<{ readonly state: "taken" } | { readonly state: "busy"; readonly holder: string; readonly expires_at: string }, LoreError>> {
+    const stillBusy = { state: "busy" as const, holder: busy.holder, expires_at: busy.expires_at };
+    if (!(await isHolderProvablyDead(busy.holder, identity, this.liveness.probe))) return ok(stillBusy);
+    const swapped = await this.store.takeOverLease(key, busy.holder, holder, expiresAtIso);
+    if (!swapped.ok) return swapped;
+    if (!swapped.value.acquired) {
+      const current = swapped.value.current;
+      if (current === null) {
+        const retry = await this.store.acquireLease(key, holder, new Date(this.clock()).toISOString(), expiresAtIso);
+        if (!retry.ok) return retry;
+        return ok(retry.value.acquired ? { state: "taken" } : { state: "busy", holder: retry.value.holder, expires_at: retry.value.expires_at });
+      }
+      return ok({ state: "busy", holder: current.holder, expires_at: current.expires_at });
+    }
+    const audited = await this.store.appendAuditEntry({
+      timestamp: new Date(this.clock()).toISOString(),
+      actor: this.holder,
+      session_id: this.holder,
+      action: REVIEW_LEASE_TAKEOVER_ACTION,
+      details: { key, dead_holder: busy.holder, new_holder: holder, rule: "BR-1514" },
+    });
+    if (!audited.ok) {
+      // reason: a takeover with no audit row must not stand; give the lease back so the failure is the only effect.
+      await this.store.releaseLease(key, holder);
+      return audited;
+    }
+    return ok({ state: "taken" });
   }
 
   /**

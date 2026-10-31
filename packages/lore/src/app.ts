@@ -548,7 +548,7 @@ export interface App {
    */
   retiredAcService?: RetiredAcService;
   /** The store's lease verbs, for the post-landing review batch lease (BR-1379); optional like the other late additions. */
-  reviewLeaseStore?: Pick<StoreInterface, "acquireLease" | "renewLease" | "releaseLease" | "readLease">;
+  reviewLeaseStore?: Pick<StoreInterface, "acquireLease" | "takeOverLease" | "renewLease" | "releaseLease" | "readLease" | "appendAuditEntry">;
   /**
    * SeatService — thin `GitPort` orchestration for the `lore seat` verb family
    * (`enter`/`list`/`resume`/`remove`, SPEC-057). Wired here with the REAL `GitPort`
