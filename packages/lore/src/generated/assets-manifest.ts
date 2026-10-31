@@ -15,8 +15,8 @@
  * for the kind -> ownership derivation rules.
  */
 
-/** One of the six vendored top-level `assets/` directories. */
-export type AssetEntryKind = "skill" | "agent" | "hook" | "governance" | "project" | "context";
+/** One of the seven vendored top-level `assets/` directories. */
+export type AssetEntryKind = "skill" | "agent" | "hook" | "governance" | "project" | "context" | "template";
 
 /** Update-time handling region (SPEC-076 §C1) — see the generator's doc comment. */
 export type AssetOwnership = "managed" | "merged" | "user_once";
@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "85addee9e87787c3edd69cc0cbea64f2bff6637b15d2a29698b403de9a674089",
+  tree_digest: "6aa4c37ba7ff69368d240e0d52a2db170dfac6671d21c99d7085cbad90e3cb1c",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "be7b99d5d1f72cf4ff8579ab09c2e42454c03ec0e0f9ba4e8fdb303b4a6cb73f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -375,5 +375,13 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "skills/shared/testing-standards-detection.md", kind: "skill", ownership: "managed", sha256: "1098f76488af63751ba388985417445ef555711e81668d066a3ec41d39dd26d8" },
   { path: "skills/shared/troubleshooting-knowledge.md", kind: "skill", ownership: "managed", sha256: "5bb0db4dd1cbcf1d23f7f6f27c4548e67b492384a54efc7617d1b41527bf5619" },
   { path: "skills/shared/verification-discipline.md", kind: "skill", ownership: "managed", sha256: "b34d70eb9c6ab541e214ac13d1a84eef6906f6bd804f8260f67420b11688f551" },
+  { path: "templates/adr.json", kind: "template", ownership: "managed", sha256: "7fd3b43a84cf2e169b0acf684be0d3d40b5fb0f294073a1203ca0908a184cca8" },
+  { path: "templates/plan.json", kind: "template", ownership: "managed", sha256: "1a1de9b6a4382616068a11f37e048f68d99832aec2aa585d880e4383b407b7fe" },
+  { path: "templates/prd.json", kind: "template", ownership: "managed", sha256: "b8c275323ae8cf3bb66c8efb18dd4a8d46870d48f295e8dc7eb02f6d24289c9e" },
+  { path: "templates/spec-design.json", kind: "template", ownership: "managed", sha256: "06489c5cc7bed66ce19bce608cbbd0061c471adffb1885b25d321048ee52d153" },
+  { path: "templates/spec-domain-overview.json", kind: "template", ownership: "managed", sha256: "374fa9dc8e12a6d9105ba022d12f592a35de9d0e81a2b827ef0811493fc22717" },
+  { path: "templates/spec-feature.json", kind: "template", ownership: "managed", sha256: "eaab3b33370359ec56154ada47c420353f1673ea629a2319fd16cd11cbd948fd" },
+  { path: "templates/spec-tech.json", kind: "template", ownership: "managed", sha256: "29b6ff23c0cdd7f1b12eda77ac32578cbf06c0d6f772d0a9099c3fc80c26354e" },
+  { path: "templates/task.json", kind: "template", ownership: "managed", sha256: "cbf701acaf78d2b97a3f6e0503f82ba50c0d92de952f7f99cbbeef5af7597245" },
   ],
 };

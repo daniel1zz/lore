@@ -471,6 +471,15 @@ const DECLARED_FILES = [
   "context/ask-then-execute.md",
   // spec-a-decision-carrying-write-records-its-decision-on-its (AC-DR-6): the decision fields a write carries
   "context/decision-records.md",
+  // seed document templates (spec-every-document-is-stored-as-structured-fields-validated-by): binary-read, never installed
+  "templates/adr.json",
+  "templates/plan.json",
+  "templates/prd.json",
+  "templates/spec-design.json",
+  "templates/spec-domain-overview.json",
+  "templates/spec-feature.json",
+  "templates/spec-tech.json",
+  "templates/task.json",
   // governance
   "governance/seat-briefing.md",
   "governance/claude-md-contract.md",
@@ -481,7 +490,7 @@ const SKILL_MD_FILES = DECLARED_FILES.filter((f) => f.endsWith("SKILL.md"));
 const EXECUTABLE_REQUIRED_FILES = DECLARED_FILES.filter(
   (f) => f.endsWith(".sh") || f.endsWith("/pre-push") || f.endsWith("/reference-transaction"),
 );
-const DECLARED_TOP_LEVEL_DIRS = ["skills", "agents", "hooks", "project", "governance", "context"];
+const DECLARED_TOP_LEVEL_DIRS = ["skills", "agents", "hooks", "project", "governance", "context", "templates"];
 
 // RE-BASELINE (SPEC-083 amended by spec-context-fragments D9): the single corpus-workflow.md is
 // replaced by these fragment files. Every assertion that pinned the old file now asserts the same
@@ -1108,7 +1117,7 @@ describe("assets-ssot — DISTRIBUTION (corpus-workflow fragments manifest fresh
 // ~/.claude. Every probe runs against a TEMP assets root so the real assets/ tree is
 // never touched.
 describe("assets/context manifest", () => {
-  const TOP_DIRS = ["agents", "governance", "hooks", "project", "skills"];
+  const TOP_DIRS = ["agents", "governance", "hooks", "project", "skills", "templates"];
 
   function makeTempAssets(withContext: boolean): string {
     const root = mkdtempSync(join(tmpdir(), "assets-ctx-"));
@@ -1173,12 +1182,12 @@ describe("assets/context manifest", () => {
     }
   });
 
-  it("listBinaryReadAssetPaths lists context and project files as assetsRoot-relative POSIX paths; only the seeded project file for a missing context dir", () => {
+  it("listBinaryReadAssetPaths lists context, project and templates files as assetsRoot-relative POSIX paths; no context entry for a missing context dir", () => {
     const withCtx = makeTempAssets(true);
     const without = makeTempAssets(false);
     try {
-      expect(listBinaryReadAssetPaths(withCtx)).toEqual(["context/zz-probe.md", "project/seed.md"]);
-      expect(listBinaryReadAssetPaths(without)).toEqual(["project/seed.md"]);
+      expect(listBinaryReadAssetPaths(withCtx)).toEqual(["context/zz-probe.md", "project/seed.md", "templates/seed.md"]);
+      expect(listBinaryReadAssetPaths(without)).toEqual(["project/seed.md", "templates/seed.md"]);
     } finally {
       rmSync(withCtx, { recursive: true, force: true });
       rmSync(without, { recursive: true, force: true });

@@ -5,7 +5,7 @@
  * the .mjs file; this file has no runtime behavior of its own.
  */
 
-export type AssetEntryKind = "skill" | "agent" | "hook" | "governance" | "project";
+export type AssetEntryKind = "skill" | "agent" | "hook" | "governance" | "project" | "template";
 export type AssetOwnership = "managed" | "merged" | "user_once";
 
 export interface EmbeddedAssetEntry {

@@ -24,14 +24,18 @@
  *   marker                  read by                    field shape
  *   x-ref-list              refs-resolve               array of strings; each is a ref (AC id, rule id,
  *                                                      field path, doc slug). Dimension `refs` are checked too.
- *   x-refusal-list          refusal-has-ac             array of entries; each key must be cited by >= 1 AC
+ *   x-ref                   refs-resolve               a single string ref (e.g. `spec_ref`), resolved like a list entry.
+ *                                                      TOP-LEVEL string fields only; a string property inside a list
+ *                                                      item is not read (that generalisation is not one line)
+ *   x-refusal-list          refusal-has-ac            array of entries; each key must be cited by >= 1 AC
  *   x-rule-change-list      rule-change-has-ac         array of entries; each key must be cited by >= 1 AC
  *   x-decision-list         decision-has-rejected      array of objects `{decision|id, chosen?, rejected, why}`;
  *                                                      `rejected` = non-empty string or non-empty array of
  *                                                      strings / `{option}` objects; `why` non-empty string
  *   x-scope-list            out-of-scope-not-in-scope  array of entries (in scope)
- *   x-out-of-scope-list     out-of-scope-not-in-scope  array of entries (out of scope); no entry may equal
- *                                                      (trim, lower-case, collapsed whitespace) a scope entry
+ *   x-out-of-scope-list     out-of-scope-not-in-scope  array of entries (out of scope); no entry's TEXT (the string, else
+ *                                                      `text` / `item`; ids ignored) may equal (trim, lower-case,
+ *                                                      collapsed whitespace) a scope entry's text
  *   x-goal                  goal-has-measure           object `{statement, measure}`; `measure` non-empty
  *                                                      string naming the observable outcome
  *
@@ -372,6 +376,10 @@ const refsResolve: CrossFieldCheck = (view, ports) => {
       if (typeof ref === "string" && !resolves(ref)) findings.push({ check: "refs-resolve", entry: `${name}: ${ref}`, problem: "names no existing AC, rule, field or document" });
     }
   }
+  for (const name of markedFields(view, "x-ref")) {
+    const ref = view.fields[name];
+    if (typeof ref === "string" && ref !== "" && !resolves(ref)) findings.push({ check: "refs-resolve", entry: `${name}: ${ref}`, problem: "names no existing AC, rule, field or document" });
+  }
   for (const dimension of view.dimensions) {
     for (const ref of dimension.refs) {
       if (!resolves(ref)) findings.push({ check: "refs-resolve", entry: `dimension ${dimension.id}: ${ref}`, problem: "names no existing AC, rule, field or document" });
@@ -396,17 +404,29 @@ const decisionHasRejected: CrossFieldCheck = (view) =>
     }),
   );
 
+/** Text of a scope entry: the string itself, else `text` of an object, else `item`; ids are ignored (they differ by design). */
+function entryText(entry: unknown, index: number): string {
+  if (typeof entry === "string") return entry;
+  if (isRecord(entry)) {
+    for (const property of ["text", "item"] as const) {
+      const candidate = entry[property];
+      if (typeof candidate === "string" && candidate !== "") return candidate;
+    }
+  }
+  return `#${index}`;
+}
+
 const outOfScopeNotInScope: CrossFieldCheck = (view) => {
   const inScope = new Map<string, string>();
   for (const name of markedFields(view, "x-scope-list")) {
     entryList(view, name).forEach((entry, index) => {
-      const key = entryKey(entry, index);
-      inScope.set(normaliseForCompare(key), key);
+      const text = entryText(entry, index);
+      inScope.set(normaliseForCompare(text), text);
     });
   }
   return markedFields(view, "x-out-of-scope-list").flatMap((name) =>
     entryList(view, name).flatMap((entry, index) => {
-      const key = entryKey(entry, index);
+      const key = entryText(entry, index);
       return inScope.has(normaliseForCompare(key))
         ? [{ check: "out-of-scope-not-in-scope" as const, entry: `${name}: ${key}`, problem: "is listed both in scope and out of scope" }]
         : [];

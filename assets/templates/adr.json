@@ -1,0 +1,122 @@
+{
+  "doc_type": "adr",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["context", "options", "decision", "status", "consequences", "reversibility"],
+    "properties": {
+      "context": {
+        "type": "string",
+        "title": "Context",
+        "minLength": 1,
+        "description": "The forces and the problem that make a decision necessary, with the evidence for them."
+      },
+      "evidence": {
+        "type": "array",
+        "title": "Evidence",
+        "description": "Each fact the decision rests on, with its source and evidence tier (S official, A measured here, B reputable secondary, C anecdote, D inference, E untrusted).",
+        "items": {
+          "type": "object",
+          "required": ["claim", "source"],
+          "properties": {
+            "claim": { "type": "string", "minLength": 1 },
+            "source": { "type": "string", "minLength": 1 },
+            "tier": { "type": "string", "enum": ["S", "A", "B", "C", "D", "E"] }
+          }
+        }
+      },
+      "options": {
+        "type": "array",
+        "title": "Options compared",
+        "minItems": 2,
+        "items": {
+          "type": "object",
+          "required": ["option", "consequences"],
+          "properties": {
+            "option": { "type": "string", "minLength": 1 },
+            "consequences": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "decision": {
+        "type": "array",
+        "title": "Decision",
+        "x-decision-list": true,
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["decision", "chosen", "rejected", "why"],
+          "properties": {
+            "decision": { "type": "string", "minLength": 1 },
+            "chosen": { "type": "string", "minLength": 1 },
+            "rejected": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["option", "why"],
+                "properties": {
+                  "option": { "type": "string", "minLength": 1 },
+                  "why": { "type": "string", "minLength": 1 }
+                }
+              }
+            },
+            "why": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "status": {
+        "type": "string",
+        "title": "Status",
+        "enum": ["proposed", "accepted", "deprecated", "superseded"]
+      },
+      "superseded_by": {
+        "type": "array",
+        "title": "Superseded by",
+        "x-ref-list": true,
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "consequences": {
+        "type": "object",
+        "title": "Consequences",
+        "required": ["positive", "negative"],
+        "properties": {
+          "positive": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+          "negative": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+        }
+      },
+      "reversibility": {
+        "type": "object",
+        "title": "Reversibility",
+        "required": ["level", "how"],
+        "properties": {
+          "level": { "type": "string", "enum": ["easy", "costly", "one-way"] },
+          "how": { "type": "string", "minLength": 1, "description": "What undoing this takes, or why it cannot be undone." }
+        }
+      },
+      "related": {
+        "type": "array",
+        "title": "Related documents",
+        "x-ref-list": true,
+        "items": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "dimensions": [
+    { "id": "reversibility", "question": "How hard is it to undo this decision, and what would trigger revisiting it?" },
+    { "id": "evidence-tier", "question": "What is the strongest evidence for each load-bearing claim, and what tier is it (official, measured here, secondary, anecdote)?" },
+    { "id": "alternatives", "question": "Which realistic alternatives were rejected, and what concrete reason rules each one out?" },
+    { "id": "consequences", "question": "What gets worse because of this decision, and who bears it?" },
+    { "id": "scope-of-effect", "question": "Which documents, modules or contracts does this decision bind, and how will they find out?", "needs_refs": true }
+  ],
+  "checks": ["decision-has-rejected", "refs-resolve"],
+  "render": [
+    { "heading": "Context", "fields": ["context", "evidence"] },
+    { "heading": "Options compared", "fields": ["options"] },
+    { "heading": "Decision", "fields": ["decision"] },
+    { "heading": "Status", "fields": ["status", "superseded_by"] },
+    { "heading": "Consequences", "fields": ["consequences"] },
+    { "heading": "Reversibility", "fields": ["reversibility"] },
+    { "heading": "Related documents", "fields": ["related"] }
+  ]
+}

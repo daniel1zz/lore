@@ -291,6 +291,15 @@ describe("cross-field check library", () => {
     return runCrossFieldChecks(template, view, ports);
   }
 
+  it("refs-resolve: an x-ref string field naming a missing doc is a finding; an existing doc, a field path or an absent field is not", () => {
+    const props = { spec_ref: { type: "string", "x-ref": true }, other: { type: "string" } } as Record<string, JsonSchemaNode>;
+    const missing = run("refs-resolve", props, { spec_ref: "no-such-spec" });
+    expect(missing.map((f) => `${f.check} ${f.entry}`)).toEqual(["refs-resolve spec_ref: no-such-spec"]);
+    expect(run("refs-resolve", props, { spec_ref: "some-slug" })).toEqual([]);
+    expect(run("refs-resolve", props, { spec_ref: "other", other: "v" })).toEqual([]);
+    expect(run("refs-resolve", props, {})).toEqual([]);
+  });
+
   it("lists exactly the six library ids", () => {
     expect([...CROSS_FIELD_CHECK_IDS].sort()).toEqual(
       ["decision-has-rejected", "goal-has-measure", "out-of-scope-not-in-scope", "refs-resolve", "refusal-has-ac", "rule-change-has-ac"],
@@ -348,6 +357,31 @@ describe("cross-field check library", () => {
     const findings = run("out-of-scope-not-in-scope", props, { scope: ["Rewrite  the CLI", "b"], out: ["rewrite the cli", "c"] });
     expect(findings.map((f) => f.entry)).toEqual(["out: rewrite the cli"]);
     expect(run("out-of-scope-not-in-scope", props, { scope: ["a"], out: ["c"] })).toEqual([]);
+  });
+
+  it("out-of-scope-not-in-scope compares entry TEXT, ignoring ids: same text with different ids is a finding", () => {
+    const props = { scope: { type: "array", "x-scope-list": true }, out: { type: "array", "x-out-of-scope-list": true } } as Record<string, JsonSchemaNode>;
+    const findings = run("out-of-scope-not-in-scope", props, {
+      scope: [{ id: "S1", text: "Rewrite the CLI" }],
+      out: [{ id: "O1", text: "Rewrite the CLI" }],
+    });
+    expect(findings.map((f) => f.entry)).toEqual(["out: Rewrite the CLI"]);
+  });
+
+  it("out-of-scope-not-in-scope: different texts with different ids yield no finding", () => {
+    const props = { scope: { type: "array", "x-scope-list": true }, out: { type: "array", "x-out-of-scope-list": true } } as Record<string, JsonSchemaNode>;
+    expect(
+      run("out-of-scope-not-in-scope", props, { scope: [{ id: "S1", text: "Rewrite the CLI" }], out: [{ id: "O1", text: "Rewrite the dashboard" }] }),
+    ).toEqual([]);
+  });
+
+  it("out-of-scope-not-in-scope: case and whitespace variants of the same text are a finding, even when ids are equal-looking or absent", () => {
+    const props = { scope: { type: "array", "x-scope-list": true }, out: { type: "array", "x-out-of-scope-list": true } } as Record<string, JsonSchemaNode>;
+    const findings = run("out-of-scope-not-in-scope", props, {
+      scope: [{ id: "S1", text: "Rewrite   the CLI" }, "plain item"],
+      out: [{ id: "O1", text: "  rewrite the cli " }, { text: "PLAIN  item" }],
+    });
+    expect(findings).toHaveLength(2);
   });
 
   it("goal-has-measure: flags a goal with no measure (object or string); passes one with a measure", () => {
