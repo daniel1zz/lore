@@ -198,7 +198,17 @@ export async function createCorpus(opts: { claimGates?: "enabled" | "disabled" }
 
 /** `by` is the RESOLVED writer name the spawn runs as (`sessionActorFor(...)`), injected through the session tier. */
 export function claim(dir: string, target: string, by: string, opts: { run?: string; steal?: boolean; worktree?: string } = {}): RunResult {
-  return runLore(["claim", target, ...(opts.steal === true ? ["--steal"] : []), ...(opts.worktree !== undefined ? ["--worktree", opts.worktree] : [])], dir, opts.run, by);
+  return runLore(["claim", target, ...(opts.steal === true ? ["--steal"] : []), ...claimWorktreeArgs(target, opts.worktree)], dir, opts.run, by);
+}
+
+/**
+ * The `--worktree` argument of a task claim. A code task is claimed on a branch (AC-DCS1-14: a claim naming no branch is refused
+ * `work-needs-branch`), so a caller that names none gets a working-copy name of its own per task, which keeps these fixtures'
+ * claims about holders and leases rather than about where the work is. A phase claim has no branch.
+ */
+export function claimWorktreeArgs(target: string, worktree: string | undefined): string[] {
+  if (worktree !== undefined) return ["--worktree", worktree];
+  return target.startsWith("task-") ? ["--worktree", `wt-${target}`] : [];
 }
 
 export function release(dir: string, target: string, by: string, opts: { run?: string; force?: boolean } = {}): RunResult {

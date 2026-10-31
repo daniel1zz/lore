@@ -94,7 +94,12 @@ describe("AC-RV-10: a claim ends with its run", () => {
   }
 
   async function claimAs(run: string, by: string): Promise<ClaimOutcome> {
-    const r = await app.taskWorkflowService.claim(taskSlug, { by, harnessRun: run as RunId });
+    // reason: a code task is claimed on its own branch (AC-DCS1-14). The claim's working copy is a real, clean repository on a branch of
+    // its own, so the ended run's claim is judged by a real `git status` (clean: it yields at once), as before.
+    const wt = mkdtempSync(join(tmpRoot, "claim-wt-"));
+    git(wt, ["init", "-q", "-b", `claim-${run.replace(/[^a-z0-9]/gi, "-")}`]);
+    git(wt, ["-c", "user.email=f@example.invalid", "-c", "user.name=f", "commit", "-q", "--allow-empty", "-m", "init"]);
+    const r = await app.taskWorkflowService.claim(taskSlug, { by, harnessRun: run as RunId, worktree: wt });
     return r.ok ? { isError: false, text: JSON.stringify(r.value) } : { isError: true, text: JSON.stringify(r.error) };
   }
 
@@ -207,7 +212,7 @@ describe("AC-RV-10: a claim ends with its run", () => {
       writeFileSync(join(worktreeDir, "a.txt"), "dirty\n");
       await endRun(R1);
 
-      const claim = await app.taskWorkflowService.claim(taskSlug, { by: BY_R2, harnessRun: R2 as RunId });
+      const claim = await app.taskWorkflowService.claim(taskSlug, { by: BY_R2, harnessRun: R2 as RunId, worktree: "wt-ended-claim-r2" });
       expect(claim.ok).toBe(false);
       if (!claim.ok) expect(exitCode(claim.error)).toBe(5);
 
@@ -223,7 +228,7 @@ describe("AC-RV-10: a claim ends with its run", () => {
       expect(existsSync(worktreeDir)).toBe(false);
       await endRun(R1);
 
-      const claim = await app.taskWorkflowService.claim(taskSlug, { by: BY_R2, harnessRun: R2 as RunId });
+      const claim = await app.taskWorkflowService.claim(taskSlug, { by: BY_R2, harnessRun: R2 as RunId, worktree: "wt-ended-claim-r2" });
       expect(claim.ok, JSON.stringify(claim)).toBe(true);
       expect(await heldRun()).toBe(R2);
     });

@@ -16,7 +16,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { rmSync } from "node:fs";
-import { createCorpus, getClaim, registerRun, runLore, type Corpus } from "./cli/support/claim-run-fixture.js";
+import { createCorpus, getClaim, registerRun, runLore, seedClaim, type Corpus } from "./cli/support/claim-run-fixture.js";
 import {
   REASON,
   claimAs,
@@ -91,6 +91,12 @@ describe("lore run end — claim release (spec-run-only-write-identity-and-run-e
     const run = freshRun();
     const task = await corpus.newTarget("task");
     expect(claimAs(corpus.dir, task, run).exitCode).toBe(0);
+    // reason: `lore claim` of a code task always records a branch (AC-DCS1-14), so a claim with NO worktree can only be the legacy
+    // shape the migration converts; it is seeded here by removing the recorded worktree, the same way the legacy claims are seeded.
+    const held = getClaim(corpus.dir, task);
+    if (held === undefined) throw new Error("the claim just taken is missing");
+    const { worktree: _recorded, ...legacy } = held as Record<string, unknown>;
+    seedClaim(corpus.dir, task, legacy);
     expect(getClaim(corpus.dir, task)?.["worktree"]).toBeUndefined();
 
     const r = endRun(corpus.dir, run);

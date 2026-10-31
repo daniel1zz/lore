@@ -299,7 +299,8 @@ const KINDS: readonly WriteKind[] = [
     writesVersion: false,
     setup: async ({ s }) => ({ task: (await planAndTask(s)).taskSlug }),
     act: async (f) => {
-      must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by, harnessRun: f.run })) as never, "claim");
+      // reason: a code task is claimed on its own branch (AC-DCS1-14); the name is all this store-level fixture needs.
+      must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by, harnessRun: f.run, worktree: "wt-matrix-claim" })) as never, "claim");
     },
   },
   {
@@ -308,7 +309,7 @@ const KINDS: readonly WriteKind[] = [
     setup: async ({ s }) => ({ task: (await planAndTask(s)).taskSlug }),
     // The claim is placed by the SAME identity through the store under test, so the measured write is the holder's own release.
     prepare: async (f) => {
-      must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by, harnessRun: f.run })) as never, "claim before release");
+      must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by, harnessRun: f.run, worktree: "wt-matrix-release" })) as never, "claim before release");
     },
     act: async (f) => {
       must((await f.w.twf.release(f.ids["task"] as string, { by: f.by, harnessRun: f.run })) as never, "release");
@@ -386,10 +387,36 @@ const KINDS: readonly WriteKind[] = [
   {
     name: "done",
     writesVersion: true,
-    setup: async ({ s }) => ({ task: (await planAndTask(s)).taskSlug }),
-    // The holder (same identity, through the store under test) finishes its own task.
-    prepare: async (f) => {
-      must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by, harnessRun: f.run })) as never, "claim before done");
+    // reason: `lore done` judges the stored contract (AC-DCS1-7) and a code task needs a landing; this fixture has no git, so the task
+    // is a corpus task (never claimed, lands nothing, AC-DCS1-19) holding the stored contract of a corpus task with no oracle. The
+    // write under test is the same archive walk, attributed to the same run.
+    setup: async ({ s }) => {
+      const plan = await mkDoc(s, { type: "plan", title: "Matrix done plan", content: "body" }, SETUP_BY);
+      const task = await mkDoc(
+        s,
+        {
+          type: "task",
+          title: "Matrix done task",
+          parent_id: plan.id,
+          content: "body",
+          extra: {
+            kind: "corpus",
+            plan_id: plan.id,
+            done_contract: {
+              compiled_at_commit: "0000000000000000000000000000000000000000",
+              kind: "corpus",
+              base_branch: "main",
+              oracles: [],
+              red_required: false,
+              landing_route: "none",
+              new_symbols: [],
+              added_oracles: [],
+            },
+          },
+        },
+        SETUP_BY,
+      );
+      return { task: task.slug };
     },
     act: async (f) => {
       must(
@@ -397,7 +424,6 @@ const KINDS: readonly WriteKind[] = [
           by: f.by,
           harnessRun: f.run,
           overrideReason: "attribution matrix fixture: no runner-attested pass exists for this throwaway task",
-          noNewTestsReason: "attribution matrix fixture: throwaway task with no new tests",
         } as never)) as never,
         "done",
       );

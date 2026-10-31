@@ -179,14 +179,14 @@ describe("AC-RID-8 (superseded by spec-every-write-is-made-by-a-known-party-an-a
   });
 
   it("a claim is refused (exit 4): an unknown run id is never downgraded to an unattested write", () => {
-    const r = lore(["claim", task], dir, { ...NAME_ENV, ...asRun(GHOST_A) });
+    const r = lore(["claim", task, "--worktree", `wt-${task}`], dir, { ...NAME_ENV, ...asRun(GHOST_A) });
     expect(r.exitCode).toBe(4);
   });
 
   it("the refused claim writes no audit row and no version, and the task stays unclaimed", async () => {
     const t2 = newTask(dir, "Unattested claim two");
     const since = new Date().toISOString();
-    const r = lore(["claim", t2], dir, { ...NAME_ENV, ...asRun(GHOST_A) });
+    const r = lore(["claim", t2, "--worktree", `wt-${t2}`], dir, { ...NAME_ENV, ...asRun(GHOST_A) });
     expect(r.exitCode).toBe(4);
     const written = await writtenSince(dir, since);
     expect(written.audit).toEqual([]);
@@ -197,7 +197,7 @@ describe("AC-RID-8 (superseded by spec-every-write-is-made-by-a-known-party-an-a
 
   it("stderr names the unknown id and both remedies", () => {
     const t4 = newTask(dir, "Unattested claim four");
-    const r = lore(["claim", t4], dir, { ...NAME_ENV, ...asRun(GHOST_A) });
+    const r = lore(["claim", t4, "--worktree", `wt-${t4}`], dir, { ...NAME_ENV, ...asRun(GHOST_A) });
     expect(r.exitCode).toBe(4);
     expect(warningLinesNaming(r.stderr, GHOST_A).length).toBeGreaterThan(0);
     expect(r.stderr).toContain("lore session start --human");
@@ -206,7 +206,7 @@ describe("AC-RID-8 (superseded by spec-every-write-is-made-by-a-known-party-an-a
 
   it("a different unknown id is named in its own refusal (the message is not a hardcoded id)", () => {
     const t5 = newTask(dir, "Unattested claim five");
-    const r = lore(["claim", t5], dir, { ...NAME_ENV, ...asRun(GHOST_B) });
+    const r = lore(["claim", t5, "--worktree", `wt-${t5}`], dir, { ...NAME_ENV, ...asRun(GHOST_B) });
     expect(r.exitCode).toBe(4);
     expect(warningLinesNaming(r.stderr, GHOST_B).length).toBeGreaterThan(0);
     expect(r.stderr).not.toContain(GHOST_A);
@@ -223,7 +223,7 @@ describe("AC-RID-8 (superseded by spec-every-write-is-made-by-a-known-party-an-a
 
   it("a multi-row write (lore done) under an unknown run id is refused before any lifecycle step is written", async () => {
     const t6 = newTask(dir, "Unattested multi-row done");
-    mustLore(["claim", t6], dir, NAME_ENV);
+    mustLore(["claim", t6, "--worktree", `wt-${t6}`], dir, NAME_ENV);
     const since = new Date().toISOString();
     const r = lore(["done", t6], dir, { ...NAME_ENV, ...asRun(GHOST_A) });
     expect(r.exitCode, r.stderr + r.stdout).toBe(4);
@@ -237,7 +237,7 @@ describe("AC-RID-8 (superseded by spec-every-write-is-made-by-a-known-party-an-a
     await registerRun(dir, REGISTERED);
     const t7 = newTask(dir, "Registered control");
     const since = new Date().toISOString();
-    const r = lore(["claim", t7], dir, { ...NAME_ENV, ...asRun(REGISTERED) });
+    const r = lore(["claim", t7, "--worktree", `wt-${t7}`], dir, { ...NAME_ENV, ...asRun(REGISTERED) });
     expect(r.exitCode, r.stderr).toBe(0);
     expect(warningLinesNaming(r.stderr, REGISTERED)).toHaveLength(0);
     const rows = (await auditSince(dir, since)).filter((row) => harnessRunOf(row) === REGISTERED);
@@ -258,7 +258,7 @@ describe("AC-RID-8: no run value at all", () => {
   it("a write with no flag succeeds and stamps the session's own run with the resolved name", async () => {
     const t = newTask(dir, "No flag target");
     const since = new Date().toISOString();
-    const r = lore(["claim", t], dir, NAME_ENV);
+    const r = lore(["claim", t, "--worktree", `wt-${t}`], dir, NAME_ENV);
     expect(r.exitCode).toBe(0);
     const rows = (await auditSince(dir, since)).filter((row) => row.actor === NAME);
     expect(rows.length).toBeGreaterThan(0);
@@ -267,7 +267,7 @@ describe("AC-RID-8: no run value at all", () => {
 
   it("prints no run warning when no run was named", () => {
     const t = newTask(dir, "No flag quiet target");
-    const r = lore(["claim", t], dir, NAME_ENV);
+    const r = lore(["claim", t, "--worktree", `wt-${t}`], dir, NAME_ENV);
     expect(r.exitCode).toBe(0);
     expect(runWarningLines(r.stderr)).toEqual([]);
   });
@@ -277,7 +277,7 @@ describe("AC-RID-8: no run value at all", () => {
     const since = new Date().toISOString();
     // reason: a claim is a working-state write and adds no versions row; `lore set --title` is a content write that does.
     mustLore(["set", t, "--title", "No flag version target renamed"], dir, NAME_ENV);
-    mustLore(["claim", t], dir, NAME_ENV);
+    mustLore(["claim", t, "--worktree", `wt-${t}`], dir, NAME_ENV);
     const versions = (await versionsSince(dir, since)).filter((v) => v.created_by === NAME);
     expect(versions.length).toBeGreaterThan(0);
     for (const v of versions) expect(harnessRunOf(v)).toBe(SESSION_RUN);
@@ -287,7 +287,7 @@ describe("AC-RID-8: no run value at all", () => {
     await registerRun(dir, REGISTERED);
     const t = newTask(dir, "Registered but not named");
     const since = new Date().toISOString();
-    const r = lore(["claim", t], dir, NAME_ENV);
+    const r = lore(["claim", t, "--worktree", `wt-${t}`], dir, NAME_ENV);
     expect(r.exitCode).toBe(0);
     const rows = (await auditSince(dir, since)).filter((row) => row.actor === NAME);
     expect(rows.length).toBeGreaterThan(0);
@@ -301,7 +301,7 @@ describe("AC-RID-8: no run value at all", () => {
     expect(os).not.toBe(NAME);
     const t = newTask(dir, "No flag author target");
     const since = new Date().toISOString();
-    mustLore(["claim", t], dir, NAME_ENV);
+    mustLore(["claim", t, "--worktree", `wt-${t}`], dir, NAME_ENV);
     mustLore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => mustLore(a, dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID })), "--sub-type", "reference", "--title", "Authored with a given name", "--content", "body", "--no-ai"], dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID });
     const rows = await auditSince(dir, since);
     expect(rows.length).toBeGreaterThan(0);
@@ -313,7 +313,7 @@ describe("AC-RID-8: no run value at all", () => {
     const t = newTask(dir, "Empty flag target");
     const since = new Date().toISOString();
     // reason: LORE_TEST_IDENTITY=none keeps the test spawn shim from filling the empty value with a default run.
-    lore(["claim", t], dir, { ...NAME_ENV, ...asRun(""), LORE_TEST_IDENTITY: "none" });
+    lore(["claim", t, "--worktree", `wt-${t}`], dir, { ...NAME_ENV, ...asRun(""), LORE_TEST_IDENTITY: "none" });
     for (const row of await auditSince(dir, since)) {
       expect(harnessRunOf(row) ?? null).toBeNull();
     }
@@ -337,7 +337,7 @@ describe("AC-RID-8 regression: no audit row of a named write is authored by the 
     const os = userInfo().username;
     const task = newTask(dir, "Gate actor target");
     const since = new Date().toISOString();
-    mustLore(["claim", task], dir, NAME_ENV);
+    mustLore(["claim", task, "--worktree", `wt-${task}`], dir, NAME_ENV);
     const rows = await auditSince(dir, since);
     expect(rows.some((r) => r.action === "gate_passed")).toBe(true);
     for (const row of rows) {
@@ -370,7 +370,7 @@ describe("AC-RID-8 regression (spec-every-write-is-made-by-a-known-party-an-atte
 
   it("the refused claim stores no claim, and the same session's own-run claim afterwards succeeds and refreshes (BR-1040)", () => {
     const task = newTask(dir, "Unregistered run claim");
-    const first = lore(["claim", task], dir, { ...NAME_ENV, ...asRun(GHOST_A) });
+    const first = lore(["claim", task, "--worktree", `wt-${task}`], dir, { ...NAME_ENV, ...asRun(GHOST_A) });
     expect(first.exitCode).toBe(4);
     const readClaim = (): Record<string, unknown> | undefined => {
       const got = (JSON.parse(mustLore(["get", task, "--json"], dir).stdout) as { data: { doc?: { extra?: { claim?: Record<string, unknown> } }; extra?: { claim?: Record<string, unknown> } } }).data;
@@ -378,13 +378,13 @@ describe("AC-RID-8 regression (spec-every-write-is-made-by-a-known-party-an-atte
     };
     expect(readClaim() ?? null).toBeNull();
     // the same session claiming on its own run (no flag) is accepted; a repeat by the same run refreshes the lease
-    const second = lore(["claim", task], dir, NAME_ENV);
+    const second = lore(["claim", task, "--worktree", `wt-${task}`], dir, NAME_ENV);
     expect(second.exitCode, second.stderr).toBe(0);
     const claim = readClaim();
     if (claim === undefined) throw new Error("claimed task has no extra.claim in `lore get --json`");
     expect(claim["harness_run"]).toBe(SESSION_RUN);
     expect(JSON.stringify(claim)).not.toContain(GHOST_A);
-    const third = lore(["claim", task], dir, NAME_ENV);
+    const third = lore(["claim", task, "--worktree", `wt-${task}`], dir, NAME_ENV);
     expect(third.exitCode, third.stderr).toBe(0);
     expect(third.stderr).not.toContain("CLAIM_CONFLICT");
   });

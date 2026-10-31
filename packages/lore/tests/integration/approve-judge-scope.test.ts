@@ -22,6 +22,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { makeCleanTreeRepo } from "../helpers/clean-tree-repo";
+import { FIXTURE_DONE_CONTRACT_CONFIG } from "../helpers/landed-code-task";
+import { patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 const TIMEOUT_MS = 120_000;
@@ -48,7 +51,11 @@ let prd: string;
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "approve-judge-scope-"));
+  // reason: approving a task compiles its done contract at a commit of the repository (AC-DCS1-1), which needs the three
+  // `workflow.done_contract` commands; the compile is not this file's subject, so the fixture only supplies what it needs.
+  makeCleanTreeRepo(dir);
   await must(["init"]);
+  patchLoreConfig(dir, { workflow: { done_contract: { ...FIXTURE_DONE_CONTRACT_CONFIG } } });
   prd = slugOf(await must(["create", "prd", "--title", "Judge scope product", "--no-ai", "--content", "# P\n\nA product.\n"]));
 }, TIMEOUT_MS);
 

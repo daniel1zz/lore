@@ -5,7 +5,8 @@
  * @task task-skill-fix-a-superseded-criterion-is-still-counted-by
  *
  * DC2-15 made `lore verify` skip a superseded criterion. This file pins the OTHER readers of the same
- * mark: `ac list` coverage and the `lore done` declared-ac_scope floor.
+ * mark: `ac list` coverage and the contract compile of `lore approve` (the declared-ac_scope floor of `lore done` it used to pin is
+ * retired by AC-DCS1-7; a superseded criterion gives no `ac:` oracle, AC-DCS1-1).
  * Throwaway corpus only (mkdtemp + `lore init`); never the repo's own `.lore/`.
  *
  * Coverage: HAPPY (a coverage `superseded`, b floor satisfied + named line), NEGATIVE (floor still
@@ -24,6 +25,7 @@ import {
   deriveAcCoverageState,
   projectAcCoverageGlyph,
 } from "@lore/core";
+import { makeCleanTreeRepo } from "../helpers/clean-tree-repo";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { actedStore } from "../live-invocation.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
@@ -34,6 +36,7 @@ let dir = "";
 let specS = "";
 let specS2 = "";
 let plan = "";
+let taskControl = "";
 let taskOnlyAc1 = "";
 let taskAc1AndAc2 = "";
 let citedRule = "";
@@ -76,19 +79,29 @@ async function addScriptAc(spec: string, acId: string): Promise<void> {
 }
 
 async function createTask(title: string, scope: readonly string[]): Promise<string> {
-  const slug = slugOf(
+  return slugOf(
     await must([
       "create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body",
       ...scope.flatMap((id) => ["--ac-scope", id]),
     ]),
   );
-  // An attested pass clears the attested-pass floor, so only the ac_scope floor is under test.
-  await must(["evidence", slug, "--oracle", "test", "--command", "true", "--result", "pass", "--capture"]);
-  return slug;
+}
+
+/** The oracle ids of the done contract `lore approve` stored on `task`. */
+async function contractOracleIds(task: string): Promise<string[]> {
+  const got = JSON.parse(await must(["get", task, "--json"])) as {
+    data: { doc?: { extra: Record<string, unknown> }; extra?: Record<string, unknown> };
+  };
+  const extra = got.data.doc?.extra ?? got.data.extra ?? {};
+  const contract = extra["done_contract"] as { oracles: { id: string }[] } | undefined;
+  if (contract === undefined) throw new Error(`task ${task} holds no done contract after approve`);
+  return contract.oracles.map((oracle) => oracle.id);
 }
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-ac-superseded-readers-"));
+  // reason: approve compiles the task's done contract at a commit of the repository, so the corpus lives in a git repository.
+  makeCleanTreeRepo(dir);
   await must(["init"]);
   patchLoreConfig(
     dir,
@@ -99,6 +112,7 @@ beforeAll(async () => {
       "    plan-promote:", "      enabled: false",
       "    task-claim:", "      enabled: false",
       '    "task-create":', "      enabled: false",
+      "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"',
       "",
     ].join("\n"),
   );
@@ -123,6 +137,7 @@ beforeAll(async () => {
   await addScriptAc(specS, "AC-3");
   await addScriptAc(specS2, "AC-9");
   plan = slugOf(await must(["create", "plan", "--title", "SR Plan", "--parent", specS, "--no-ai", "--content", "body"]));
+  taskControl = await createTask("SR control task AC-1", ["AC-1"]);
   taskOnlyAc1 = await createTask("SR task only AC-1", ["AC-1"]);
   taskAc1AndAc2 = await createTask("SR task AC-1 and AC-2", ["AC-1", "AC-2"]);
   await must(["approve", specS, "--override-no-judgment"]);
@@ -173,12 +188,11 @@ describe("superseded is its own coverage state in the one derivation (pure)", ()
 });
 
 describe("a superseded criterion is read as superseded by every coverage and floor reader", () => {
-  it("control: before supersession AC-1 is not `superseded` and the done floor demands a red run", async () => {
+  it("control: before supersession AC-1 is not `superseded` and the contract compiled at approve holds its oracle ac:AC-1", async () => {
     const states = await coverageStates(specS);
     expect(states["AC-1"]).not.toBe("superseded");
-    const refused = await lore(["done", taskOnlyAc1]);
-    expect(refused.exitCode).toBe(4);
-    expect(refused.stderr).toContain("extra.ac_scope (AC-1)");
+    await must(["approve", taskControl]);
+    expect(await contractOracleIds(taskControl)).toContain("ac:AC-1");
   }, 120_000);
 
   it("(1) ac list coverage reads `superseded` for the superseded criterion only", async () => {
@@ -193,17 +207,19 @@ describe("a superseded criterion is read as superseded by every coverage and flo
     expect(table).not.toMatch(/⊖ AC-2/);
   }, 120_000);
 
-  it("(2) a task scoped to only the superseded id passes the ac_scope floor and the output names the supersession", async () => {
-    const done = await lore(["done", taskOnlyAc1]);
-    expect(done.exitCode, done.stderr).toBe(0);
-    expect(done.stdout).toMatch(/AC-1.*supersed/i);
-    // the mark stores the superseding spec's document id, so the line names `<spec id>:AC-9`
-    expect(done.stdout).toMatch(/superseded by \S+:AC-9/);
+  // reason: the declared-ac_scope floor of `lore done` is retired (AC-DCS1-7): the contract compiled at approve (AC-DCS1-1) is what
+  // done judges, and a superseded criterion gives no oracle there. The two readers of the mark below are therefore asserted at approve.
+  it("(2) a task scoped to only the superseded id is approved with no ac oracle for it", async () => {
+    const approved = await lore(["approve", taskOnlyAc1]);
+    expect(approved.exitCode, approved.stderr).toBe(0);
+    expect(await contractOracleIds(taskOnlyAc1)).not.toContain("ac:AC-1");
   }, 120_000);
 
-  it("(2b) negative: a scope that still holds a LIVE id is refused by the floor", async () => {
-    const refused = await lore(["done", taskAc1AndAc2]);
-    expect(refused.exitCode).toBe(4);
-    expect(refused.stderr).toContain("extra.ac_scope");
+  it("(2b) negative: a scope that still holds a LIVE id keeps that id's oracle and still drops the superseded one", async () => {
+    const approved = await lore(["approve", taskAc1AndAc2]);
+    expect(approved.exitCode, approved.stderr).toBe(0);
+    const oracles = await contractOracleIds(taskAc1AndAc2);
+    expect(oracles).toContain("ac:AC-2");
+    expect(oracles).not.toContain("ac:AC-1");
   }, 120_000);
 });
