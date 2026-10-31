@@ -1,3 +1,5 @@
+// @spawns-external sleep a short-lived child process whose liveness the real probe observes, then kills
+// @spawns-external ps the real process probe (production code under test) reads a pid's start time with `ps -o lstart=`
 /**
  * @spec_ref spec-a-review-lease-whose-holder-process-is-gone-on-this (AC-DL-1, BR-1514, BR-1511)
  *
@@ -12,13 +14,14 @@
  */
 
 import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { err, ok } from "@lore/core";
 import { ReviewLeases, REVIEW_LEASE_EXPIRY_MS, type LeaseOutcome } from "../../src/service/review-batch-lease.js";
-import { formatHolder, parseHolder, type LocalProcessIdentity, type ProcessProbe } from "../../src/service/review-lease-liveness.js";
+import { formatHolder, isHolderProvablyDead, parseHolder, probeLocalProcess, resolveLocalIdentity, type LocalProcessIdentity, type ProcessProbe } from "../../src/service/review-lease-liveness.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 
 const T0 = Date.parse("2026-10-31T12:00:00.000Z");
@@ -203,5 +206,68 @@ describe("AC-DL-1: compare-and-set between two takers", () => {
     expect(result.ok && result.value.acquired).toBe(false);
     const stored = await w.store.readLease(KEY);
     expect(stored.ok && stored.value?.holder).not.toBe("me#1");
+  });
+});
+
+describe("AC-DL-1: the real process probe and identity (production code, no injection)", () => {
+  async function observe(pid: number): Promise<{ alive: boolean; startTime: string | null }> {
+    const result = await probeLocalProcess(pid);
+    if (!result.ok) throw new Error(`probe failed: ${JSON.stringify(result.error)}`);
+    return result.value;
+  }
+
+  it("a live child is alive with a start time; after it is killed and has exited, the probe says dead", async () => {
+    const child = spawn("sleep", ["30"], { stdio: "ignore" });
+    const pid = child.pid;
+    if (pid === undefined) throw new Error("sleep did not start");
+    try {
+      const alive = await observe(pid);
+      expect(alive.alive).toBe(true);
+      expect(alive.startTime).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+      child.kill("SIGKILL");
+      await exited;
+      expect(await observe(pid)).toEqual({ alive: false, startTime: null });
+      // the dead child's holder name is dead to the real probe, and live when the recorded start time is its own
+      const holder = formatHolder("app", identityOf("m1", pid, alive.startTime ?? START_A), "ab12cd34");
+      expect(await isHolderProvablyDead(holder, identityOf("m1", process.pid, START_B), probeLocalProcess)).toBe(true);
+    } finally {
+      child.kill("SIGKILL");
+    }
+  });
+
+  it("this process: alive, with the same start time on two probes", async () => {
+    const first = await observe(process.pid);
+    const second = await observe(process.pid);
+    expect(first.alive).toBe(true);
+    expect(first.startTime).not.toBeNull();
+    expect(second).toEqual(first);
+  });
+
+  it("resolveLocalIdentity is stable across two calls and across a fresh module load, writing only under LORE_HOME", async () => {
+    const home = mkdtempSync(join(tmpdir(), "lore-home-"));
+    const before = process.env["LORE_HOME"];
+    process.env["LORE_HOME"] = home;
+    try {
+      vi.resetModules();
+      const fresh = await import("../../src/service/review-lease-liveness.js");
+      const a = await fresh.resolveLocalIdentity();
+      const b = await fresh.resolveLocalIdentity();
+      if (a === null) throw new Error("this machine yields no identity (boot id or stored id unreadable)");
+      expect(b).toEqual(a);
+      expect(a.machineId).toMatch(/^[0-9a-f]{16}$/);
+      expect(a.pid).toBe(process.pid);
+      expect(existsSync(join(home, "machine-id"))).toBe(true);
+      // a second module load re-derives the id from the stored file: same machine id
+      vi.resetModules();
+      const again = await (await import("../../src/service/review-lease-liveness.js")).resolveLocalIdentity();
+      expect(again?.machineId).toBe(a.machineId);
+    } finally {
+      if (before === undefined) delete process.env["LORE_HOME"];
+      else process.env["LORE_HOME"] = before;
+      rmSync(home, { recursive: true, force: true });
+    }
+    // the statically imported copy is the same function the app wires; it is only referenced here, never run against HOME
+    expect(typeof resolveLocalIdentity).toBe("function");
   });
 });
