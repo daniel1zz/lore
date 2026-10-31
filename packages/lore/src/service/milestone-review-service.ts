@@ -127,23 +127,24 @@ export interface MilestoneReviewResult {
 }
 
 /**
- * The measured root causes of a review's failed findings: the failing suite files attributed to the plan (when
- * `regression` failed) and the contradicted cited rule ids (when `snapshot_accuracy` failed); `undefined` when neither.
+ * The measured root causes of a review's failed findings: the files red at the plan's last landing that the selection
+ * charged to it (when `regression` failed) and the contradicted cited rule ids (when `snapshot_accuracy` failed);
+ * `undefined` when neither.
  */
 export function measuredCauses(
   dimensions: LlmMilestoneOutput["dimensions"],
   attributedFailingFiles: readonly string[],
   cited: readonly CitedRuleStateRow[],
-  suiteFailingFiles: readonly string[] = [],
 ): ReviewCauses | undefined {
   const regression =
     dimensions.regression.verdict === "fail" && attributedFailingFiles.length > 0 ? [...new Set(attributedFailingFiles)].sort() : undefined;
   const contradicted = cited.filter((r) => r.state === "contradicted").map((r) => r.rule_id);
   const rules = dimensions.snapshot_accuracy.verdict === "fail" && contradicted.length > 0 ? [...new Set(contradicted)].sort() : undefined;
   if (regression === undefined && rules === undefined) return undefined;
-  // reason: BR-1379 / #345 — one failing main suite is ONE root cause, so the whole run's failing set is stored beside
-  // the plan's attributed subset; the fingerprint reads the whole set.
-  const suiteSet = regression !== undefined ? [...new Set(suiteFailingFiles)].sort() : undefined;
+  // reason: BR-1496 / #540 — no review measures a full suite, so the root cause is the set of files the selection found red
+  // at the plan's last landing and charged to it. `suite_failing_files` (the field the fingerprint reads, BR-1379) carries
+  // that set; the per-file fingerprint is #556's change, not made here.
+  const suiteSet = regression;
   return { ...(regression !== undefined ? { regression_files: regression } : {}), ...(suiteSet !== undefined ? { suite_failing_files: suiteSet } : {}), ...(rules !== undefined ? { contradicted_rules: rules } : {}) };
 }
 
@@ -389,7 +390,6 @@ export class MilestoneReviewService {
       dimensions,
       opts.facts?.regression_files ?? [],
       citedRulesResult.value,
-      opts.suite?.status === "measured" ? opts.suite.failing_test_files.map((f) => f.file) : [],
     );
     const review: MilestoneReview = {
       plan_id: bundle.plan.id,
