@@ -312,7 +312,7 @@ describe("AC-DCS2-13: lore migrate close-tasks resolves every close task and run
   beforeAll(async () => {
     first = await closeWorld("alpha", { landed: true });
     // a plan whose close refuses (its P0 UAT gate: no verdict is recorded): the other plans are still processed first or after it
-    second = await closeWorld("beta", { landed: false, requiresUat: true });
+    second = await closeWorld("beta", { landed: true, requiresUat: true });
     // look-alikes that are NOT close tasks: the prefix with a file anchor, and a task without the prefix whose title talks about closing
     const plan = await approvedPlan("Plan lookalikes");
     lookalikeAnchored = await fixture.createTask({ plan, kind: "code", title: "Close plan with a file", anchors: ["src/lookalike.ts"], acScope: [] });
@@ -415,6 +415,15 @@ describe("AC-DCS2-13: lore migrate close-tasks resolves every close task and run
 /** A UAT verdict file accepting every P0 (the plan has no requirements, so an accept verdict with no list is complete). */
 function writeVerdict(): string {
   const path = join(scratch, "verdict.json");
-  writeFileSync(path, JSON.stringify({ verdict: "accept", p0_accepted: true, summary: "accepted for the migration test", results: [] }));
+  writeFileSync(
+    path,
+    JSON.stringify({
+      verdict: "accept",
+      tier_results: [{ tier: "P0", accepted: 1, rejected: 0, unverified: 0 }],
+      requirement_coverage: { total: 1, covered: 1, uncovered_p0: [] },
+      uiux: { blocker_count: 0, min_dimension_score: 4 },
+      run_meta: { at: new Date().toISOString(), by: "agent:uat-fixture" },
+    }),
+  );
   return path;
 }

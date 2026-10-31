@@ -101,7 +101,7 @@ export default defineLoreCommand({
     },
     apply: {
       type: "boolean",
-      description: "[ordinals, spec-parents, plan-outline-exempt, outline-sections, config-keys, memory-limits, audit-backfill, fragments] Execute the migration (default is dry-run/preview-only)",
+      description: "[ordinals, spec-parents, plan-outline-exempt, outline-sections, done-contract, close-tasks, config-keys, memory-limits, audit-backfill, fragments] Execute the migration (default is dry-run/preview-only)",
     },
     scope: {
       type: "string",
@@ -168,14 +168,28 @@ export default defineLoreCommand({
       args.version !== "spec-parents" &&
       args.version !== "plan-outline-exempt" &&
       args.version !== "done-contract" &&
+      args.version !== "close-tasks" &&
       args.version !== "config-keys" &&
       args.version !== "memory-limits" &&
       args.version !== "audit-backfill"
     ) {
       inv.io.stderr.write(
-        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, outline-sections, ordinals, spec-parents, plan-outline-exempt, done-contract, config-keys, memory-limits, audit-backfill.\n`,
+        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, outline-sections, ordinals, spec-parents, plan-outline-exempt, done-contract, close-tasks, config-keys, memory-limits, audit-backfill.\n`,
       );
       exitCli(2);
+    }
+
+    // ── close-tasks action ────────────────────────────────────────────────
+    // reason: AC-DCS2-13 — preview by default (exit 0); `--apply` resolves every close task and runs the plan close that is due
+    // (exit 4 when a plan close failed, after the other plans were processed). Body in `../close-task-migration-run.ts`.
+    if (args.version === "close-tasks") {
+      const { runCloseTasksMigration } = await import("../close-task-migration-run.js");
+      const { app, dbPath, config } = loadLoreApp({ inv });
+      try {
+        return await runCloseTasksMigration({ inv, app, dbPath, config, apply: args.apply === true, json: args.json === true });
+      } finally {
+        app.close();
+      }
     }
 
     // ── done-contract action ──────────────────────────────────────────────

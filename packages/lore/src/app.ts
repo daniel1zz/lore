@@ -137,6 +137,7 @@ import { RealGitPort } from "./adapters/real-git-port.js";
 import { armMainTree, buildBaselineDeclarationPort } from "./adapters/cli/absent-declarations.js";
 import { DoneContractService } from "./service/done-contract-service.js";
 import { DoneContractMigrationService } from "./service/done-contract-migration-service.js";
+import { CloseTaskMigrationService } from "./service/close-task-migration-service.js";
 import { ExecutionLogService } from "./service/execution-log-service.js";
 import { createRealMigrationGit } from "./adapters/real-done-contract-migration-git.js";
 import { TaskFinishService } from "./service/task-finish-service.js";
@@ -524,6 +525,11 @@ export interface App {
    * every in-flight task through the approve-time compile, all or nothing. Wired by {@link wireDoneContract}.
    */
   doneContractMigrationService?: DoneContractMigrationService;
+  /**
+   * CloseTaskMigrationService — `lore migrate close-tasks [--apply]` (AC-DCS2-13): resolves every close task of the old protocol
+   * and hands each plan left with no open task to the one plan close. Always present in production; the CLI guards `=== undefined`.
+   */
+  closeTaskMigrationService?: CloseTaskMigrationService;
   /**
    * ExecutionLogService — the standalone writer of `extra.execution_log` (AC-DCS2-14): a plan's evidence-moved entries and the
    * `superseded` entry of every task holding a corrected or superseded criterion. Wired by {@link wireDoneContract}.
@@ -1850,6 +1856,8 @@ function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | 
   app.acService?.attachExecutionLog(app.executionLogService);
   // reason: AC-DCS1-22 — the migration compiles through the SAME service approve uses, and writes through the one write route.
   app.doneContractMigrationService = new DoneContractMigrationService(store, app.corpusService, contracts, createRealMigrationGit(repoRoot));
+  // reason: AC-DCS2-13 — the close-task migration writes through the one write route and removes links through the corpus service.
+  app.closeTaskMigrationService = new CloseTaskMigrationService(store, app.corpusService);
   // reason: AC-DCS1-11 — a write-set addition runs a test file with the same template the approve-time contract used.
   app.taskWorkflowService.setTestFileTemplate(commands.test_file);
   // reason: AC-DCS1-15 — finish composes the workflow service (the one write) and the verify runner (the one measurement).
