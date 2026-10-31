@@ -356,7 +356,9 @@ describe("build first for a selection holding a declared-spawn test", () => {
   };
 
   it("AC-SC-3 buildFirst runs `bun run build` before the tests: a build that writes a marker is seen by the test script", { timeout: 120_000 }, async () => {
-    const root = packageWith({ build: "echo built > built.marker", testFile: "test -f built.marker" });
+    // reason: the runner appends the file names to `test:file`, so the script is a program that ignores its arguments.
+    const root = packageWith({ build: "echo built > built.marker", testFile: "node check.js" });
+    writeFileSync(join(root, "check.js"), 'process.exit(require("node:fs").existsSync("built.marker") ? 0 : 4);\n');
     try {
       const without = await runTestFilesTogether(root, "fixture", [A], cleanEnv());
       // the script fails without the build: not a green (the exit is whatever the script gave, which is no test result: a runner

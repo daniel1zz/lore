@@ -419,7 +419,8 @@ describe("AC-AF-2 the runner's timeout ends the whole process tree", () => {
     expect(greenRun.ok && greenRun.value[0]).toMatchObject({ file: "x.test.ts", exit_code: 0 });
     expect(greenRun.ok && greenRun.value[0]?.output_tail).toContain("all-green");
     await greenRunner.disposeWorktrees?.();
-    const redRepo = makeRepo({ "test:file": "echo boom; exit 3" }, {});
+    // reason: the runner appends the file names to the script, so the fixture is a program that ignores its arguments.
+    const redRepo = makeRepo({ "test:file": "node red.js" }, { "red.js": 'console.log("boom"); process.exit(3);\n' });
     const redRunner = createGitCommitSuiteRunner(redRepo.repo, process.env, { timeoutMs: 20_000, graceMs: GRACE_MS });
     const redRun = await redRunner.runFiles(redRepo.commit, ["x.test.ts"]);
     expect(redRun.ok && redRun.value[0]).toMatchObject({ exit_code: 3 });
