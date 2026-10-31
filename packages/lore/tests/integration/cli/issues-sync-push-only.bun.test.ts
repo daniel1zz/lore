@@ -36,6 +36,7 @@ import { join } from "node:path";
 
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../../helpers/clean-tree-repo";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { CARRIER_DONE_CONTRACT_CONFIG_LINES, createCarrierSpec, landCarrierAndDone } from "../support/issue-carrier";
 
 const SPEC = "spec-github-owns-issue-report-state-no-mirror-task-work-carries";
 const FAKE_REPO = "acme/widget";
@@ -193,10 +194,13 @@ async function mustRun(fixture: Fixture, session: string, args: string[]): Promi
 
 const slugOfCreate = (stdout: string): string => (JSON.parse(stdout) as { data: { slug: string } }).data.slug;
 
-/** `lore done` after a runner-attested pass on an unclaimed task (a claim naming a working copy would arm the not-landed floor, which needs a real `lore integrate`). */
+/**
+ * `lore done` of a carrier under the done-contract model: the carrier is approved, claimed on a branch, landed on main and holds a runner
+ * pass for every contract oracle (see support/issue-carrier.ts). The retired route claimed nothing, captured one pass and ran
+ * `lore done --declare-no-new-tests`.
+ */
 async function completeWithDone(fixture: Fixture, slug: string): Promise<RunResult> {
-  await mustRun(fixture, "worker", ["evidence", slug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"]);
-  return await runLore(fixture, "worker", ["done", slug, "--declare-no-new-tests", "fixture: throwaway task"]);
+  return await landCarrierAndDone({ dir: fixture.dir, run: (args, session) => runLore(fixture, session, [...args]) }, slug, dirsToClean);
 }
 
 /** gh calls that write (PATCH, POST, DELETE) to issue `n`, oldest first. */
@@ -240,6 +244,7 @@ async function makeFixture(): Promise<{ fixture: Fixture; slugs: { forty: string
       "      enabled: false",
       "  review:",
       "    judgment_required_types: []",
+      ...CARRIER_DONE_CONTRACT_CONFIG_LINES,
       "feedback:",
       "  upstream:",
       `    repo: ${FAKE_REPO}`,
@@ -247,9 +252,11 @@ async function makeFixture(): Promise<{ fixture: Fixture; slugs: { forty: string
     ].join("\n"),
   );
   await mustRun(fixture, "setup", ["create", "prd", "--title", "Sync Fixture PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"]);
+  // reason: an ad-hoc task names the spec whose criteria govern it (`--spec`)
+  const spec = await createCarrierSpec({ dir, run: (args, session) => runLore(fixture, session, [...args]) });
   const createCarrier = async (title: string, issue: number): Promise<string> =>
     slugOfCreate(
-      (await mustRun(fixture, "setup", ["create", "task", "--kind", "code", "--adhoc", "--ac-scope", "", "--title", title, "--no-ai", "--content", "Carrier.", "--issue", String(issue), "--json"])).stdout,
+      (await mustRun(fixture, "setup", ["create", "task", "--kind", "code", "--adhoc", "--spec", spec, "--ac-scope", "", "--title", title, "--no-ai", "--content", "Carrier.", "--issue", String(issue), "--json"])).stdout,
     );
   const forty = await createCarrier("Carrier of forty", 40);
   const fortyTwo = await createCarrier("Carrier of forty-two", 42);

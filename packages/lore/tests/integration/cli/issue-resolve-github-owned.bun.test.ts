@@ -27,6 +27,9 @@ import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { cleanDirs, makeIssueFixture, type IssueFixture } from "../../helpers/gh-issue-stub";
+import { patchLoreConfig } from "../../helpers/patch-lore-config";
+import { createCarrierSpec, landCarrierAndDone } from "../support/issue-carrier";
+import { FIXTURE_DONE_CONTRACT_CONFIG } from "../support/land-task";
 
 const SPEC = "spec-github-owns-issue-report-state-no-mirror-task-work-carries";
 const dirsToClean: string[] = [];
@@ -233,16 +236,20 @@ describe("AC-IL-10 an issue whose naming work is archived is not given a verdict
 
   beforeAll(async () => {
     fixture = await makeIssueFixture([{ number: PENDING }, { number: FIXED }], { dirsToClean });
+    // reason: approve compiles each carrier's done contract from these commands (a code task needs all three)
+    patchLoreConfig(fixture.dir, { workflow: { done_contract: { ...FIXTURE_DONE_CONTRACT_CONFIG } } });
+    const world = { dir: fixture.dir, run: (args: readonly string[], session: string) => fixture.run([...args], session) };
+    const spec = await createCarrierSpec(world);
     for (const n of [PENDING, FIXED]) {
-      const created = await fixture.run(["create", "task", "--kind", "code", "--adhoc", "--ac-scope", "", "--title", `Carrier of ${n}`, "--no-ai", "--content", "Carrier.", "--issue", String(n), "--json"], "setup");
+      const created = await fixture.run(["create", "task", "--kind", "code", "--adhoc", "--spec", spec, "--ac-scope", "", "--title", `Carrier of ${n}`, "--no-ai", "--content", "Carrier.", "--issue", String(n), "--json"], "setup");
       expect(created.exitCode, created.stderr + created.stdout).toBe(0);
       const slug = (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
       slugs[n] = slug;
       // The close of PENDING is made to fail, so it stays open with archived work; FIXED is closed as completed by the archive.
       if (n === PENDING) writeFileSync(join(fixture.stubDir, `fail-patch-${n}`), "1");
-      const evidence = await fixture.run(["evidence", slug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"], "setup");
-      expect(evidence.exitCode, evidence.stderr + evidence.stdout).toBe(0);
-      const done = await fixture.run(["done", slug, "--declare-no-new-tests", "fixture: throwaway task"], "setup");
+      // the carrier is approved, claimed on a branch, landed and holds its contract passes, then `lore done` archives it (the retired
+      // route captured one pass and ran `lore done --declare-no-new-tests`)
+      const done = await landCarrierAndDone(world, slug, dirsToClean, "setup");
       expect(done.exitCode, done.stderr + done.stdout).toBe(0);
       rmSync(join(fixture.stubDir, `fail-patch-${n}`), { force: true });
     }

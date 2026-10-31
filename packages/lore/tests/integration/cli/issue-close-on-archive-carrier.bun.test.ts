@@ -32,6 +32,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../../helpers/clean-tree-repo";
+import { landCarrierAndDone } from "../support/issue-carrier";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 const SPEC = "spec-github-owns-issue-report-state-no-mirror-task-work-carries";
@@ -208,7 +209,7 @@ function closeFailedAuditRows(corpus: Corpus): Array<{ issue: number; step: stri
 }
 
 /** A fresh corpus: clean git tree, feedback.upstream naming the FAKE repo, one root PRD, and the stub seeded with `issues`. */
-async function makeCorpus(issues: readonly StubIssue[]): Promise<Corpus & { prdSlug: string }> {
+async function makeCorpus(issues: readonly StubIssue[]): Promise<Corpus & { prdSlug: string; specSlug: string }> {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "lore-gs-t4-corpus-")));
   const stubDir = mkdtempSync(join(tmpdir(), "lore-gs-t4-stub-"));
   dirsToClean.push(dir, stubDir);
@@ -228,6 +229,11 @@ async function makeCorpus(issues: readonly StubIssue[]): Promise<Corpus & { prdS
       "      enabled: false",
       "  review:",
       "    judgment_required_types: []",
+      // reason: approve compiles each carrier's done contract from these commands (a code task needs all three)
+      "  done_contract:",
+      '    install: "echo install-ok"',
+      '    typecheck: "echo typecheck-ok"',
+      '    test_file: "echo Ran 1 tests in {file}"',
       "feedback:",
       "  upstream:",
       `    repo: ${FAKE_REPO}`,
@@ -237,21 +243,30 @@ async function makeCorpus(issues: readonly StubIssue[]): Promise<Corpus & { prdS
   const prd = slugOfCreate(
     (await mustRun(corpus, "setup", ["create", "prd", "--title", "Carrier Fixture PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"])).stdout,
   );
-  return { ...corpus, prdSlug: prd };
+  // reason: an ad-hoc task names the spec whose criteria govern it (`--spec`); approve and finish resolve its criteria through it.
+  const spec = slugOfCreate(
+    (await mustRun(corpus, "setup", ["create", "spec", "--title", "Carrier Fixture Spec", "--kind", "tech", "--no-ai", "--content", "## Overview\n\nBody.", "--json"])).stdout,
+  );
+  return { ...corpus, prdSlug: prd, specSlug: spec };
 }
 
 /** Creates a task carrier through the service (`--issue` writes `extra.issues`). */
-async function createCarrierTask(corpus: Corpus, title: string, numbers: readonly number[]): Promise<string> {
+async function createCarrierTask(corpus: Corpus & { specSlug: string }, title: string, numbers: readonly number[]): Promise<string> {
   const issueArgs = numbers.flatMap((number) => ["--issue", String(number)]);
   return slugOfCreate(
-    (await mustRun(corpus, "setup", ["create", "task", "--kind", "code", "--adhoc", "--ac-scope", "", "--title", title, "--no-ai", "--content", "Carrier.", ...issueArgs, "--json"])).stdout,
+    (await mustRun(corpus, "setup", ["create", "task", "--kind", "code", "--adhoc", "--spec", corpus.specSlug, "--ac-scope", "", "--title", title, "--no-ai", "--content", "Carrier.", ...issueArgs, "--json"])).stdout,
   );
 }
 
-/** `lore done` after a runner-attested pass (`--capture` runs the command and attests its exit code) on an unclaimed task: a claim naming a working copy would arm the not-landed floor, which needs a real `lore integrate`. */
+/**
+ * `lore done` of the carrier. A carrier that changes files is a code task judged by its stored contract (AC-DCS1-7): it is approved
+ * (red run waived: not this file's subject), claimed on a branch of its own, landed on main with its landing record, and holds a runner
+ * pass for every contract oracle; `lore done` then archives it and prints what the archive did for each named issue (see
+ * support/issue-carrier.ts). The retired route claimed nothing, captured one pass and ran `lore done --declare-no-new-tests`. (A corpus
+ * task is closed by `lore finish`, which does not print the issue-close lines, so it cannot stand in for the carrier here.)
+ */
 async function completeWithDone(corpus: Corpus, slug: string): Promise<RunResult> {
-  await mustRun(corpus, "worker", ["evidence", slug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"]);
-  return await runLore(corpus, "worker", ["done", slug, "--declare-no-new-tests", "fixture: throwaway task"]);
+  return await landCarrierAndDone({ dir: corpus.dir, run: (args, session) => runLore(corpus, session, [...args]) }, slug, dirsToClean);
 }
 
 async function statusOf(corpus: Corpus, slug: string): Promise<string> {
@@ -352,7 +367,7 @@ describe(`${SPEC}#AC-GS-8: archiving a carrier closes each named issue`, () => {
     async () => {
       const corpus = await makeCorpus(THREE_ISSUES);
       const slug = slugOfCreate(
-        (await mustRun(corpus, "setup", ["create", "task", "--kind", "code", "--adhoc", "--ac-scope", "", "--title", "No carrier", "--no-ai", "--content", "Plain.", "--json"])).stdout,
+        (await mustRun(corpus, "setup", ["create", "task", "--kind", "code", "--adhoc", "--spec", corpus.specSlug, "--ac-scope", "", "--title", "No carrier", "--no-ai", "--content", "Plain.", "--json"])).stdout,
       );
       const callsBefore = ghLog(corpus).length;
 

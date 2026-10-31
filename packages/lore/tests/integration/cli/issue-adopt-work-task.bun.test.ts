@@ -26,6 +26,9 @@ import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { cleanDirs, makeIssueFixture, STUB_REPO_ID, type IssueFixture } from "../../helpers/gh-issue-stub";
+import { patchLoreConfig } from "../../helpers/patch-lore-config";
+import { createCarrierSpec, landCarrierAndDone } from "../support/issue-carrier";
+import { FIXTURE_DONE_CONTRACT_CONFIG } from "../support/land-task";
 
 import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 const SPEC = "spec-github-owns-issue-report-state-no-mirror-task-work-carries";
@@ -268,8 +271,13 @@ describe("AC-IL-8 any open listed issue is adoptable; closed or archived-work is
     const prdSlug = (Array.isArray(prdData) ? prdData : (prdData.docs ?? []))[0]?.slug ?? "";
     expect(prdSlug).not.toBe("");
 
+    // reason: approve compiles each carrier's done contract from these commands (a code task needs all three); an ad-hoc task names its spec
+    patchLoreConfig(fixture.dir, { workflow: { done_contract: { ...FIXTURE_DONE_CONTRACT_CONFIG } } });
+    const world = { dir: fixture.dir, run: (args: readonly string[], session: string) => fixture.run([...args], session) };
+    const carrierSpec = await createCarrierSpec(world);
+
     const carrier = async (title: string, n: number): Promise<string> =>
-      slugOf(await must(["create", "task", "--adhoc", "--kind", "code", "--ac-scope", "", "--title", title, "--no-ai", "--content", "Carrier.", "--issue", String(n), "--json"]));
+      slugOf(await must(["create", "task", "--adhoc", "--kind", "code", "--spec", carrierSpec, "--ac-scope", "", "--title", title, "--no-ai", "--content", "Carrier.", "--issue", String(n), "--json"]));
 
     deprecatedTaskSlug = await carrier("Deprecated carrier", DEPRECATED);
     await must(["set", deprecatedTaskSlug, "--status", "deprecated"]);
@@ -277,8 +285,10 @@ describe("AC-IL-8 any open listed issue is adoptable; closed or archived-work is
     // Archiving a carrier closes its issue on GitHub; the PATCH is made to fail so the issue stays OPEN with archived work.
     archivedTaskSlug = await carrier("Archived carrier", ARCHIVED_TASK);
     writeFileSync(join(fixture.stubDir, `fail-patch-${ARCHIVED_TASK}`), "1");
-    await must(["evidence", archivedTaskSlug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"]);
-    await must(["done", archivedTaskSlug, "--declare-no-new-tests", "fixture: throwaway task"]);
+    // the carrier is approved, claimed on a branch, landed and holds its contract passes, then `lore done` archives it (the retired route
+    // captured one pass and ran `lore done --declare-no-new-tests`)
+    const archivedByDone = await landCarrierAndDone(world, archivedTaskSlug, dirsToClean, "setup");
+    expect(archivedByDone.exitCode, archivedByDone.stderr + archivedByDone.stdout).toBe(0);
     rmSync(join(fixture.stubDir, `fail-patch-${ARCHIVED_TASK}`));
 
     archivedPlanSlug = slugOf(
