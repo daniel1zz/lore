@@ -17,16 +17,16 @@
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { err, ok, parseConfig, resolveMachineTestSlots, MILESTONE_DIMENSIONS, type DocRecord, type LoreError, type MilestoneReview, type PlanBundle, type Result } from "@lore/core";
 import { REVIEW_BATCH_HANDOFF_ENV, readBatchHandoff, spawnDetachedReviewBatch } from "../../src/adapters/cli/review-batch-wiring.js";
 import { describeBatchStart } from "../../src/service/integrate-service.js";
 import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/service/issue-filing-service.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint } from "../../src/service/milestone-review.js";
 import { ReviewBatchRunner, ReviewTriggerService, type BatchHandoff, type BatchRunPorts, type MachineBatchPorts } from "../../src/service/review-batch-service.js";
-import { ReviewLeases, batchLeaseKey, planLeaseKey, testSlotLeaseKey, type LeaseOutcome } from "../../src/service/review-batch-lease.js";
+import { ReviewLeases, planLeaseKey, type LeaseOutcome } from "../../src/service/review-batch-lease.js";
 import type { LocalProcessIdentity, ProcessProbe } from "../../src/service/review-lease-liveness.js";
-import { ReviewTestSlots, slotCommitSuiteRunner, slotCriterionRerunner, slotStaleRefresher } from "../../src/service/review-test-slots.js";
+import type { ReviewTestSlots } from "../../src/service/review-test-slots.js";
 import { coverFailedDimensions } from "../../src/service/milestone-review-inputs.js";
 import type { CommitSuiteRunnerPort } from "../../src/service/suite-result-service.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
@@ -36,9 +36,18 @@ const T0 = Date.parse("2026-11-01T12:00:00.000Z");
 const START_A = "2026-11-01T08:00:00.000Z";
 const START_B = "2026-11-01T09:30:00.000Z";
 const MACHINE = "m1";
-const BATCH_KEY = batchLeaseKey(MACHINE);
-const SLOT_0 = testSlotLeaseKey(MACHINE, 0);
-const BASE_CONFIG = { project: { name: "fixture", author: "fixture" } };
+// literals, not the key builders: the spec's key shapes are the contract, and a builder call at import would fail collection on a tree without it
+const BATCH_KEY = "batch:m1";
+const SLOT_0 = "test-slot:m1:0";
+// reason: the slots module is loaded in a `beforeEach` of the slot describes, not at import, so a tree without it fails each slot test (a
+// runner-visible red) instead of failing the file's collection, which a runner reports as "no tests" and the red-first floor cannot tell
+// from a broken command. (`beforeAll` would SKIP the tests instead of failing them.)
+let slotsModule: typeof import("../../src/service/review-test-slots.js");
+const loadSlotsModule = async (): Promise<void> => {
+  slotsModule = await import("../../src/service/review-test-slots.js");
+};
+
+const BASE_CONFIG ={ project: { name: "fixture", author: "fixture" } };
 const identityOf = (pid: number, startIso = START_A, machineId = MACHINE): LocalProcessIdentity => ({ machineId, pid, startIso });
 
 class World {
@@ -481,7 +490,7 @@ function suiteRunnerOf(fake: FakeRunner): CommitSuiteRunnerPort {
 }
 
 function slotsFor(w: World, identity: LocalProcessIdentity | null, slots: number, say: (line: string) => void = () => undefined, sleepCalls?: number[]): ReviewTestSlots {
-  return new ReviewTestSlots({
+  return new slotsModule.ReviewTestSlots({
     leases: w.leasesFor(identity, `proc-${String(identity?.pid ?? "x")}`),
     slots,
     sleep: async (ms) => {
@@ -494,15 +503,17 @@ function slotsFor(w: World, identity: LocalProcessIdentity | null, slots: number
 }
 
 describe("AC-MC-2: test slots", () => {
+  beforeEach(loadSlotsModule);
+
   it("with 1 slot a selection chunk, a head recheck, a bisection run, a criteria run and a direct assess run one at a time", async () => {
     const w = world();
     const fake = new FakeRunner();
     const batchSlots = slotsFor(w, identityOf(2001), 1);
     const directSlots = slotsFor(w, identityOf(2002, START_B), 1);
-    const batchRunner = slotCommitSuiteRunner(suiteRunnerOf(fake), batchSlots);
-    const directRunner = slotCommitSuiteRunner(suiteRunnerOf(fake), directSlots);
-    const criteria = slotCriterionRerunner({ rerun: async () => fake.run("criteria", { passed: true, detail: "pass" }) }, batchSlots);
-    const refresh = slotStaleRefresher({ runAcs: async () => fake.run("refresh", undefined) }, batchSlots);
+    const batchRunner = slotsModule.slotCommitSuiteRunner(suiteRunnerOf(fake), batchSlots);
+    const directRunner = slotsModule.slotCommitSuiteRunner(suiteRunnerOf(fake), directSlots);
+    const criteria = slotsModule.slotCriterionRerunner({ rerun: async () => fake.run("criteria", { passed: true, detail: "pass" }) }, batchSlots);
+    const refresh = slotsModule.slotStaleRefresher({ runAcs: async () => fake.run("refresh", undefined) }, batchSlots);
     const results = await Promise.all([
       batchRunner.runFilesTogether?.("c", ["a.test.ts", "b.test.ts"]),
       batchRunner.runFiles("c", ["recheck.test.ts"]),
@@ -581,7 +592,7 @@ describe("AC-MC-2: test slots", () => {
     const taken: string[] = [];
     const real = w.leasesFor(identityOf(2501), "recording");
     const recording = { machineId: () => real.machineId(), acquire: (key: string) => (taken.push(key), real.acquire(key)) };
-    const slots = new ReviewTestSlots({ leases: recording, slots: 2, sleep: async () => undefined, clock: () => T0, say: () => undefined });
+    const slots = new slotsModule.ReviewTestSlots({ leases: recording, slots: 2, sleep: async () => undefined, clock: () => T0, say: () => undefined });
     let takenDuringWork = -1;
     await slots.run(async () => {
       const before = taken.length;
@@ -599,8 +610,8 @@ describe("AC-MC-2: test slots", () => {
   it("slotting only batch runs would let a direct assess overlap: the direct runner shares the same slot keys", async () => {
     const w = world();
     const fake = new FakeRunner(30);
-    const batchRunner = slotCommitSuiteRunner(suiteRunnerOf(fake), slotsFor(w, identityOf(2601), 1));
-    const directRunner = slotCommitSuiteRunner(suiteRunnerOf(fake), slotsFor(w, identityOf(2602, START_B), 1));
+    const batchRunner = slotsModule.slotCommitSuiteRunner(suiteRunnerOf(fake), slotsFor(w, identityOf(2601), 1));
+    const directRunner = slotsModule.slotCommitSuiteRunner(suiteRunnerOf(fake), slotsFor(w, identityOf(2602, START_B), 1));
     await Promise.all([batchRunner.runFiles("c", ["a.test.ts"]), directRunner.runFiles("c", ["b.test.ts"])]);
     expect(fake.maxRunning).toBe(1);
   });
