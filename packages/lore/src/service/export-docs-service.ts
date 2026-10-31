@@ -335,6 +335,7 @@ const TYPE_PREFIX: Record<DocType, string> = {
   phase: "PHASE",
   // baseline (spec-baseline-slice-1 C1) — compile-forced entry; "BL" avoided because BL-n names PRD requirements.
   baseline: "BASE",
+  template: "TPL",
 } as const;
 
 /**
@@ -351,6 +352,7 @@ const TYPE_DIR: Record<DocType, string> = {
   // SPEC-056 T4 — see TYPE_PREFIX's phase entry above for the same rationale.
   phase: "phase",
   baseline: "baseline",
+  template: "template",
 } as const;
 
 // ─── ExportDocsService ────────────────────────────────────────────────────────

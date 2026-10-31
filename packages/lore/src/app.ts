@@ -126,6 +126,7 @@ import { VerificationProjectionService } from "./service/verification-projection
 import { SessionService } from "./service/session-service.js";
 import { ValidityService } from "./service/validity-service.js";
 import { DriftCheckService } from "./service/drift-check-service.js";
+import { TemplateService } from "./service/template-service.js";
 import { OutlineSectionsRetireMigrationService } from "./service/outline-sections-retire-migration-service.js";
 import { OrdinalMigrationService } from "./service/ordinal-migration-service.js";
 import { SpecParentMigrationService } from "./service/spec-parent-migration-service.js";
@@ -638,6 +639,12 @@ export interface App {
    */
   checkStatsService?: CheckStatsService;
   /**
+   * Resolves, renders, validates and cross-checks templated documents against their template (`lore template show|check`,
+   * and the write path from T6). Optional for the same "hand-built App test stubs stay valid" reason as
+   * `driftCheckService`; always wired in production.
+   */
+  templateService?: TemplateService;
+  /**
    * SPEC-102 OPTIONAL read/deny-instrumentation port — the SAME instance
    * wired into `CorpusService`/`GateEnforcer` (service-layer deny). Exposed
    * on `App` so the CLI adapter can fire the HOOK-layer deny trace
@@ -1064,6 +1071,9 @@ function buildAppFromSqlite(
     // reason: DriftCheckService depends only on StoreInterface — stateless, no AI, no
     // telemetry, same shape as PhaseService/AcService. SPEC-045 §Design Decisions D4.
     driftCheckService: armDecisionGate(new DriftCheckService(store, corpusService), decisionGate),
+    // reason: TemplateService is a read-only reader of corpus template documents (store only), same DI shape as
+    // DriftCheckService; structured-documents T2.
+    templateService: new TemplateService(store),
     // reason: VerificationProjectionService depends only on StoreInterface plus the
     // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
     // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.
@@ -1510,6 +1520,9 @@ function buildAppFromTurso(
     // reason: DriftCheckService depends only on StoreInterface — stateless, no AI, no
     // telemetry, same shape as PhaseService/AcService. SPEC-045 §Design Decisions D4.
     driftCheckService: armDecisionGate(new DriftCheckService(store, corpusService), decisionGate),
+    // reason: TemplateService is a read-only reader of corpus template documents (store only), same DI shape as
+    // DriftCheckService; structured-documents T2.
+    templateService: new TemplateService(store),
     // reason: VerificationProjectionService depends only on StoreInterface plus the
     // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
     // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.

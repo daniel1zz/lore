@@ -200,6 +200,7 @@ import { MIGRATION_042_ADD_COLUMNS, MIGRATION_042_SQL } from "./migrations/migra
 import { MIGRATION_043_SQL } from "./migrations/migration-043.js";
 import { MIGRATION_044_SQL } from "./migrations/migration-044.js";
 import { MIGRATION_045_SQL } from "./migrations/migration-045.js";
+import { MIGRATION_046_SQL } from "./migrations/migration-046.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey, DecisionVersionQuery } from "./store-interface.js";
@@ -1101,6 +1102,26 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("ROLLBACK;");
         } catch {
           // reason: same as migration-044 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 46 && 46 <= ceiling) {
+      // reason: migration-046 widens docs.type to accept 'template' with the migration-013 table-recreate recipe (FK pragma outside the transaction).
+      try {
+        this.db.exec(MIGRATION_046_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-013 — safe to ignore, the failure below is what to report.
+        }
+        // reason: BUG-010 — `PRAGMA foreign_keys = OFF` is connection-level and survives ROLLBACK; restore it (as migration-013's branch does).
+        try {
+          this.db.exec("PRAGMA foreign_keys = ON");
+        } catch {
+          // reason: only throws on a closed/broken connection, where `error` below is what the caller needs.
         }
         throw error;
       }

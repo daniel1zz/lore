@@ -25,6 +25,9 @@ export const PARENT_TYPE_CONTRACT = {
   phase:     ["plan"],
   // baseline: root under a prd, branch/leaf under a baseline (node/parent detail: baseline.ts).
   baseline:  ["prd", "baseline"],
+  // reason: a template takes NO parent (structured-documents T2): it governs a whole doc type, so it
+  // hangs under no single prd/spec; the first template must be creatable in an empty corpus.
+  template:  [],
 } as const satisfies Record<DocType, readonly DocType[]>;
 
 /**
@@ -39,7 +42,7 @@ export function isValidParentType(child: DocType, parent: DocType): boolean {
  * these types is legal, and a parent on one is refused (BR-2). They relate to the
  * rest of the corpus by other means (a spec: criterion citations of BR/AS rules).
  */
-export const PARENTLESS_TYPES: readonly DocType[] = ["spec"];
+export const PARENTLESS_TYPES: readonly DocType[] = ["spec", "template"];
 
 /** True iff `type` takes no parent (see {@link PARENTLESS_TYPES}). */
 export function isParentlessType(type: DocType): boolean {

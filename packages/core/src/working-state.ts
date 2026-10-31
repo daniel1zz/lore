@@ -35,6 +35,7 @@ export const WORKING_STATE_KEYS: Record<DocType, readonly string[]> = {
   prd: ["outline_budget"],
   adr: [],
   baseline: [],
+  template: [],
 };
 
 /** Structural view of a `docs` row: any column plus `extra`. */

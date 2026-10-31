@@ -157,6 +157,7 @@ export class RecordLockService {
       }
       case "prd":
       case "baseline":
+      case "template":
         return ok(base);
       default: {
         const unreachable: never = doc.type;

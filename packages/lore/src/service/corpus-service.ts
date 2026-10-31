@@ -18,6 +18,8 @@ import type { LoreError } from "@lore/core";
 import { containsCjk, getTransliterateCjk } from "@lore/core/node";
 import {
   adrExtraSchema,
+  templateDocumentExtraSchema,
+  templatesEqual,
   canonicaliseBody,
   createDocInputSchema,
   deriveTypeMeta,
@@ -3414,9 +3416,16 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // reason: spec D14 — the demotion trigger is a DIFFERENCE too. A resend of the stored text (a tag save
     // from the dashboard) is not an edit, and demoting a locked record on it would reopen it by the back
     // door. `bodyDiffers` compares canonicalised text, so a re-save of the same body reads as unchanged.
+    // reason: a template's substance is `extra.template`, not its body — editing it is a contract edit, so an approved
+    // template returns to draft and the approved version stays what it was (T2: `slug@N` must keep resolving).
+    const templateChanged =
+      existing.type === "template" &&
+      parsedPatch.data.extra !== undefined &&
+      !templatesEqual(existing.extra["template"], parsedPatch.data.extra["template"]);
     const contentOrTitleChanged =
       (parsedPatch.data.content !== undefined && bodyDiffers(existing.content, parsedPatch.data.content)) ||
-      (parsedPatch.data.title !== undefined && parsedPatch.data.title !== existing.title);
+      (parsedPatch.data.title !== undefined && parsedPatch.data.title !== existing.title) ||
+      templateChanged;
     // reason: this is an INTERNAL lifecycle invariant (SPEC-002 §3), not a
     // user-requested transition — approved→draft is deliberately absent from
     // VALID_TRANSITIONS (only active/archived/deprecated follow "approved"),
@@ -3778,6 +3787,19 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
           message: "extra.validity cannot be changed via `lore set` — use `lore invalidate` instead",
           value: parsedPatch.data.extra["validity"],
           rule: "BR-730",
+        });
+      }
+    }
+
+    // template: extra.template is re-validated by the core meta-schema on every set (all issues, one refusal).
+    if (existing.type === "template" && parsedPatch.data.extra !== undefined) {
+      const templateResult = templateDocumentExtraSchema.safeParse(parsedPatch.data.extra);
+      if (!templateResult.success) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "extra.template",
+          message: templateResult.error.issues.map((issue) => issue.message).join("; "),
+          value: parsedPatch.data.extra["template"],
         });
       }
     }

@@ -42,6 +42,16 @@ const VALID_EXTRA: Record<DocType, Record<string, unknown>> = {
   // assertions implied).
   phase: { plan_id: "01ARZ3PLAN0000000000001" },
   baseline: { node: "root" },
+  template: {
+    template: {
+      doc_type: "spec",
+      version: 1,
+      fields: { type: "object", properties: { summary: { type: "string" } } },
+      dimensions: [{ id: "scope", question: "What is in scope?" }],
+      checks: [],
+      render: [{ heading: "Summary", fields: ["summary"] }],
+    },
+  },
 };
 
 function makeDoc(type: DocType, overrides: Partial<DocRecord> = {}): DocRecord {
