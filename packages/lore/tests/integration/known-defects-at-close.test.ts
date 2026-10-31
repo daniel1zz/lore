@@ -121,7 +121,7 @@ async function buildWorld(spec: WorldSpec) {
   const known = spec.entries.map((e) => {
     const verdict = spec.verdicts[e.dimension] ?? "fail";
     const variant = e.variant ?? spec.reviewVariants?.[e.dimension] ?? "";
-    return { repo_id: REPO_ID, number: e.number, dimension: e.dimension, fingerprint: fingerprintOf(e.dimension, verdict === "na" ? "fail" : verdict, variant), ...(e.gateAccepted === true ? { gate_accepted: true } : {}) };
+    return { repo_id: REPO_ID, number: e.number, dimension: e.dimension, fingerprint: fingerprintOf(e.dimension, verdict === "na" ? "fail" : verdict, variant), ...(e.gateAccepted === true ? { gate_accepted: true, accepted_source: "human" } : {}) };
   });
   const plan = await seed(store, docOf("plan", "Closing plan", known.length > 0 ? { known_defects: known } : {}, "approved"));
   await seed(store, docOf("task", "Landed task", { plan_id: plan.id }, "archived", plan.id));

@@ -37,7 +37,7 @@ import {
   type MilestoneReview,
   type Result,
 } from "@lore/core";
-import { acceptedGatesOf } from "./gate-acceptance-service.js";
+import { acceptedGatesOf, type GateAcceptanceLog } from "./gate-acceptance-service.js";
 import type { IssueRead } from "./milestone-review-inputs.js";
 import { issueWriteLeaseKey, type ReviewLeases } from "./review-batch-lease.js";
 import { rootCauseOf } from "./root-cause-fingerprint.js";
@@ -128,13 +128,16 @@ export function closingFactsOf(planSlug: string, latest: ClosingReview): Partial
  * @returns the detachment, or a VALIDATION_ERROR naming the first issue that cannot be read (the close is refused)
  */
 export async function planKnownDefectDetachment(
-  plan: Pick<DocRecord, "slug" | "extra">,
+  plan: Pick<DocRecord, "id" | "slug" | "extra">,
   latest: ClosingReview,
   otherOpenPlans: readonly Pick<DocRecord, "slug" | "extra">[],
   reader: KnownDefectIssueReader | undefined,
+  acceptanceLog: GateAcceptanceLog | undefined,
 ): Promise<Result<KnownDefectDetachment, LoreError>> {
   const entries = readKnownDefects(plan.extra);
-  const split = partitionKnownDefectsAtClose(entries, closingFactsOf(plan.slug, latest), acceptedGatesOf(plan, latest));
+  const acceptedGates = await acceptedGatesOf(plan, latest, acceptanceLog);
+  if (!acceptedGates.ok) return acceptedGates;
+  const split = partitionKnownDefectsAtClose(entries, closingFactsOf(plan.slug, latest), acceptedGates.value);
   if (split.detached.length === 0) return ok({ kept: split.kept, detached: [] });
   const refuse = (message: string): LoreError => ({ code: "VALIDATION_ERROR", field: "gate:plan-close", message, rule: "BR-1510" });
   if (reader === undefined) {

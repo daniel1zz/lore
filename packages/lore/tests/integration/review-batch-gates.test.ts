@@ -197,7 +197,7 @@ function acceptGate(plan: WorldPlan, dimension: MilestoneDimension, issue: numbe
   const cites = verdict === "fail" ? [`src/${dimension}.ts`] : [`${dimension}:subject`];
   const cause = rootCauseOf({ plan: plan.slug, dimension, reason: `${dimension} ${String(verdict)}`, reference: "fixture", cites, reviewSlug: "fixture" });
   if (!cause.ok) throw new Error(JSON.stringify(cause.error));
-  extra["known_defects"] = [...existing, { repo_id: 1, number: issue, dimension, fingerprint: cause.value.fingerprint, gate_accepted: true }];
+  extra["known_defects"] = [...existing, { repo_id: 1, number: issue, dimension, fingerprint: cause.value.fingerprint, gate_accepted: true, accepted_source: "human" }];
 }
 
 describe("AC-AF-6 a failed or not-measured gate keeps the plan open", () => {
@@ -426,7 +426,7 @@ async function handWorld(verdicts: Partial<Record<MilestoneDimension, "fail" | "
     const verdict = verdicts[entry.dimension] ?? "fail";
     const cause = rootCauseOf({ plan: "p", dimension: entry.dimension, reason: "x", reference: "r", cites: handCites(entry.dimension, verdict, entry.causeVariant ?? ""), reviewSlug: "r" });
     if (!cause.ok) throw new Error(JSON.stringify(cause.error));
-    return { repo_id: HAND_REPO_ID, number: HAND_ISSUE, dimension: entry.dimension, fingerprint: cause.value.fingerprint, ...(entry.gateAccepted === true ? { gate_accepted: true } : {}) };
+    return { repo_id: HAND_REPO_ID, number: HAND_ISSUE, dimension: entry.dimension, fingerprint: cause.value.fingerprint, ...(entry.gateAccepted === true ? { gate_accepted: true, accepted_source: "human" } : {}) };
   });
   const plan = await seedDoc(store, handDoc("plan", "Hand plan", known.length > 0 ? { known_defects: known } : {}, "approved"));
   await seedDoc(store, handDoc("task", "Landed task", { plan_id: plan.id }, "archived", plan.id));

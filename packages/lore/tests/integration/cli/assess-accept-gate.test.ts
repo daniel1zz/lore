@@ -25,7 +25,7 @@ import type { GithubFilingContext, GithubUpstreamCfg } from "../../../src/adapte
 import { parseDecisionFlags } from "../../../src/adapters/cli/decision-flags.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { DecisionGate, type DecisionDraft } from "../../../src/service/decision-gate.js";
-import { GateAcceptanceService } from "../../../src/service/gate-acceptance-service.js";
+import { GateAcceptanceService, createGateAcceptanceLog } from "../../../src/service/gate-acceptance-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { IssueFilingService } from "../../../src/service/issue-filing-service.js";
 import { DecisionOutcomeService } from "../../../src/service/decision-outcome-service.js";
@@ -257,6 +257,10 @@ async function worldWith(
         filing: opts?.tracker === false ? undefined : new IssueFilingService(counting),
         writer: corpus,
         by: "t",
+        // reason: #538 — an agent's acceptance waits for a human; these AC-AF-7 tests are about the acceptance's content, so the writer is a human party (its direct call writes at once).
+        writerSource: "human",
+        decisions: undefined,
+        log: createGateAcceptanceLog(store),
       });
     },
     runBatch: async () => {
