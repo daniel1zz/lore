@@ -8,7 +8,7 @@
  *
  * AC-OL-1 (describe "per worktree"): throwaway repo with two REAL linked worktrees A and B; the lock is taken by the real
  * writer (`scripts/oracle-lock.ts`) for A; the real reader (`probeOccupancyForCheckout`) and the real executor run the verify
- * service. A run in B is stamped with B's head and writes no audit row; a run in A is skipped exactly as AC-CT-8 states; an
+ * service. A run in B is stamped with B's head and writes no audit row; a run in A is skipped exactly as the predecessor skip rule states; an
  * old-format lock (pid only) skips both; the writer records the holder's worktree and the reader returns it.
  * AC-OL-2 (describe "review names why"): the cause the real verify run reports travels through the real rerunner and the real
  * head-criteria runner into `measureCriteriaAtHead`, whose not-measured reason must name it.
@@ -182,7 +182,7 @@ const exitCodeOf = (run: ServiceRun): number => {
   if (r.some((x) => x.result === "inconclusive")) return 3;
   return r.some((x) => x.result === "fail") ? 1 : 0;
 };
-const withoutDuration = (run: ServiceRun) => run.result.results.map(({ duration_ms: _d, unbound_cause: _u, ...rest }) => rest);
+const withoutDuration = (run: ServiceRun) => run.result.results.map(({ duration_ms: _d, ...rest }) => rest);
 
 describe("AC-OL-1: occupancy is per worktree", () => {
   it("per worktree: a lock held from A leaves a run in B STAMPED with B's head and writes no skip row", async () => {
@@ -196,14 +196,14 @@ describe("AC-OL-1: occupancy is per worktree", () => {
     const att = inB.evidence[0]!.attestation!;
     expect(att.state_stamp, "stamped from B's own pre/post git state").toEqual({ head_sha: headB, worktree_dirty: false });
     expect(inB.result.warnings.filter((w) => w.includes("SKIPPED"))).toHaveLength(0);
-    expect(inB.result.results[0]!.unbound_cause, "a stamped run has no unbound cause").toBeUndefined();
+    expect(inB.result.unbound_causes, "a stamped run has no unbound cause").toBeUndefined();
   });
 
   for (const [label, command, expectedExit] of [
     ["passing oracle", "true", 0],
     ["failing oracle", "false", 1],
   ] as const) {
-    it(`per worktree: the SAME lock skips a run in A exactly as AC-CT-8 states (${label})`, async () => {
+    it(`per worktree: the SAME lock skips a run in A as the unscoped skip always did (${label})`, async () => {
       const { a, lockDir } = makeTwoWorktrees();
       const absent = await runService(a, a, command, false);
       expect(exitCodeOf(absent), "fixture: the check-absent control").toBe(expectedExit);

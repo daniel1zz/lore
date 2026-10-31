@@ -337,11 +337,6 @@ export interface VerifyPlanOpts {
 export interface VerifyAcResult {
   readonly ac_id: string;
   /**
-   * Why this run's row carries no `state_stamp` (BR-1512): `state_binding_skipped (...)` naming the lock holder's pid and
-   * worktree, `state_moved` or `dirty_tree`. Omitted when the row was stamped or git could not answer. In-memory only.
-   */
-  readonly unbound_cause?: string;
-  /**
    * `"inconclusive"` (SPEC-061 §Scope D3) is the attestation-completeness
    * guard's own verdict — set instead of `"pass"` when the command exited 0
    * but its declared test-file path arguments were not all matched by the
@@ -415,6 +410,12 @@ export interface VerifyPlanResult {
   readonly superseded: VerifySupersededAc[];
   /** Advisory notes (e.g. "parent spec not approved") — never affects `results`. */
   readonly warnings: string[];
+  /**
+   * Why a row of this run carries no `state_stamp` (BR-1512), one entry per such AC: `state_binding_skipped (...)` naming
+   * the lock holder's pid and worktree, `state_moved` or `dirty_tree`. Present only when some row is unstamped for a
+   * known cause. Kept off `results` because AC-CT-8 pins a skip to change no result field. In-memory only.
+   */
+  readonly unbound_causes?: ReadonlyArray<{ readonly ac_id: string; readonly cause: string }>;
 }
 
 // ─── Attested-Red Falsifier Runner (spec-falsifiability-reachability-a-
@@ -1103,6 +1104,7 @@ export class VerifyRunnerService {
     }
 
     const warnings: string[] = [];
+    const unboundCauses: { ac_id: string; cause: string }[] = [];
     if (spec.status !== "approved" && spec.status !== "active") {
       warnings.push(
         `Spec "${spec.slug}" is not approved/active (status: ${spec.status}) — ` +
@@ -1483,11 +1485,18 @@ export class VerifyRunnerService {
         ...(executedFiles !== undefined ? { executed_files: executedFiles } : {}),
         ...(declaredPaths !== undefined ? { declared_paths: declaredPaths } : {}),
         ...(binaryFreshness !== undefined ? { binary_freshness: binaryFreshness } : {}),
-        ...(unboundCause !== undefined ? { unbound_cause: unboundCause } : {}),
       });
+      if (unboundCause !== undefined) unboundCauses.push({ ac_id: criterion.id, cause: unboundCause });
     }
 
-    return ok({ task: { id: task.id, slug: task.slug }, results, skipped, superseded, warnings });
+    return ok({
+      task: { id: task.id, slug: task.slug },
+      results,
+      skipped,
+      superseded,
+      warnings,
+      ...(unboundCauses.length > 0 ? { unbound_causes: unboundCauses } : {}),
+    });
   }
 
   /**

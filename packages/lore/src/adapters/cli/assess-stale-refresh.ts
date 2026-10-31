@@ -147,10 +147,11 @@ export function createAppCriterionRerunner(
       if (!ran.ok) return ran;
       const row = ran.value.results.find((r) => r.ac_id === acId);
       if (row === undefined) return err({ code: "STORE_ERROR", message: `the runner reported no result for ${spec.slug} ${acId}` });
+      const unboundCause = ran.value.unbound_causes?.find((u) => u.ac_id === acId)?.cause;
       return ok({
         passed: row.result === "pass",
         detail: `${row.result} (exit ${String(row.exit_code)})`,
-        ...(row.unbound_cause !== undefined ? { unbound_cause: row.unbound_cause } : {}),
+        ...(unboundCause !== undefined ? { unbound_cause: unboundCause } : {}),
       });
     },
   };
