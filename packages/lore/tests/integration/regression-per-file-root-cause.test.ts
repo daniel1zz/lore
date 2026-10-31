@@ -129,7 +129,7 @@ interface World {
   /** Issue numbers open on GitHub. */
   readonly openIssues: Set<number>;
   reload(): Promise<DocRecord>;
-  close(): Promise<ReturnType<CorpusService["set"]>>;
+  close(): ReturnType<CorpusService["set"]>;
   accept(file: string): Promise<number>;
   latest(): Promise<{ doc: DocRecord; review: MilestoneReview }>;
   service(tracker: FakeTracker, writerSource?: string): GateAcceptanceService;
