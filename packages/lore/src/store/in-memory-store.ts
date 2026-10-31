@@ -1867,10 +1867,6 @@ export class InMemoryStore implements StoreInterface {
     return ok(this.leases.get(name) ?? null);
   }
 
-  async listLeases(prefix: string): Promise<Result<LeaseRecord[], LoreError>> {
-    return ok([...this.leases.values()].filter((row) => row.name.startsWith(prefix)).sort((a, b) => a.name.localeCompare(b.name)));
-  }
-
   async listReadCounts(sinceDay: string): Promise<Result<ReadDayCount[], LoreError>> {
     const rows = [...this.readCounts.entries()]
       .filter(([day]) => day >= sinceDay)

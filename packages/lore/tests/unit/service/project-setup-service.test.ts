@@ -1,3 +1,4 @@
+// @spawns-external git the setup service's git probes run through a real exec port, and the test builds a repository
 // @reads assets/project/**
 // @reads packages/lore/src/flows/setup-project-flow.ts
 // @reads packages/lore/src/service/project-setup-service.ts

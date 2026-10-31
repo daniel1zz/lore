@@ -1,3 +1,4 @@
+// @spawns dist/lore -- the turn-review harness runs `lore` from PATH
 // @spawns assets/hooks/stop-turn-review.mjs
 // @spawns assets/hooks/user-prompt-turn-start.mjs
 // @spawns assets/hooks/post-edit-mark.mjs

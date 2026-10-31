@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * AC-FS-1 / BR-1508: the reviewer reads each changed file's FINAL state in the plan, not the plan's intermediate landings.
  * Throwaway git repo; no corpus. The per-file net diff runs from the earliest touching landing's main_before to the main

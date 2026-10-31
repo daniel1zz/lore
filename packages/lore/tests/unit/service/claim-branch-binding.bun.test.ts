@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * AC-OWN-2 (spec-multi-session-concurrency-queryable-ownership-checkout) —
  * `TaskWorkflowService.claim` AUTO-CAPTURES `claim.branch` from the caller's

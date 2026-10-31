@@ -1,4 +1,8 @@
 // @reads assets/**
+// @spawns packages/lore/src/index.ts -- the main-guard fixture runs the lore entry point as a child process
+// @spawns-external git builds a throwaway git repository the test runs against
+// @spawns-external sh the main-guard fixture resolves the real git path through sh
+// @spawns-external sleep a process that keeps a worktree busy
 /**
  * worktree-check-sweep-compiled.bun.test.ts — AC-WS-2 (spec-one-worktree-removal-test-for-the-guard-lore-done-and-a;
  * D1, D2, D4, D5; BR-1070, BR-1079).

@@ -1,3 +1,4 @@
+// @spawns-external sh runs the floor runner's `sh -c <command>` shape with an ambient environment that names no run
 /**
  * @spec_ref spec-a-lore-call-s-run-identity-is-injected-per-bash-call-and#AC-RV-11
  * @task task-red-tests-export-prefix-ancestry-verification-refusal (RED; implementation lands in a later task of the same plan)

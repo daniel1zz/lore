@@ -1,3 +1,4 @@
+// @spawns-external bun runs `bun run typecheck:dashboard-tests` (the package.json script under test)
 // @reads packages/dashboard/src/routeTree.gen.ts
 /** @spec_ref AC-TC-3 */
 /**

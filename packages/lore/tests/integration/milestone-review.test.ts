@@ -157,8 +157,49 @@ function close(plan: string): RunResult {
  */
 function closeAccepted(plan: string): RunResult {
   configureGithubUpstream();
-  for (const dimension of ["regression", "security"]) runLore(["assess", plan, "--accept-gate", dimension, ...DECIDED_FLAGS], tmpDir);
+  for (const dimension of ["regression", "security"]) acceptGateWithHumanAnswer(plan, dimension);
   return close(plan);
+}
+
+/** The environment of every spawn of this suite (the agent run `agent:milestone-review-test`). */
+function spawnEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, HOME: FIXTURE_HOME_OUTSIDE_REPO, CLAUDECODE: "1", LORE_ACTOR: "agent:milestone-review-test", ...extraEnv };
+}
+
+/**
+ * `--accept-gate` as an agent run does it (#538): the call creates a pending human decision (exit 4), the human answers Accept
+ * through the in-session route (`lore pending --ask` writes the question, `lore decide --from-harness` records the answer, as
+ * the shipped PostToolUse hook does), and the SAME call is re-run, which then reports the gate accepted. A refusal that opens no
+ * pending decision (nothing to accept) is returned as is.
+ */
+function acceptGateWithHumanAnswer(plan: string, dimension: string): RunResult {
+  const acceptArgs = ["assess", plan, "--accept-gate", dimension, ...DECIDED_FLAGS];
+  const first = runLore(acceptArgs, tmpDir);
+  const pendingId = Number(/pending decision (\d+)/.exec(first.stderr)?.[1]);
+  if (first.exitCode !== 4 || !(pendingId > 0)) return first;
+  acceptGateWithHumanAnswerOf(pendingId);
+  return runLore(acceptArgs, tmpDir);
+}
+
+/** The human's Accept for pending decision `pendingId`, recorded through the in-session route; `true` when recorded. */
+function acceptGateWithHumanAnswerOf(pendingId: number): boolean {
+  const asked = runLore(["pending", "--ask"], tmpDir);
+  const { questions, decision_ids: ids } = (JSON.parse(asked.stdout) as { data: { questions: { question: string }[]; decision_ids: number[] } }).data;
+  const question = questions[ids.indexOf(pendingId)];
+  if (question === undefined) throw new Error(`no ask question for decision ${String(pendingId)}: ${asked.stdout}`);
+  const payload = {
+    session_id: "sess-milestone-review",
+    cwd: tmpDir,
+    permission_mode: "default",
+    hook_event_name: "PostToolUse",
+    tool_name: "AskUserQuestion",
+    tool_input: { questions },
+    tool_response: { questions, answers: { [question.question]: "Accept" }, annotations: {} },
+    tool_use_id: "toolu_milestone_review",
+  };
+  const answered = spawnSync("bun", ["run", INDEX_TS, "decide", "--from-harness"], { cwd: tmpDir, input: JSON.stringify(payload), encoding: "utf8", env: spawnEnv() });
+  if (answered.status !== 0) throw new Error(`the human answer was not recorded: ${answered.stderr}`);
+  return true;
 }
 
 /**
@@ -469,13 +510,19 @@ describe("milestone review gates close", () => {
     configureGithubUpstream();
     // reason: the call used to be dropped from the batch test for hanging until the test timeout (BR-1500 follow-up); a
     // spawn that outlives the bound is killed by spawnSync and reports status null, so a hang fails here in seconds, not minutes.
+    const acceptArgs = ["run", INDEX_TS, "assess", bad.plan, "--accept-gate", "regression", ...DECIDED_FLAGS];
+    const bounded = () => spawnSync("bun", acceptArgs, { cwd: tmpDir, encoding: "utf8", timeout: ACCEPT_GATE_BOUND_MS, env: spawnEnv() });
+    // #538: an agent's call first creates a pending human decision (exit 4, nothing accepted); only after the human answered
+    // Accept does the SAME call report the gate accepted (exit 0). Both calls are bounded.
+    const pending = bounded();
+    expect(pending.signal, `accept-gate did not finish within ${ACCEPT_GATE_BOUND_MS} ms`).toBeNull();
+    expect(pending.status, pending.stderr).toBe(4);
+    expect(pending.stderr).toContain("lore pending --ask");
+    expect(pending.stdout).not.toContain("Accepted gate");
+    const answered = acceptGateWithHumanAnswerOf(Number(/pending decision (\d+)/.exec(pending.stderr)?.[1]));
+    expect(answered, "the human answer was recorded").toBe(true);
     const started = Date.now();
-    const proc = spawnSync("bun", ["run", INDEX_TS, "assess", bad.plan, "--accept-gate", "regression", ...DECIDED_FLAGS], {
-      cwd: tmpDir,
-      encoding: "utf8",
-      timeout: ACCEPT_GATE_BOUND_MS,
-      env: { ...process.env, HOME: FIXTURE_HOME_OUTSIDE_REPO, CLAUDECODE: "1", LORE_ACTOR: "agent:milestone-review-test", ...extraEnv },
-    });
+    const proc = bounded();
     expect(proc.signal, `accept-gate did not finish within ${ACCEPT_GATE_BOUND_MS} ms`).toBeNull();
     expect(proc.status, proc.stderr).toBe(0);
     expect(proc.stdout).toContain("Accepted gate regression");

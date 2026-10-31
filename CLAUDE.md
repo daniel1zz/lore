@@ -20,6 +20,7 @@ The command table (name, command, description) is generated below from `package.
 
 - ⛔ `test:changed` under- AND over-selects: hand-pick consumers, re-verify on main.
 - One runner, vitest: `bun run test:bun` is retired (prints a notice, exits 1). Run a single file with `bun run test:file <path>`.
+- Task flow: `lore start <task>`, `lore finish --red`, `lore finish`, `lore land <task>`; `lore dispatch <task>` prints a subagent prompt from the contract compiled at `lore approve`.
 - ⛔ Never write to the repo's own `.lore/` from tests or smoke checks — use a throwaway corpus (`mkdtemp` + `lore init`). ⛔ Never assume a server on port 8787 is yours.
 - Pre-push gate: its checks and their order live in `hooks/pre-push`, never here. ⛔ Every merge to main is followed by `bun run build` (a `dist/lore` older than HEAD is refused), after the batch's last agent returns. After clone: `git config core.hooksPath hooks`.
 

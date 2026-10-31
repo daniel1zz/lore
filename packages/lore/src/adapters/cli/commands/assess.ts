@@ -26,9 +26,10 @@
  * AI default (SPEC-026 §3 D5): assess has no non-AI mode. It runs with AI on every surface by default; only an
  * EXPLICIT `ai.default_per_surface.<surface> = false` config override requires `--ai`. `--no-ai` is always exit 2.
  *
- * Inputs measured once per batch (Part D): before the first review `assess` runs `bun run check:plan-close` and
- * `bun run test` ONCE on main's HEAD in a throwaway worktree (`assess-suite-runner.ts`) and hands that one result to
- * every plan's regression dimension. `--file-issues` then files the failed findings BY ROOT CAUSE (BR-1379): one GitHub
+ * Inputs measured once per batch (Part D): before the first review `assess` does the head-bound work (stale cited-rule
+ * refresh, plan criteria) once in a throwaway worktree of main's HEAD (`assess-suite-runner.ts`). No review runs the full suite:
+ * each plan's regression runs the selector's tests for its own changed paths at the commit holding its last landing
+ * (`assess-selection.ts`, `regression-at-head.ts`). `--file-issues` then files the failed findings BY ROOT CAUSE (BR-1379): one GitHub
  * issue per fingerprint (title `<dimension>: <cause> [fp:<12 hex>]`, full fingerprint in the body), an open issue with
  * the fingerprint is linked instead of duplicated, and each issue is linked to every plan sharing it
  * (`IssueFilingService` over `assess-file-issues.ts`); plan close accepts a failing review when every failed dimension
@@ -61,7 +62,7 @@ import { DecisionGate } from "../../../service/decision-gate.js";
 import { SpawnDecisionGitPort } from "../../../service/decision-git-port.js";
 import { GateAcceptanceService } from "../../../service/gate-acceptance-service.js";
 import type { App } from "../../../app.js";
-import { buildBatchRunPorts, createAssessFiling, createAssessWiring, createBatchRunner, type AssessWiring } from "../assess-batch-wiring.js";
+import { buildBatchRunPorts, gateAcceptanceLogOf, createAssessFiling, createAssessWiring, createBatchRunner, type AssessWiring } from "../assess-batch-wiring.js";
 import { buildPlanCloseService, closeFlowOf } from "../plan-close-wiring.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
 import { invocationOf } from "../command-invocation.js";
@@ -132,7 +133,7 @@ export default defineLoreCommand({
     "accept-gate": {
       type: "string",
       description:
-        "Accept one failed or not-measured gate (regression | security) of the plan's current review as a known defect so the plan can close; needs --reason, --premise and --alt. correctness_vs_acs cannot be accepted: use `lore ac supersede`",
+        "Accept one failed or not-measured gate (regression | security) of the plan's current review as a known defect so the plan can close; needs --reason, --premise and --alt. An agent run's call only creates a pending human decision (answer it with `lore pending --ask`, then re-run the same command); a human party accepts at once. correctness_vs_acs cannot be accepted: use `lore ac supersede`",
     },
     ...DECISION_FLAG_ARGS,
     json: { type: "boolean", description: "Output the rows as JSON" },
@@ -423,13 +424,16 @@ async function runAcceptGate(context: Parameters<typeof invocationOf>[0], positi
       filing,
       writer: app.corpusService,
       by: actor,
+      writerSource: inv.identity.claimedSource,
+      decisions: app.decisionReadService,
+      log: gateAcceptanceLogOf(app),
     });
     const accepted = await service.acceptGate(positionals[0] ?? "", String(args["accept-gate"]), draft.value);
     if (!accepted.ok) {
       inv.io.stderr.write(formatErrorFor(inv, accepted.error) + "\n");
       return exitCode(accepted.error);
     }
-    const line = `Accepted gate ${accepted.value.dimension} of plan ${accepted.value.plan} as a known defect (issue #${String(accepted.value.issue)}, review ${accepted.value.review}); the next \`lore assess --where needs-review --close\` may archive it.`;
+    const line = `Accepted gate ${accepted.value.dimension} of plan ${accepted.value.plan} (human decision record ${String(accepted.value.decision_record)}, issue #${String(accepted.value.issue)}, review ${accepted.value.review}); the next \`lore assess --where needs-review --close\` may archive it.`;
     if (args.json === true) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: accepted.value }, null, 2));
     else printLine(inv.io.stdout, line);
     return 0;

@@ -1,4 +1,5 @@
-// @spawns packages/lore/src/index.ts
+// @spawns packages/lore/src/index.ts -- the claim-run fixture runs the lore entry point as a child process
+// @spawns-external git the run-end fixture builds a git repository
 /**
  * Claim conflict, the `lore done` holder check and the `lore ready` overlap test identify the holder by RUN.
  *

@@ -1,3 +1,4 @@
+// @spawns-external ps reads this test process's own start time (declared once here: every test that reaches this helper inherits it)
 /**
  * Test identity: gives a test's `lore` run a KNOWN PARTY, the way an installed agent integration does, now that a
  * write with no attested run and no human session is refused (spec-every-write-is-made-by-a-known-party-an-attested-agent-run,

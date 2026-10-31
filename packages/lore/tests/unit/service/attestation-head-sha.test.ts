@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * [C5t] RED — runner-issued attestations record `head_sha` and `worktree_dirty`
  * (baseline slice 1 §C5, covers AC-BLS1-4's "unknown when head_sha is absent / dirty").

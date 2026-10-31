@@ -1,3 +1,5 @@
+// @spawns-external git asks `git check-ignore` whether the scratch namespace is ignored
+// @spawns-external tsc type-checks a throwaway fixture project
 // @reads package.json
 // @reads packages/**
 // @reads tsconfig.json

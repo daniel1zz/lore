@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 // @reads assets/project/lore-config-template.yaml
 // @reads assets/governance/write-spec-rule.md
 /**

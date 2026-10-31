@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * @spec_ref spec-a-decision-carrying-write-records-its-decision-on-its
  * @ac_ref AC-DR-7

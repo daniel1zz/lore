@@ -1,3 +1,4 @@
+// @spawns-external git commits the miniature checkout (declared once here: every test that reaches this helper inherits it)
 /**
  * Test helper: a throwaway lore source checkout in miniature plus a baseline corpus over it, for the root-coverage
  * tests (AC-BCR-2..4). The checkout holds a CLI command registry (`COMMAND_LOADERS`) with two commands, `alpha` and

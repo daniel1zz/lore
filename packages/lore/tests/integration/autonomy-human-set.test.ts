@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * AC-LG-8 oracle — only three classes wait for a human (BR-1370).
  *

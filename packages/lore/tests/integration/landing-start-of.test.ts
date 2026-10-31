@@ -1,3 +1,4 @@
+// @spawns-external git builds the real throwaway git repositories the test runs against
 /**
  * landing-start-of.test.ts: `createGitFacts(cwd).landingStartOf` over real throwaway git repositories.
  *

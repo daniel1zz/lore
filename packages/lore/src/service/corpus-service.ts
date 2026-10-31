@@ -7,7 +7,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { ulid } from "ulidx";
 import { isContentChange, buildStateChange, type ContentComparableRow, type StateChange } from "@lore/core";
-import { err, ok, DEDICATED_EXTRA_KEYS, isGateDimension, issueRefSchema, judgeKnownDefectsExtra, readKnownDefects, MAX_ISSUE_REFS_PER_CARRIER, type KnownDefectEntry, type Result } from "@lore/core";
+import { err, ok, DEDICATED_EXTRA_KEYS, isGateDimension, issueRefSchema, judgeKnownDefectsExtra, readKnownDefects, MAX_ISSUE_REFS_PER_CARRIER, type GateDimension, type KnownDefectEntry, type Result } from "@lore/core";
 import { admitAcWrite, applyAcChange } from "./ac-write-chokepoint.js";
 import type { LoreError } from "@lore/core";
 // reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
@@ -99,7 +99,7 @@ import type { TreeBlueprint } from "@lore/core";
 import { findTraceActorFor, findWriteSourceFor, resolveWriteActorFor, WriteActorUnresolvedError } from "../store/write-context-store.js";
 import { writeCarriesDecision, type DecisionDraft, type DecisionGate } from "./decision-gate.js";
 import { pendingRevisionsOf } from "./baseline-items.js";
-import { acceptedGatesOf } from "./gate-acceptance-service.js";
+import { acceptedGatesOf, createGateAcceptanceLog } from "./gate-acceptance-service.js";
 import {
   KNOWN_DEFECT_ISSUE_WRITES_AUDIT_ACTION,
   carryOutIssueWrites,
@@ -1441,9 +1441,10 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // reason: BR-1379/BR-1500 — a failed or not-measured gate is not covered by an open issue; only an acceptance
     // bound to this failure's root cause lets it close, on the hand-close path exactly as in the review batch.
     const latest = selectLatestMilestoneReview(reviewDocs);
-    const unacceptedGates = currency.failed.filter(
-      (dimension) => isGateDimension(dimension) && (latest === undefined || !acceptedGatesOf(plan, latest).includes(dimension)),
-    );
+    // reason: #538 — only an acceptance backed by a human counts (`acceptedGatesOf` is the one predicate, it reads the decision log).
+    const acceptedGates = latest === undefined ? ok<GateDimension[]>([]) : await acceptedGatesOf(plan, latest, createGateAcceptanceLog(this.store));
+    if (!acceptedGates.ok) return acceptedGates;
+    const unacceptedGates = currency.failed.filter((dimension) => isGateDimension(dimension) && !acceptedGates.value.includes(dimension));
     if (unacceptedGates.length > 0) {
       return err({
         code: "VALIDATION_ERROR",
@@ -3916,7 +3917,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       if (closingReview !== undefined) {
         const others = await this.listOtherOpenPlans(existing.id);
         if (!others.ok) return others;
-        const planned = await planKnownDefectDetachment({ slug: existing.slug, extra: effectiveExtra }, closingReview, others.value, this.planCloseIssuePort);
+        const planned = await planKnownDefectDetachment({ id: existing.id, slug: existing.slug, extra: effectiveExtra }, closingReview, others.value, this.planCloseIssuePort, createGateAcceptanceLog(this.store));
         if (!planned.ok) return planned;
         if (planned.value.detached.length > 0) {
           detachment = { plan: planned.value, reviewSlug: closingReview.doc.slug };

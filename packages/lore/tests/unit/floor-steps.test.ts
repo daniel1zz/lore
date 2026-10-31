@@ -27,7 +27,7 @@ import { deriveFloorSteps, derivePlanCloseSteps, FLOOR_STEPS, PLAN_CLOSE_STEPS, 
 
 const ROOT = join(__dirname, "..", "..", "..", "..");
 const scripts = (JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { scripts: Record<string, string> }).scripts;
-const FLOOR = ["install", "build", "typecheck", "baseline-coverage:changed", "ac-oracle-ownership:changed"];
+const FLOOR = ["install", "build", "typecheck", "baseline-coverage:changed", "ac-oracle-ownership:changed", "test-spawns:changed"];
 
 function list(flag: string): { status: number | null; lines: string[] } {
   const r = spawnSync("bun", ["scripts/run-chain.ts", flag, "--list"], { cwd: ROOT, encoding: "utf8" });
@@ -81,7 +81,7 @@ describe("lean floor (AC-LG-5)", () => {
   });
 
   it("lean floor: the floor runs install/build/typecheck and the two :changed scripts, no other check: script", () => {
-    expect(deriveFloorSteps(scripts)).toEqual(["bun install --frozen-lockfile", "bun run build", "bun run typecheck", "bun run check:baseline-coverage:changed", "bun run check:ac-oracle-ownership:changed"]);
+    expect(deriveFloorSteps(scripts)).toEqual(["bun install --frozen-lockfile", "bun run build", "bun run typecheck", "bun run check:baseline-coverage:changed", "bun run check:ac-oracle-ownership:changed", "bun run check:test-spawns:changed"]);
     const { "check:ac-oracle-ownership:changed": _dropped, ...without } = scripts;
     expect(() => deriveFloorSteps(without)).toThrow(/check:ac-oracle-ownership:changed/);
   });

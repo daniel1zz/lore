@@ -107,7 +107,7 @@ export interface HumanChannelProof {
   readonly [humanChannelProofBrand]: true;
   readonly channel: "human-tty";
   /** How the human answered: at a terminal (`terminal`) or in the agent session through the harness (`harness-ask`, BR-1374). */
-  readonly via: "terminal" | "harness-ask";
+  readonly via: "terminal" | "harness-ask" | "human-party";
   readonly ancestry: readonly AncestrySnapshotEntry[];
   readonly verified_at: string;
 }
@@ -271,6 +271,20 @@ export function confirmHumanNonce(
  */
 export function issueHarnessAskProof(verifiedAt: string): HumanChannelProof {
   const proof = { channel: "human-tty" as const, via: "harness-ask" as const, ancestry: [], verified_at: verifiedAt } as unknown as HumanChannelProof;
+  issuedProofs.add(proof);
+  return proof;
+}
+
+/**
+ * The proof for a call made BY a human party itself (a human session, a dashboard login or an api key), where the invocation
+ * identity already established that no agent run is the caller (BR-1055): the party's own direct command is its answer, so
+ * there is no pending question to hand back.
+ *
+ * ⛔ Call ONLY when `inv.identity.claimedSource` is `human`, `dashboard` or `api-key`; never for a `run`. Today's only caller
+ * is `GateAcceptanceService` (a human party's `--accept-gate`, spec-an-agent-s-gate-acceptance-waits-for-a-human-decision).
+ */
+export function issueHumanPartyProof(verifiedAt: string): HumanChannelProof {
+  const proof = { channel: "human-tty" as const, via: "human-party" as const, ancestry: [], verified_at: verifiedAt } as unknown as HumanChannelProof;
   issuedProofs.add(proof);
   return proof;
 }

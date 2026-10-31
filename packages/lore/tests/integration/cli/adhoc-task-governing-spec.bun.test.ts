@@ -1,4 +1,5 @@
 // @reads assets/project/lore-config-template.yaml
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * AC-PAR-3 — an ad-hoc task with a non-empty criteria scope records its governing spec, and every reader of its
  * criteria resolves through that record (BR-118, BR-156, BR-1494, BR-1495; issue #496).

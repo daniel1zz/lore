@@ -28,6 +28,7 @@ import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/ser
 import { coverFailedDimensions } from "../../src/service/milestone-review-inputs.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint } from "../../src/service/milestone-review.js";
 import { ReviewLeases, planLeaseKey } from "../../src/service/review-batch-lease.js";
+import { noDecisionLog } from "../helpers/gate-acceptance-log.js";
 import { ReviewBatchRunner, ReviewTriggerService, type BatchErrorRecord, type BatchRunPorts } from "../../src/service/review-batch-service.js";
 import type { MilestoneReviewResult } from "../../src/service/milestone-review-service.js";
 
@@ -103,6 +104,7 @@ class World {
     return new ReviewBatchRunner({
       getPlanBundle: async () => ok(this.bundle()),
       listReviewDocs: async () => ok(this.docs),
+      acceptanceLog: noDecisionLog(),
       issueCoverage: async (_planId, failed) => {
         const entries = this.issues.links.flatMap((l) => l.dimensions.map((dimension) => ({ number: l.issue, dimension, state: "open" as const })));
         return ok(coverFailedDimensions(failed, entries));

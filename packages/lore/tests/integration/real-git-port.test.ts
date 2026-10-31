@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the real git port runs against
 /**
  * real-git-port.test.ts — SPEC-057 AC-S-6.
  *

@@ -17,7 +17,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureRequirementsDocSlugViaEntry } from "../../packages/lore/tests/helpers/parented-create.js";
+import { ensureRequirementsDocSlugViaEntry } from "../../packages/lore/tests/helpers/parented-create-via-entry.js";
 import { MIRROR_DRIFT_EXIT_CODE } from "../export-spec-mirror-core.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));

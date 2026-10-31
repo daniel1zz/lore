@@ -1,4 +1,7 @@
 // @reads assets/project/reference-transaction
+// @spawns packages/lore/src/index.ts -- the main-guard fixture runs the lore entry point as a child process
+// @spawns-external git builds a throwaway git repository the test runs against
+// @spawns-external sh the main-guard fixture resolves the real git path through sh
 /**
  * The landing lookup matches what `lore integrate` actually writes: the merge commit is named by the BRANCH
  * (`merge(<branch>)`), while a claim from a linked worktree records the worktree PATH. Both `recordLanding`

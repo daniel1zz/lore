@@ -1,3 +1,5 @@
+// @spawns-external tsc type-checks a throwaway fixture project
+// @spawns-external bunx generates the dashboard route tree (`@tanstack/router-cli generate`)
 // @reads packages/dashboard/src/components/IssueDetail.tsx
 // @reads packages/dashboard/src/components/IssuesList.tsx
 // @reads packages/dashboard/src/routeTree.gen.ts

@@ -1,3 +1,6 @@
+// @spawns packages/lore/src/index.ts -- the main-guard fixture runs the lore entry point as a child process
+// @spawns-external git builds a throwaway git repository the test runs against
+// @spawns-external sh the main-guard fixture resolves the real git path through sh
 /**
  * @reads packages/lore/src/adapters/cli/commands
  * @reads packages/lore/src/adapters/cli/commands/*.ts
@@ -44,6 +47,7 @@ import { ReviewLeases, planLeaseKey, REVIEW_LEASE_EXPIRY_MS, REVIEW_LEASE_RENEW_
 
 /** A plan key the lease-mechanics tests use (the corpus-wide `review-batch` lease is retired, BR-1511). */
 const RENEW_KEY = planLeaseKey("p-lease-mechanics");
+import { noDecisionLog } from "../helpers/gate-acceptance-log.js";
 import { ReviewBatchRunner, ReviewTriggerService, type BatchErrorRecord, type BatchRunPorts, type ReviewTriggerDeps } from "../../src/service/review-batch-service.js";
 import type { MilestoneReviewResult } from "../../src/service/milestone-review-service.js";
 import { CheckStatsService } from "../../src/service/check-stats-service.js";
@@ -666,7 +670,7 @@ class World {
   }
 
   runner(): ReviewBatchRunner {
-    return new ReviewBatchRunner({ getPlanBundle: async (ref) => ok(this.find(ref).bundle), listReviewDocs: async (planId) => ok(this.find(planId).docs), issueCoverage: (planId, failed) => this.coverage(planId, failed) });
+    return new ReviewBatchRunner({ getPlanBundle: async (ref) => ok(this.find(ref).bundle), listReviewDocs: async (planId) => ok(this.find(planId).docs), issueCoverage: (planId, failed) => this.coverage(planId, failed), acceptanceLog: noDecisionLog() });
   }
 
   ports(holder: string, overrides: Partial<BatchRunPorts> = {}): BatchRunPorts {

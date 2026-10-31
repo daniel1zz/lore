@@ -1,3 +1,5 @@
+// @spawns-external git builds the fixture repository and its linked worktree
+// @spawns-external bun runs `bun run` / `bun test` and the vitest and tsc entry points from the worktree
 // @reads packages/core/src/index.ts
 // @reads packages/core/src/node.ts
 // @reads packages/dashboard/vite.config.ts
