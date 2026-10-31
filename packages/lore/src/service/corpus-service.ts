@@ -20,6 +20,8 @@ import {
   adrExtraSchema,
   templateDocumentExtraSchema,
   templatesEqual,
+  parseTemplateRef,
+  validationError,
   canonicaliseBody,
   createDocInputSchema,
   deriveTypeMeta,
@@ -96,7 +98,8 @@ import type {
 } from "../store/store-interface.js";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent } from "@lore/core";
 import type { PlanBundle } from "@lore/core";
-import type { ReviewBundle } from "@lore/core";
+import type { ReviewBundle, ReviewTemplateContext } from "@lore/core";
+import { documentKindOf } from "./template-service.js";
 import type { TreeBlueprint } from "@lore/core";
 import { findTraceActorFor, findWriteSourceFor, resolveWriteActorFor, WriteActorUnresolvedError } from "../store/write-context-store.js";
 import { writeCarriesDecision, type DecisionDraft, type DecisionGate } from "./decision-gate.js";
@@ -5854,12 +5857,49 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       }
     }
 
+    const templateContext = await this.resolveReviewTemplateContext(doc);
+    if (!templateContext.ok) return templateContext;
+
     return ok({
       doc,
       ...(parent !== undefined ? { parent } : {}),
       links,
       ...(brokenLinkTargets.length > 0 ? { brokenLinkTargets } : {}),
       ...(blueprint !== undefined ? { blueprint } : {}),
+      ...(templateContext.value !== undefined ? { template: templateContext.value } : {}),
+    });
+  }
+
+  /**
+   * The template a templated document is judged against (prompt v9): its PINNED approved version plus the proposals open
+   * against that template. `undefined` for a legacy document (no `extra.template_ref`), which keeps prompt v8.
+   *
+   * @returns the context, `undefined` for a legacy document, or the refusal when the pin cannot be resolved (a templated
+   *   document is never silently judged as a legacy one) or no template reader is wired
+   */
+  private async resolveReviewTemplateContext(doc: DocRecord): Promise<Result<ReviewTemplateContext | undefined, LoreError>> {
+    const ref: unknown = doc.extra["template_ref"];
+    if (typeof ref !== "string") return ok(undefined);
+    const parsedRef = parseTemplateRef(ref);
+    if (this.structuredWrite === undefined || parsedRef === undefined) {
+      return err(
+        validationError(
+          "extra.template_ref",
+          `${doc.slug} is pinned to template "${ref}" but no template reader is available to judge it per dimension`,
+          ref,
+        ),
+      );
+    }
+    const template = await this.structuredWrite.templates.resolvePinned(ref);
+    if (!template.ok) return template;
+    const pending = await this.store.findPendingTemplateRevision(parsedRef.slug);
+    if (!pending.ok) return pending;
+    const kind = documentKindOf(doc);
+    return ok({
+      ref,
+      template: template.value,
+      ...(kind !== undefined ? { kind } : {}),
+      pendingProposals: (pending.value?.proposals ?? []).map((proposal) => ({ id: proposal.id, question: proposal.question, count: proposal.count })),
     });
   }
 

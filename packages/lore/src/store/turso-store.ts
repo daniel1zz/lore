@@ -49,6 +49,7 @@ import { MIGRATION_043_SQL } from "./migrations/migration-043.js";
 import { MIGRATION_044_SQL } from "./migrations/migration-044.js";
 import { MIGRATION_045_SQL } from "./migrations/migration-045.js";
 import { MIGRATION_046_SQL } from "./migrations/migration-046.js";
+import { MIGRATION_048_ADD_COLUMNS, MIGRATION_048_SQL } from "./migrations/migration-048.js";
 import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migration-017.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
@@ -128,7 +129,7 @@ import {
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey, DecisionVersionQuery } from "./store-interface.js";
-import type { DecisionRecord, RuleIdPrefix } from "@lore/core";
+import type { DecisionRecord, TemplateDimensionVerdict, ProposalDecision, RuleIdPrefix, TemplateRevision } from "@lore/core";
 import { listedRuleLifecycle } from "./index-rows.js";
 import type {
   AuditEntry,
@@ -226,6 +227,10 @@ import {
   type DocRow,
   type FtsRow,
   type JudgmentRow,
+  assembleTemplateRevisions,
+  type TemplateProposalFindingRow,
+  type TemplateProposalRow,
+  type TemplateRevisionRow,
   type LinkRow,
   type VersionRow,
   INSERT_RUN_SQL,
@@ -584,6 +589,8 @@ function libsqlRowToJudgmentRow(row: Row): JudgmentRow {
     superseded_candidate: rowStrOrNull(row, "superseded_candidate"),
     truncated: row["truncated"] === null || row["truncated"] === undefined ? null : Number(row["truncated"]),
     truncation: rowStrOrNull(row, "truncation"),
+    template_ref: rowStrOrNull(row, "template_ref"),
+    missing_dimensions: rowStrOrNull(row, "missing_dimensions"),
     created_at: rowStr(row, "created_at"),
     created_by: rowStr(row, "created_by"),
   };
@@ -1299,6 +1306,16 @@ export class TursoStore implements StoreInterface {
         // reason: migration-046 widens docs.type to accept 'template' (a `docs` table-recreate, same shape as
         // migration-013, applied the same way); idempotent on re-run (DROP TABLE IF EXISTS docs_new first).
         await this.client.executeMultiple(MIGRATION_046_SQL);
+      }
+
+      if (currentVersion < 48) {
+        // reason: migration-048 is two-phase like 019: nullable review_judgments columns where missing, then the per-dimension verdict and
+        // template revision/proposal tables plus the version bump in one BEGIN/COMMIT string.
+        for (const { table, column, ddl } of MIGRATION_048_ADD_COLUMNS) {
+          const info = await this.client.execute(`PRAGMA table_info(${table})`);
+          if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
+        }
+        await this.client.executeMultiple(MIGRATION_048_SQL);
       }
     })();
 
@@ -4894,33 +4911,239 @@ export class TursoStore implements StoreInterface {
   async insertJudgment(judgment: ReviewJudgment): Promise<Result<void, LoreError>> {
     try {
       await this.ensureReady();
-      await this.client.execute({
-        sql: `INSERT INTO review_judgments
+      // reason: one batch (implicit transaction): the judgment row and its per-dimension rows land together or not at all.
+      await this.client.batch(
+        [
+          {
+            sql: `INSERT INTO review_judgments
                (id, doc_id, doc_version, decision, confidence, reasons, checks,
                 blocking_questions, judge_provider, judge_model, judge_prompt_version,
-                kind, superseded_candidate, truncated, truncation, created_at, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [
-          judgment.id,
-          judgment.doc_id,
-          judgment.doc_version,
-          judgment.decision,
-          judgment.confidence,
-          JSON.stringify(judgment.reasons),
-          JSON.stringify(judgment.checks),
-          JSON.stringify(judgment.blocking_questions),
-          judgment.judge.provider,
-          judgment.judge.model,
-          judgment.judge.prompt_version,
-          judgment.kind ?? "review",
-          judgment.superseded_candidate !== undefined ? JSON.stringify(judgment.superseded_candidate) : null,
-          judgment.truncated === true ? 1 : null,
-          judgment.truncation !== undefined ? JSON.stringify(judgment.truncation) : null,
-          judgment.created_at,
-          judgment.created_by,
-        ] as InValue[],
+                kind, superseded_candidate, truncated, truncation, template_ref, missing_dimensions, created_at, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [
+              judgment.id,
+              judgment.doc_id,
+              judgment.doc_version,
+              judgment.decision,
+              judgment.confidence,
+              JSON.stringify(judgment.reasons),
+              JSON.stringify(judgment.checks),
+              JSON.stringify(judgment.blocking_questions),
+              judgment.judge.provider,
+              judgment.judge.model,
+              judgment.judge.prompt_version,
+              judgment.kind ?? "review",
+              judgment.superseded_candidate !== undefined ? JSON.stringify(judgment.superseded_candidate) : null,
+              judgment.truncated === true ? 1 : null,
+              judgment.truncation !== undefined ? JSON.stringify(judgment.truncation) : null,
+              judgment.template_ref ?? null,
+              judgment.missing_dimensions !== undefined ? JSON.stringify(judgment.missing_dimensions) : null,
+              judgment.created_at,
+              judgment.created_by,
+            ] as InValue[],
+          },
+          ...(judgment.dimension_verdicts ?? []).map((verdict) => ({
+            sql: "INSERT INTO review_judgment_dimensions (judgment_id, dimension_id, verdict, reason, evidence) VALUES (?, ?, ?, ?, ?)",
+            args: [judgment.id, verdict.dimension_id, verdict.verdict, verdict.reason, verdict.evidence] as InValue[],
+          })),
+        ],
+        "write",
+      );
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async findJudgmentDimensions(judgmentId: string): Promise<Result<TemplateDimensionVerdict[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: "SELECT dimension_id, verdict, reason, evidence FROM review_judgment_dimensions WHERE judgment_id = ? ORDER BY rowid",
+        args: [judgmentId],
+      });
+      return ok(
+        rs.rows.map((row) => ({
+          dimension_id: rowStr(row, "dimension_id"),
+          verdict: rowStr(row, "verdict") as TemplateDimensionVerdict["verdict"],
+          reason: rowStr(row, "reason"),
+          evidence: rowStr(row, "evidence"),
+        })),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  // ── Template revisions and proposals ────────────────────────────────────
+
+  async insertTemplateRevision(input: {
+    id: string;
+    template_slug: string;
+    base_version: number;
+    created_at: string;
+  }): Promise<Result<void, LoreError>> {
+    try {
+      await this.ensureReady();
+      // reason: the partial unique index idx_template_revisions_one_pending refuses a second pending revision per template.
+      await this.client.execute({
+        sql: "INSERT INTO template_revisions (id, template_slug, status, base_version, created_at) VALUES (?, ?, 'pending', ?, ?)",
+        args: [input.id, input.template_slug, input.base_version, input.created_at],
       });
       return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  private async readTemplateRevisions(where: string, param: string): Promise<TemplateRevision[]> {
+    const revisionRs = await this.client.execute({
+      sql: `SELECT * FROM template_revisions WHERE ${where} ORDER BY created_at DESC, id DESC`,
+      args: [param],
+    });
+    const revisions: TemplateRevisionRow[] = revisionRs.rows.map((row) => ({
+      id: rowStr(row, "id"),
+      template_slug: rowStr(row, "template_slug"),
+      status: rowStr(row, "status"),
+      base_version: rowNum(row, "base_version"),
+      created_at: rowStr(row, "created_at"),
+      resolved_at: rowStrOrNull(row, "resolved_at"),
+      resolved_by: rowStrOrNull(row, "resolved_by"),
+    }));
+    if (revisions.length === 0) return [];
+    const proposalRs = await this.client.execute({
+      sql: `SELECT * FROM template_proposals WHERE revision_id IN (${revisions.map(() => "?").join(", ")}) ORDER BY created_at, rowid`,
+      args: revisions.map((revision) => revision.id),
+    });
+    const proposals: TemplateProposalRow[] = proposalRs.rows.map((row) => ({
+      id: rowStr(row, "id"),
+      revision_id: rowStr(row, "revision_id"),
+      question: rowStr(row, "question"),
+      decision: rowStrOrNull(row, "decision"),
+      dimension_id: rowStrOrNull(row, "dimension_id"),
+      drop_reason: rowStrOrNull(row, "drop_reason"),
+    }));
+    let findings: TemplateProposalFindingRow[] = [];
+    if (proposals.length > 0) {
+      const findingRs = await this.client.execute({
+        sql: `SELECT proposal_id, judgment_id FROM template_proposal_findings WHERE proposal_id IN (${proposals.map(() => "?").join(", ")}) ORDER BY id`,
+        args: proposals.map((proposal) => proposal.id),
+      });
+      findings = findingRs.rows.map((row) => ({ proposal_id: rowStr(row, "proposal_id"), judgment_id: rowStr(row, "judgment_id") }));
+    }
+    return assembleTemplateRevisions(revisions, proposals, findings);
+  }
+
+  async findPendingTemplateRevision(templateSlug: string): Promise<Result<TemplateRevision | null, LoreError>> {
+    try {
+      await this.ensureReady();
+      return ok((await this.readTemplateRevisions("template_slug = ? AND status = 'pending'", templateSlug))[0] ?? null);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async findTemplateRevisions(templateSlug: string): Promise<Result<TemplateRevision[], LoreError>> {
+    try {
+      await this.ensureReady();
+      return ok(await this.readTemplateRevisions("template_slug = ?", templateSlug));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async insertTemplateProposal(input: {
+    id: string;
+    revision_id: string;
+    question: string;
+    judgment_id: string;
+    reason?: string | undefined;
+    created_at: string;
+  }): Promise<Result<void, LoreError>> {
+    try {
+      await this.ensureReady();
+      // reason: INSERT ... SELECT only while the revision is pending, so a proposal never lands on a closed revision; the
+      // batch (implicit transaction) adds the proposal and its first finding together.
+      await this.client.batch(
+        [
+          {
+            sql: "INSERT INTO template_proposals (id, revision_id, question, created_at) SELECT ?, id, ?, ? FROM template_revisions WHERE id = ? AND status = 'pending'",
+            args: [input.id, input.question, input.created_at, input.revision_id],
+          },
+          {
+            sql: "INSERT INTO template_proposal_findings (proposal_id, judgment_id, reason, created_at) SELECT id, ?, ?, ? FROM template_proposals WHERE id = ?",
+            args: [input.judgment_id, input.reason ?? null, input.created_at, input.id],
+          },
+        ],
+        "write",
+      );
+      const stored = await this.client.execute({ sql: "SELECT 1 AS ok FROM template_proposals WHERE id = ?", args: [input.id] });
+      if (stored.rows.length === 0) {
+        return err({ code: "STORE_ERROR", message: `template revision ${input.revision_id} is not pending` });
+      }
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async insertTemplateProposalFinding(input: {
+    proposal_id: string;
+    judgment_id: string;
+    reason?: string | undefined;
+    created_at: string;
+  }): Promise<Result<void, LoreError>> {
+    try {
+      await this.ensureReady();
+      await this.client.execute({
+        sql: "INSERT INTO template_proposal_findings (proposal_id, judgment_id, reason, created_at) VALUES (?, ?, ?, ?)",
+        args: [input.proposal_id, input.judgment_id, input.reason ?? null, input.created_at],
+      });
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async approveTemplateRevision(input: {
+    id: string;
+    resolved_at: string;
+    resolved_by: string;
+    decisions: readonly ProposalDecision[];
+  }): Promise<Result<void, LoreError>> {
+    try {
+      await this.ensureReady();
+      const tx = await this.client.transaction("write");
+      try {
+        const closed = await tx.execute({
+          sql: "UPDATE template_revisions SET status = 'approved', resolved_at = ?, resolved_by = ? WHERE id = ? AND status = 'pending' RETURNING id",
+          args: [input.resolved_at, input.resolved_by, input.id],
+        });
+        if (closed.rows.length === 0) {
+          await tx.rollback();
+          return err({ code: "STORE_ERROR", message: `template revision ${input.id} is not pending` });
+        }
+        for (const decision of input.decisions) {
+          const updated = await tx.execute({
+            sql: "UPDATE template_proposals SET decision = ?, dimension_id = ?, drop_reason = ? WHERE id = ? AND revision_id = ? RETURNING id",
+            args: [
+              decision.decision,
+              decision.decision === "accepted" ? decision.dimension_id : null,
+              decision.decision === "dropped" ? decision.reason : null,
+              decision.proposal_id,
+              input.id,
+            ],
+          });
+          if (updated.rows.length === 0) {
+            await tx.rollback();
+            return err({ code: "STORE_ERROR", message: `template revision ${input.id} has no proposal ${decision.proposal_id}` });
+          }
+        }
+        await tx.commit();
+        return ok(undefined);
+      } finally {
+        tx.close();
+      }
     } catch (e) {
       return wrapStoreError(e);
     }
