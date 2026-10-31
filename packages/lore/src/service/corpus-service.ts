@@ -7,7 +7,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { ulid } from "ulidx";
 import { isContentChange, buildStateChange, type ContentComparableRow, type StateChange } from "@lore/core";
-import { err, ok, DEDICATED_EXTRA_KEYS, isGateDimension, issueRefSchema, judgeKnownDefectsExtra, readKnownDefects, MAX_ISSUE_REFS_PER_CARRIER, type GateDimension, type KnownDefectEntry, type Result } from "@lore/core";
+import { err, ok, DEDICATED_EXTRA_KEYS, MILESTONE_DIMENSIONS, isGateDimension, issueRefSchema, judgeKnownDefectsExtra, readKnownDefects, MAX_ISSUE_REFS_PER_CARRIER, type GateDimension, type KnownDefectEntry, type Result } from "@lore/core";
 import { admitAcWrite, applyAcChange } from "./ac-write-chokepoint.js";
 import type { LoreError } from "@lore/core";
 // reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
@@ -99,7 +99,8 @@ import type { TreeBlueprint } from "@lore/core";
 import { findTraceActorFor, findWriteSourceFor, resolveWriteActorFor, WriteActorUnresolvedError } from "../store/write-context-store.js";
 import { writeCarriesDecision, type DecisionDraft, type DecisionGate } from "./decision-gate.js";
 import { pendingRevisionsOf } from "./baseline-items.js";
-import { acceptedGatesOf, createGateAcceptanceLog } from "./gate-acceptance-service.js";
+import { acceptedGatesOf, createGateAcceptanceLog, unacceptedGateCausesOf } from "./gate-acceptance-service.js";
+import { failingCausesOf, issueTitleOf, type RootCause } from "./root-cause-fingerprint.js";
 import {
   KNOWN_DEFECT_ISSUE_WRITES_AUDIT_ACTION,
   carryOutIssueWrites,
@@ -127,7 +128,7 @@ import {
   type CitedRuleStateRow,
   type MilestoneReviewCurrency,
 } from "./milestone-review.js";
-import { coverFailedDimensions, type DimensionCoverage, type KnownDefectLive, type PlanCloseIssuePort } from "./milestone-review-inputs.js";
+import { coverFailedDimensions, type DimensionCoverage, type FailingCause, type KnownDefectLive, type PlanCloseIssuePort } from "./milestone-review-inputs.js";
 import { describeRetirementRefusal, type PlanCloseRetirementPort } from "./milestone-review.js";
 import type { RuleStateFull } from "./rule-state-service.js";
 import { resolveDoc, ULID_REGEX, type ResolveDocOptions } from "./resolve.js";
@@ -1440,10 +1441,15 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     if (!acceptedGates.ok) return acceptedGates;
     const unacceptedGates = currency.failed.filter((dimension) => isGateDimension(dimension) && !acceptedGates.value.includes(dimension));
     if (unacceptedGates.length > 0) {
+      // reason: BR-1513 — a regression is accepted file by file, so the refusal names each file still without a human accept.
+      const missing = latest === undefined ? ok(new Map<GateDimension, RootCause[]>()) : await unacceptedGateCausesOf(plan, latest, createGateAcceptanceLog(this.store));
+      if (!missing.ok) return missing;
+      const named = unacceptedGates.flatMap((gate) => (missing.value.get(gate as GateDimension) ?? []).map(issueTitleOf));
+      const naming = named.length === 0 ? "" : ` (not accepted: ${named.join("; ")})`;
       return err({
         code: "VALIDATION_ERROR",
         field: "gate:plan-close",
-        message: `MILESTONE_REVIEW_FAILED: plan ${plan.slug} cannot close: gate ${unacceptedGates.join(", ")} failed or was not measured in its review and was not accepted for this failure; an open issue does not accept a gate (accept it with \`lore assess ${plan.slug} --accept-gate <dimension>\` and a decision, or fix it and review again) (BR-1379, BR-1500)`,
+        message: `MILESTONE_REVIEW_FAILED: plan ${plan.slug} cannot close: gate ${unacceptedGates.join(", ")} failed or was not measured in its review and was not accepted for this failure${naming}; an open issue does not accept a gate (accept it with \`lore assess ${plan.slug} --accept-gate <dimension>\` and a decision, or fix it and review again) (BR-1379, BR-1500)`,
         rule: "BR-1500",
       });
     }
@@ -1463,15 +1469,27 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
           rule: "BR-1372",
         });
       }
+      // reason: BR-1421 / BR-1513 — a cause no open issue covers refuses the close naming that cause (exit 4), instead of the generic gate refusal.
+      const causes = coverage.value.uncoveredCauses ?? [];
+      if (causes.length > 0) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "gate:plan-close",
+          message: `MILESTONE_REVIEW_FAILED: plan ${plan.slug} cannot close with known defects: no open issue covers ${causes.map((c) => c.title).join("; ")} (BR-1421); file it with \`lore assess ${plan.slug} --file-issues\` and close again`,
+          rule: "BR-1421",
+        });
+      }
       return ok(currency);
     }
     return ok({ state: "accepted", reviewSlug: currency.reviewSlug, failed: currency.failed, issues: coverage.value.issues });
   }
 
   /**
-   * The ONE coverage predicate (BR-1372, BR-1379, BR-1421): which failed dimensions are covered by an entry of the
+   * The ONE coverage predicate (BR-1372, BR-1379, BR-1421, BR-1513): which failed dimensions are covered by entries of the
    * plan's `extra.known_defects` whose issue is open on GitHub, read per issue NUMBER (single-issue read, never the
-   * listing). Plan close and the review batch's "is filing complete" both decide from this.
+   * listing). A dimension is covered only when EVERY current root cause of the plan's latest review (one per charged file for a
+   * regression) has an open entry carrying that cause's fingerprint. Plan close and the review batch's "is filing complete"
+   * both decide from this.
    *
    * @param planId - the plan's document id
    * @param failed - the failed dimension ids of the current review
@@ -1488,6 +1506,20 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     if (plan.value === null) return err({ code: "DOC_NOT_FOUND", id: planId });
     // reason: BR-1510 — a closing plan's gate runs on the entries it KEEPS; a detached entry never covers a failed dimension.
     const entries = (keptEntries ?? readKnownDefects(plan.value.extra)).filter((entry) => failed.includes(entry.dimension));
+    // reason: BR-1513 — coverage is read per root cause, from the plan's latest stored review (the one the caller decides on). A
+    // dimension whose cause cannot be identified has no named cause and is read per dimension, as a cause that cannot be
+    // identified is never read as gone (BR-1510).
+    const reviewDocs = await this.listMilestoneReviewDocs(planId);
+    if (!reviewDocs.ok) return reviewDocs;
+    const latestReview = selectLatestMilestoneReview(reviewDocs.value);
+    let causes: FailingCause[] | undefined;
+    if (latestReview !== undefined) {
+      causes = [];
+      for (const dimension of MILESTONE_DIMENSIONS.filter((d) => failed.includes(d))) {
+        const identified = failingCausesOf(plan.value.slug, latestReview.doc.slug, latestReview.review, dimension);
+        if (identified.ok) causes.push(...identified.value.map((c) => ({ dimension, fingerprint: c.fingerprint, title: issueTitleOf(c) })));
+      }
+    }
     const reads = new Map<number, { repoId: number; state: "open" | "closed" }>();
     const live: KnownDefectLive[] = [];
     for (const entry of entries) {
@@ -1504,9 +1536,9 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       if (read.repoId !== entry.repo_id) {
         return err({ code: "VALIDATION_ERROR", field: "gate:plan-close", message: `known defect #${String(entry.number)} of ${plan.value.slug} is recorded for repository id ${String(entry.repo_id)} but the configured repository has id ${String(read.repoId)}; it cannot be read`, rule: "BR-1372" });
       }
-      live.push({ number: entry.number, dimension: entry.dimension, state: read.state });
+      live.push({ number: entry.number, dimension: entry.dimension, fingerprint: entry.fingerprint, state: read.state });
     }
-    return ok(coverFailedDimensions(failed, live));
+    return ok(coverFailedDimensions(failed, live, causes));
   }
 
   /** Present iff {@link setArchiveIssueClosePort} was called. */

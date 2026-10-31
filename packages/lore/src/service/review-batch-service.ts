@@ -49,7 +49,7 @@ import type { SuiteRun } from "./milestone-review-inputs.js";
 import { retirementSubjectId } from "./retired-ac-service.js";
 import type { IssueFilingService } from "./issue-filing-service.js";
 import type { DimensionCoverage } from "./milestone-review-inputs.js";
-import { rootCauseOf, type FailedFinding, type RootCause } from "./root-cause-fingerprint.js";
+import { failingCausesOf, type FailedFinding } from "./root-cause-fingerprint.js";
 import { leaseLostError, type LeaseHandle, type LeaseOutcome } from "./review-batch-lease.js";
 
 // reason: the constant lives in the pure acceptance view (bootstrap and checks stats read the same rows); re-exported so existing importers keep one name.
@@ -523,8 +523,8 @@ export class ReviewBatchRunner {
 }
 
 /** "; acceptance pending <id> (<gate>)" for each blocking gate whose acceptance waits for a human; "" when none. */
-function pendingNote(pending: ReadonlyMap<string, number>, blockers: readonly string[]): string {
-  const parts = blockers.filter((gate) => pending.has(gate)).map((gate) => `acceptance pending ${String(pending.get(gate))} (${gate})`);
+function pendingNote(pending: ReadonlyMap<string, readonly number[]>, blockers: readonly string[]): string {
+  const parts = blockers.filter((gate) => pending.has(gate)).map((gate) => `acceptance pending ${(pending.get(gate) ?? []).map(String).join(", ")} (${gate})`);
   return parts.length === 0 ? "" : `; ${parts.join("; ")}`;
 }
 
@@ -591,18 +591,15 @@ function hasFindingsToFile(review: MilestoneReview): boolean {
   return review.overall === "fail" || filableDimensions(review.dimensions).length > 0;
 }
 
-/** The root-cause results of a stored review's failed dimensions, one per dimension. */
-function causesOfReview(planSlug: string, reviewSlug: string, review: MilestoneReview): Result<RootCause, LoreError>[] {
-  return filableDimensions(review.dimensions).map((dimension) =>
-    rootCauseOf({ plan: planSlug, dimension, reason: review.dimensions[dimension].reason, reference: review.dimensions[dimension].reference, cites: review.dimensions[dimension].cites, reviewSlug, causes: review.causes }),
-  );
-}
-
 /**
- * The reason a stored review cannot be filed (a failed regression without `suite_failing_files`), or `undefined`.
- * Per-plan by construction: the filing site keeps its loud error; classification only turns it into "needs review".
+ * The reason a stored review cannot be filed (a failed dimension whose root cause cannot be identified, e.g. a cite-less
+ * finding), or `undefined`. Per-plan by construction: the filing site keeps its loud error; classification only turns it
+ * into "needs review".
  */
 export function unfileableReviewError(planSlug: string, reviewSlug: string, review: MilestoneReview): LoreError | undefined {
-  for (const cause of causesOfReview(planSlug, reviewSlug, review)) if (!cause.ok) return cause.error;
+  for (const dimension of filableDimensions(review.dimensions)) {
+    const causes = failingCausesOf(planSlug, reviewSlug, review, dimension);
+    if (!causes.ok) return causes.error;
+  }
   return undefined;
 }

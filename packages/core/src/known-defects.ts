@@ -120,7 +120,7 @@ export interface KnownDefectsAtClose {
  * An entry is detached only when the review MEASURED its dimension and no longer has its cause: the verdict is `pass`,
  * or `fail` with a set of fingerprints that does not include the entry's. It is kept when its fingerprint is a failing
  * cause, when the dimension is `not-measured` or `na`, when the review has no fact for the dimension, or when it is a
- * gate accepted with `--accept-gate` (`acceptedGates`): not measured is never read as fixed.
+ * gate accepted with `--accept-gate` (`acceptedGates`) whose cause is still failing: not measured is never read as fixed.
  *
  * @param entries - the plan's known defects, in stored order
  * @param facts - the closing review's verdict and failing fingerprints per dimension
@@ -136,7 +136,11 @@ export function partitionKnownDefectsAtClose(
   const detached: DetachedKnownDefect[] = [];
   for (const entry of entries) {
     const fact = facts[entry.dimension];
-    if (fact === undefined || acceptedGates.includes(entry.dimension)) {
+    // reason: BR-1513 — an accepted gate shields its entries only while their cause is still a failing one: a regression is
+    // accepted file by file, so the entry of a file that is no longer red is detached even though the gate stays accepted.
+    const staleUnderAcceptedGate =
+      fact !== undefined && fact.verdict === "fail" && fact.failingFingerprints.length > 0 && !fact.failingFingerprints.includes(entry.fingerprint);
+    if (fact === undefined || (acceptedGates.includes(entry.dimension) && !staleUnderAcceptedGate)) {
       kept.push(entry);
       continue;
     }
