@@ -82,7 +82,7 @@ function build(files: readonly string[], redFiles: ReadonlySet<string> = new Set
   };
   const storeSingle = async (kind: "bisect" | "confirm", commitIndex: number, file: string, durationMs: number): Promise<void> => {
     const inserted = await store.insertSuiteFileRuns([
-      { suite_result_id: singleFileRunKey(kind, sha(commitIndex)), commit_sha: sha(commitIndex), file, exit_code: 0, output_tail: "", duration_ms: durationMs, measured_at: "2026-10-30T09:00:00.000Z" },
+      { suite_result_id: singleFileRunKey(kind, sha(commitIndex)), commit_sha: sha(commitIndex), file, exit_code: 0, output_tail: "", duration_ms: durationMs, measured_at: "2026-10-30T09:00:00.000Z", classification: "green", inconclusive_cause: null },
     ]);
     if (!inserted.ok) throw new Error(`fixture row not stored: ${inserted.error.code}`);
   };

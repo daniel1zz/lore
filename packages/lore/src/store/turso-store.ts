@@ -49,6 +49,7 @@ import { MIGRATION_043_SQL } from "./migrations/migration-043.js";
 import { MIGRATION_044_SQL } from "./migrations/migration-044.js";
 import { MIGRATION_045_SQL } from "./migrations/migration-045.js";
 import { MIGRATION_046_SQL } from "./migrations/migration-046.js";
+import { MIGRATION_047_SQL } from "./migrations/migration-047.js";
 import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migration-017.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
@@ -1299,6 +1300,11 @@ export class TursoStore implements StoreInterface {
         // reason: migration-046 widens docs.type to accept 'template' (a `docs` table-recreate, same shape as
         // migration-013, applied the same way); idempotent on re-run (DROP TABLE IF EXISTS docs_new first).
         await this.client.executeMultiple(MIGRATION_046_SQL);
+      }
+
+      if (currentVersion < 47) {
+        // reason: migration-047 classifies every stored file run (BR-1533) and narrows the single-file unique index to conclusive rows.
+        await this.client.executeMultiple(MIGRATION_047_SQL);
       }
     })();
 
@@ -4512,8 +4518,8 @@ export class TursoStore implements StoreInterface {
       await this.client.batch(
         rows.map((row) => ({
           // reason: OR IGNORE honours migration-045's partial unique index (first single-file run of a (key, file) wins, #528).
-          sql: "INSERT OR IGNORE INTO suite_file_runs (suite_result_id, commit_sha, file, exit_code, output_tail, duration_ms, measured_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          args: [row.suite_result_id, row.commit_sha, row.file, row.exit_code, row.output_tail, row.duration_ms, row.measured_at],
+          sql: "INSERT OR IGNORE INTO suite_file_runs (suite_result_id, commit_sha, file, exit_code, output_tail, duration_ms, measured_at, classification, inconclusive_cause) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          args: [row.suite_result_id, row.commit_sha, row.file, row.exit_code, row.output_tail, row.duration_ms, row.measured_at, row.classification, row.inconclusive_cause],
         })),
         "write",
       );
@@ -4537,6 +4543,8 @@ export class TursoStore implements StoreInterface {
             output_tail: rowStr(row, "output_tail"),
             duration_ms: Number(row["duration_ms"]),
             measured_at: rowStr(row, "measured_at"),
+            classification: rowStr(row, "classification"),
+            inconclusive_cause: row["inconclusive_cause"] === null || row["inconclusive_cause"] === undefined ? null : rowStr(row, "inconclusive_cause"),
           }),
         ),
       );

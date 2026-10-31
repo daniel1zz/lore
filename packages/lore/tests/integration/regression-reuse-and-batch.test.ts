@@ -134,7 +134,7 @@ function build(script: Script) {
   /** Stores one file's `batch` row at a commit, as an earlier review's search would have. */
   const storeBatchRow = async (index: number, file: string, exitCode: number): Promise<void> => {
     const inserted = await store.insertSuiteFileRuns([
-      { suite_result_id: singleFileRunKey("batch", sha(index)), commit_sha: sha(index), file, exit_code: exitCode, output_tail: "", duration_ms: 1, measured_at: "2026-10-30T09:30:00.000Z" },
+      { suite_result_id: singleFileRunKey("batch", sha(index)), commit_sha: sha(index), file, exit_code: exitCode, output_tail: "", duration_ms: 1, measured_at: "2026-10-30T09:30:00.000Z", classification: exitCode === 0 ? "green" : "red", inconclusive_cause: null },
     ]);
     if (!inserted.ok) throw new Error(`could not store the fixture batch row: ${inserted.error.code}`);
   };

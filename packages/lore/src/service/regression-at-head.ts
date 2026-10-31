@@ -35,6 +35,9 @@
  *   - A file absent at a commit counts as not red there (no run), so a test the plan added is charged to the landing that added it.
  *   - A step that cannot complete (history unreadable, a run erroring or timing out) makes that file `not-measured` (and the
  *     gate not-measured); it is never a pass.
+ *   - Timeouts are inconclusive (BR-1533): at each (commit, file, kind) the NEWEST CONCLUSIVE stored run decides (`decidingRun`); a run
+ *     that only timed out decides nothing, is not retried within this review, and leaves the file `not-measured` with cause `timeout`
+ *     (named, never charged, never a confirmation); the next review runs the point again.
  *   - Fact rows: one selection row, one per red file, one per unlanded task. The dimension verdict is their fold (fail > not-measured > pass).
  *   - The review fingerprint hashes the stored run ids the verdict used (the selection's rows at L, the head recheck's rows, the
  *     floor, bisect and confirm runs); search-step batch rows are not hashed, they decide nothing.
@@ -48,7 +51,7 @@ import { err, ok, type LoreError, type MilestoneFactRow, type RegressionNotMeasu
 import type { SuiteFileRunRecord, SuiteResultRecord } from "../store/store-interface.js";
 import { noCodeRegressionRow } from "./corpus-only-task.js";
 import { runSelectionAtL } from "./selection-run-at-l.js";
-import { loreErrorText, singleFileRunKey, type CommitSuiteRunnerPort, type RunBatchOptions, type SingleFileRunKind } from "./suite-result-service.js";
+import { decidingRun, loreErrorText, singleFileRunKey, type CommitSuiteRunnerPort, type RunBatchOptions, type SingleFileRunKind } from "./suite-result-service.js";
 
 /** One landing of the plan, as `deriveLandingDiffForPlan` reports it. */
 export interface RegressionLandingInput {
@@ -162,11 +165,17 @@ export function regressionBisectionBudget(commitsInRange: number): number {
 const NO_TEST_REACHES = "no test reaches this plan's changes";
 
 type FileState = "green" | "red";
-type Step<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly reason: string };
+/** A step that could not complete names why and, when it is not the default `unrunnable`, its cause (`timeout`: only inconclusive runs, BR-1533). */
+type StepStop = { readonly ok: false; readonly reason: string; readonly cause?: RegressionNotMeasuredCause };
+type Step<T> = { readonly ok: true; readonly value: T } | StepStop;
 
-const stop = (reason: string): { ok: false; reason: string } => ({ ok: false, reason });
-const reasonOf = (what: string, error: LoreError): { ok: false; reason: string } => stop(`${what}: ${loreErrorText(error)}`);
-const stateOfExit = (exitCode: number): FileState => (exitCode === 0 ? "green" : "red");
+const stop = (reason: string, cause?: RegressionNotMeasuredCause): StepStop => (cause === undefined ? { ok: false, reason } : { ok: false, reason, cause });
+const reasonOf = (what: string, error: LoreError): StepStop => stop(`${what}: ${loreErrorText(error)}`);
+/** The stop of a run that only timed out: it decides nothing at its point (BR-1533), so the file is not measured, never charged. */
+const inconclusiveStop = (file: string, commit: string, kind: string): StepStop =>
+  stop(`${file} has no conclusive ${kind} run at ${commit}: its run ended only in test or hook timeouts (inconclusive, not charged; the next review runs it again)`, "timeout");
+/** The state a CONCLUSIVE stored row shows; an inconclusive row is never passed here (callers filter with `decidingRun` or check first). */
+const stateOfRow = (row: SuiteFileRunRecord): FileState => (row.classification === "red" ? "red" : "green");
 const runIdOf = (row: SuiteFileRunRecord): string => `${row.measured_at}#${String(row.exit_code)}`;
 
 /** Reads and runs the state of ONE file across commits; keeps what it consulted for the fingerprint. */
@@ -182,7 +191,8 @@ class FileProbe {
   private async storedRun(kind: SingleFileRunKind | "batch", commit: string): Promise<Step<SuiteFileRunRecord | undefined>> {
     const rows = await this.ports.suites.listFileRuns(singleFileRunKey(kind, commit));
     if (!rows.ok) return reasonOf(`stored ${kind} runs at ${commit} could not be read`, rows.error);
-    return { ok: true, value: rows.value.filter((r) => r.file === this.file && r.commit_sha === commit).at(-1) };
+    // reason: BR-1533 — the NEWEST CONCLUSIVE run at the point decides; an inconclusive run (newer or not) is no result and never overrides one.
+    return { ok: true, value: decidingRun(rows.value.filter((r) => r.file === this.file && r.commit_sha === commit)) };
   }
 
   /**
@@ -194,7 +204,7 @@ class FileProbe {
     if (!stored.ok) return stored;
     if (stored.value !== undefined) {
       this.consulted.push({ key: `${this.file}@${commit}:bisect`, id: runIdOf(stored.value) });
-      return { ok: true, value: stateOfExit(stored.value.exit_code) };
+      return { ok: true, value: stateOfRow(stored.value) };
     }
     const suite = this.measuredByCommit.get(commit);
     if (suite === undefined) return { ok: true, value: undefined };
@@ -232,7 +242,7 @@ class FileProbe {
     if (known.value !== undefined) return known;
     const batch = await this.storedRun("batch", commit);
     if (!batch.ok) return batch;
-    return { ok: true, value: batch.value === undefined ? undefined : stateOfExit(batch.value.exit_code) };
+    return { ok: true, value: batch.value === undefined ? undefined : stateOfRow(batch.value) };
   }
 
   /** Whether the file exists at `commit` (a batch leaves an absent file out). */
@@ -249,7 +259,7 @@ class FileProbe {
     if (!stored.ok) return stored;
     if (stored.value !== undefined) {
       this.consulted.push({ key: `${this.file}@${commit}:confirm`, id: runIdOf(stored.value) });
-      return { ok: true, value: stateOfExit(stored.value.exit_code) };
+      return { ok: true, value: stateOfRow(stored.value) };
     }
     return this.run(commit, "confirm");
   }
@@ -257,8 +267,10 @@ class FileProbe {
   private async run(commit: string, kind: SingleFileRunKind): Promise<Step<FileState>> {
     const ran = await this.ports.suites.runSingleFile(commit, this.file, kind, this.ports.runner);
     if (!ran.ok) return reasonOf(`${this.file} could not be run at ${commit}`, ran.error);
+    // reason: BR-1533 — one run per point per review: an inconclusive run is not retried here; the file is not measured and the next review runs the point again.
+    if (ran.value.classification === "inconclusive") return inconclusiveStop(this.file, commit, kind);
     this.consulted.push({ key: `${this.file}@${commit}:${kind}`, id: runIdOf(ran.value) });
-    return { ok: true, value: stateOfExit(ran.value.exit_code) };
+    return { ok: true, value: stateOfRow(ran.value) };
   }
 }
 
@@ -356,7 +368,7 @@ async function attributeRedFiles(input: AttributionInput): Promise<{ files: File
     // end. Searching up to head instead would let a flip between L and head read as the transition and cost runs above L for nothing.
     const bounds = await initialBounds(probeOf(file), history, attribution.latestIndex, attribution);
     if (bounds.kind === "settled") outcomes.set(file, bounds.outcome);
-    else if (bounds.kind === "stop") notMeasured(file, bounds.reason);
+    else if (bounds.kind === "stop") notMeasured(file, bounds.reason, bounds.cause);
     else actives.push({ file, probe: probeOf(file), low: bounds.low, high: bounds.high, failed: false });
   }
 
@@ -384,7 +396,7 @@ async function recheckAtHead(
   const present: string[] = [];
   for (const file of files) {
     const there = await probeOf(file).existsAt(headCommit);
-    if (!there.ok) notMeasured(file, there.reason);
+    if (!there.ok) notMeasured(file, there.reason, there.cause);
     else if (!there.value) outcomes.set(file, { file, outcome: "green-at-head", commit: headCommit });
     else present.push(file);
   }
@@ -401,16 +413,22 @@ async function recheckAtHead(
       notMeasured(file, `the head recheck returned no row for ${file} at ${headCommit}`);
       continue;
     }
+    // reason: BR-1533 — a file whose recheck run only timed out has no state at head: not measured, never dropped as green and never kept as red.
+    if (row.classification === "inconclusive") {
+      const stopped = inconclusiveStop(file, headCommit, "head recheck");
+      notMeasured(file, stopped.reason, stopped.cause);
+      continue;
+    }
     const probe = probeOf(file);
     probe.consulted.push({ key: `${file}@${headCommit}:batch`, id: runIdOf(row) });
-    if (stateOfExit(row.exit_code) === "red") {
+    if (stateOfRow(row) === "red") {
       red.push(file);
       continue;
     }
     // reason: green beside other files does not prove green alone: interference can hide a failure as well as cause one, so the file is
     // run once alone before it is dropped (spec: Final state still decides).
     const alone = await probe.stateAt(headCommit);
-    if (!alone.ok) notMeasured(file, alone.reason);
+    if (!alone.ok) notMeasured(file, alone.reason, alone.cause);
     else if (alone.value === "red") red.push(file);
     else outcomes.set(file, { file, outcome: "green-at-head", commit: headCommit });
   }
@@ -420,7 +438,7 @@ async function recheckAtHead(
 type Bounds =
   | { readonly kind: "active"; readonly low: number; readonly high: number }
   | { readonly kind: "settled"; readonly outcome: FileRegression }
-  | { readonly kind: "stop"; readonly reason: string };
+  | { readonly kind: "stop"; readonly reason: string; readonly cause?: RegressionNotMeasuredCause };
 
 /**
  * The interval of one file: known-green start (newest stored single-file pass, else the floor decided by a single-file run) to the
@@ -447,7 +465,7 @@ async function initialBounds(probe: FileProbe, history: readonly string[], redIn
     const floorCommit = history[floorIndex];
     if (floorCommit === undefined) return { kind: "stop", reason: `history has no commit at position ${String(floorIndex)}` };
     const floor = await probe.stateAt(floorCommit);
-    if (!floor.ok) return { kind: "stop", reason: floor.reason };
+    if (!floor.ok) return floor.cause === undefined ? { kind: "stop", reason: floor.reason } : { kind: "stop", reason: floor.reason, cause: floor.cause };
     if (floor.value === "red") return { kind: "settled", outcome: { file: probe.file, outcome: "red-before", commit: floorCommit } };
   }
   // reason: floorIndex -1 is "before main's first commit": the file cannot exist there, so it is green without a run.
@@ -472,9 +490,9 @@ async function searchTogether(
   ports: RegressionAtHeadPorts,
   notMeasured: (file: string, reason: string, cause?: RegressionNotMeasuredCause) => void,
 ): Promise<void> {
-  const fail = (active: Active, reason: string): void => {
+  const fail = (active: Active, reason: string, cause?: RegressionNotMeasuredCause): void => {
     active.failed = true;
-    notMeasured(active.file, reason);
+    notMeasured(active.file, reason, cause);
   };
   const apply = (active: Active, index: number, state: FileState): void => {
     if (state === "red") active.high = index;
@@ -493,7 +511,7 @@ async function searchTogether(
         }
         const step = await active.probe.peekStep(commit);
         if (!step.ok) {
-          fail(active, step.reason);
+          fail(active, step.reason, step.cause);
           break;
         }
         if (step.value === undefined) {
@@ -511,7 +529,7 @@ async function searchTogether(
       for (const active of searching()) {
         if (!(active.low < index && index < active.high)) continue;
         const step = await active.probe.peekStep(commit);
-        if (!step.ok) fail(active, step.reason);
+        if (!step.ok) fail(active, step.reason, step.cause);
         else if (step.value === undefined) members.push(active);
         else apply(active, index, step.value);
       }
@@ -524,7 +542,11 @@ async function searchTogether(
       for (const [position, member] of members.entries()) {
         const row = ran.value[position];
         if (row === undefined) fail(member, `the batched run at ${commit} returned no row for ${member.file}`);
-        else apply(member, index, stateOfExit(row.exit_code));
+        // reason: BR-1533 — a step that only timed out is no step: the file is not measured (cause timeout) and is not retried within this review.
+        else if (row.classification === "inconclusive") {
+          const stopped = inconclusiveStop(member.file, commit, "batched");
+          fail(member, stopped.reason, stopped.cause);
+        } else apply(member, index, stateOfRow(row));
       }
     }
   }
@@ -537,10 +559,10 @@ async function decideFile(active: Active, history: readonly string[], attributio
   const first = history[high];
   if (first === undefined) return notMeasured(`history has no commit at position ${String(high)}`);
   const firstConfirm = await probe.confirmAt(first);
-  if (!firstConfirm.ok) return notMeasured(firstConfirm.reason);
+  if (!firstConfirm.ok) return notMeasured(firstConfirm.reason, firstConfirm.cause);
   const parent = low >= 0 ? history[low] : undefined;
   const parentConfirm = parent === undefined ? ({ ok: true, value: "green" } as const) : await probe.confirmAt(parent);
-  if (!parentConfirm.ok) return notMeasured(parentConfirm.reason);
+  if (!parentConfirm.ok) return notMeasured(parentConfirm.reason, parentConfirm.cause);
   if (firstConfirm.value !== "red" || parentConfirm.value !== "green") {
     return notMeasured(`flaky during bisection: the confirmation runs disagree with the bisection at ${first} (confirm there alone: ${firstConfirm.value}; at its parent alone: ${parentConfirm.value})`, "flaky-bisection");
   }
@@ -653,14 +675,20 @@ export async function regressionAtHead(
     return unmeasured(selectionCommit, `the selected tests could not be run at ${selectionCommit}: ${String(chunked.value.remaining.length)} of ${String(selected.length)} selected test files have no result yet${why}`);
   }
   const singleFileRunIds: { key: string; id: string }[] = chunked.value.rows.map((stored) => ({ key: `${stored.row.file}@${selectionCommit}:${stored.kind}`, id: runIdOf(stored.row) }));
-  const redFiles = chunked.value.rows.filter((stored) => stateOfExit(stored.row.exit_code) === "red").map((stored) => stored.row.file).sort();
+  const redFiles = chunked.value.rows.filter((stored) => stateOfRow(stored.row) === "red").map((stored) => stored.row.file).sort();
+  // reason: BR-1533 — a selected file whose run at L only timed out has no state there: named, not measured (cause timeout), never charged; the others are still measured.
+  const timedOutAtSelection = chunked.value.inconclusive.map((file): FileRegression => {
+    const stopped = inconclusiveStop(file, selectionCommit, "batched");
+    return { file, outcome: "not-measured", reason: stopped.reason, cause: "timeout" };
+  });
   const selectionRow: MilestoneFactRow = {
     subject: `selection@${selectionCommit}`,
     verdict: "pass",
     detail: `${summary}${redFiles.length === 0 ? "; all green at the selection commit" : `; ${String(redFiles.length)} red at the selection commit, each examined below`}\n${selection.accounting}`,
   };
   const selectionFacts = { commit: selectionCommit, selected: selected.length, total: selection.totalTestFiles };
-  const finish = (files: readonly FileRegression[], consulted: readonly { key: string; id: string }[]): Result<RegressionAtHead, LoreError> => {
+  const finish = (attributed: readonly FileRegression[], consulted: readonly { key: string; id: string }[]): Result<RegressionAtHead, LoreError> => {
+    const files = [...timedOutAtSelection, ...attributed];
     const charged = files.flatMap((f): RegressionFinding[] => (f.outcome === "regression" ? [{ file: f.file, landing: f.landing }] : []));
     const rows = [selectionRow, ...files.map(rowOfFile), ...unlandedRows];
     return ok({ assessed_commit: headCommit, selection: selectionFacts, files, charged, single_file_run_ids: [...singleFileRunIds, ...consulted], rows, causes: causesOf(rows) });

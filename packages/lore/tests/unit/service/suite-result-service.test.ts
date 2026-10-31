@@ -389,7 +389,7 @@ describe("single-file runs are stored once per (commit, file, kind) (#528, BR-14
 
   it("AC-AF-2 the store ignores a second row for a single-file key but still appends re-runs under a suite result id", async () => {
     const store = new InMemoryStore();
-    const base = { commit_sha: COMMIT_A, file: FILE_X, duration_ms: 1, measured_at: "2026-10-28T10:00:00.000Z" };
+    const base = { commit_sha: COMMIT_A, file: FILE_X, duration_ms: 1, measured_at: "2026-10-28T10:00:00.000Z", classification: "green" as const, inconclusive_cause: null };
     const key = `file-bisect@${COMMIT_A}`;
     await store.insertSuiteFileRuns([{ ...base, suite_result_id: key, exit_code: 0, output_tail: "first" }]);
     await store.insertSuiteFileRuns([{ ...base, suite_result_id: key, exit_code: 1, output_tail: "second" }]);

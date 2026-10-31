@@ -27,7 +27,7 @@
 
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { SuiteFileRunRecord } from "../store/store-interface.js";
-import { loreErrorText, singleFileRunKey, type CommitSuiteRunnerPort, type RunBatchOptions, type SingleFileRunKind } from "./suite-result-service.js";
+import { decidingRun, loreErrorText, singleFileRunKey, type CommitSuiteRunnerPort, type RunBatchOptions, type SingleFileRunKind } from "./suite-result-service.js";
 
 /** Most files in one chunk. */
 export const MAX_CHUNK_FILES = 100;
@@ -64,6 +64,11 @@ export interface SelectionRun {
   readonly remaining: readonly string[];
   /** One text per chunk that did not complete (what the runner or the store said). */
   readonly failures: readonly string[];
+  /**
+   * Files this call ran whose run was inconclusive (only timeouts, BR-1533): stored, not a result, never retried inside this call.
+   * They are not in `rows` and not in `remaining`; the caller reports each as not measured (cause timeout).
+   */
+  readonly inconclusive: readonly string[];
   /** Files that already had a result when the run started (not run again). */
   readonly reused: number;
 }
@@ -100,8 +105,11 @@ async function storedResultsAt(commit: string, files: readonly string[], listFil
   for (const kind of ["batch", ...DURATION_KINDS] as const) {
     const rows = await listFileRuns(singleFileRunKey(kind, commit));
     if (!rows.ok) return rows;
-    for (const row of rows.value) {
-      if (wanted.has(row.file) && row.commit_sha === commit && !found.has(row.file)) found.set(row.file, { kind, row });
+    // reason: BR-1533 — only a conclusive run is a result at L; an inconclusive one leaves the file without a result, so a retry runs it.
+    for (const file of wanted) {
+      if (found.has(file)) continue;
+      const row = decidingRun(rows.value.filter((r) => r.file === file && r.commit_sha === commit));
+      if (row !== undefined) found.set(file, { kind, row });
     }
   }
   return ok(found);
@@ -142,6 +150,7 @@ export async function runSelectionAtL(
   if (!before.ok) return err({ code: "STORE_ERROR", message: `stored results at ${commit} could not be read: ${loreErrorText(before.error)}` });
   const missing = selected.filter((f) => !before.value.has(f.path));
   const failures: string[] = [];
+  const inconclusive: string[] = [];
   if (missing.length > 0) {
     const durationCommits = [...history.slice(-DURATION_HISTORY_COMMITS).filter((c) => c !== commit), commit];
     const durations = await storedDurations(missing.map((f) => f.path), durationCommits, ports.listFileRuns);
@@ -153,8 +162,21 @@ export async function runSelectionAtL(
       const buildFirst = !built && chunk.some((f) => f.needsCompiledBinary);
       const ran = await ports.runBatch(commit, chunk.map((f) => f.path), ports.runner, { buildFirst });
       if (ran.ok) {
-        failedInARow = 0;
-        if (buildFirst) built = true;
+        const timedOut = ran.value.filter((row) => row.classification === "inconclusive");
+        for (const row of timedOut) inconclusive.push(row.file);
+        // reason: a chunk in which EVERY file timed out is a failed chunk for the stop rule (a machine that times out every chunk would
+        // otherwise spend the full limit on each remaining chunk); a chunk with some conclusive file made progress.
+        if (timedOut.length < ran.value.length) {
+          failedInARow = 0;
+          if (buildFirst) built = true;
+          continue;
+        }
+        failures.push(`chunk ${String(index + 1)} of ${String(chunks.length)} (${String(chunk.length)} files): every file timed out`);
+        failedInARow += 1;
+        if (failedInARow >= MAX_CONSECUTIVE_FAILED_CHUNKS && index + 1 < chunks.length) {
+          failures.push(`${String(chunks.length - index - 1)} later chunk(s) not tried after ${String(failedInARow)} failed chunks in a row`);
+          break;
+        }
         continue;
       }
       failures.push(`chunk ${String(index + 1)} of ${String(chunks.length)} (${String(chunk.length)} files): ${loreErrorText(ran.error)}`);
@@ -171,5 +193,12 @@ export async function runSelectionAtL(
     const stored = after.value.get(path);
     return stored === undefined ? [] : [stored];
   });
-  return ok({ rows, remaining: paths.filter((path) => !after.value.has(path)), failures, reused: before.value.size });
+  const inconclusiveSet = new Set(inconclusive);
+  return ok({
+    rows,
+    remaining: paths.filter((path) => !after.value.has(path) && !inconclusiveSet.has(path)),
+    failures,
+    inconclusive: paths.filter((path) => !after.value.has(path) && inconclusiveSet.has(path)),
+    reused: before.value.size,
+  });
 }
