@@ -1,3 +1,5 @@
+// @reads package.json -- the production batched invocation runs this checkout's `test:file` script
+// @spawns packages/lore/tests/zz-batched-fixture-*/*.test.ts -- throwaway real test files created and removed by the real-runner case
 /**
  * @spec_ref spec-a-plan-s-regression-reuses-a-stored-suite-that-contains (AC-AC-1, AC-AC-2, AC-AC-3, BR-1496, BR-1497)
  *
@@ -12,7 +14,11 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ok, type LoreError, type Result } from "@lore/core";
+import { outcomesOfTogetherRun, runTestFilesTogether } from "../../src/adapters/cli/assess-suite-runner.js";
 import { PreparedWorktreeCache } from "../../src/adapters/cli/assess-worktree-cache.js";
 import { InMemoryStore } from "../../src/store/in-memory-store.js";
 import type { SuiteResultRecord } from "../../src/store/store-interface.js";
@@ -361,6 +367,44 @@ describe("batched attribution", () => {
     const t = await measure(step, [landingAt(1), landingAt(21)]);
     expect(t.charged).toEqual([{ file: A, landing: sha(21) }]);
     expect(batchesAt(step, sha(16))).toEqual([]);
+  });
+});
+
+describe("batched attribution: the production batched invocation against a real test runner", () => {
+  /** The environment of a clean shell: the outer vitest's own variables must not steer the inner `bun run test:file`. */
+  const cleanEnv = (): NodeJS.ProcessEnv => Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(VITEST|VITE_|NODE_ENV$|TEST$)/.test(name)));
+  const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url)).replace(/\/$/, "");
+
+  it("AC-AC-2 one `bun run test:file f1 f2 f3` invocation reports each file's own outcome: pass, fail, and a collect error (missing import) as failed", { timeout: 300_000 }, async () => {
+    const relDir = `packages/lore/tests/zz-batched-fixture-${String(process.pid)}-${String(Date.now())}`;
+    const dir = join(repoRoot, relDir);
+    mkdirSync(dir, { recursive: true });
+    try {
+      const body = (assertion: string): string => `import { expect, it } from "vitest";\nit("case", () => {\n  ${assertion}\n});\n`;
+      writeFileSync(join(dir, "pass.test.ts"), body("expect(1).toBe(1);"));
+      writeFileSync(join(dir, "fail.test.ts"), body("expect(1).toBe(2);"));
+      writeFileSync(join(dir, "collect.test.ts"), `import "./does-not-exist.js";\n${body("expect(1).toBe(1);")}`);
+      const [pass, fail, collect] = ["pass", "fail", "collect"].map((name) => `${relDir}/${name}.test.ts`) as [string, string, string];
+      const exact = (outcomes: readonly FileRunOutcome[]) => outcomes.map((o) => [o.file, o.exit_code, o.incomplete]);
+
+      // order must not matter: the failing file sits in the middle, then at the ends
+      expect(exact(await runTestFilesTogether(repoRoot, "fixture", [pass, fail, collect], cleanEnv()))).toEqual([[pass, 0, undefined], [fail, 1, undefined], [collect, 1, undefined]]);
+      expect(exact(await runTestFilesTogether(repoRoot, "fixture", [collect, pass, fail], cleanEnv()))).toEqual([[collect, 1, undefined], [pass, 0, undefined], [fail, 1, undefined]]);
+      // a batch of passing files only is green for every file; a batch with one failing file charges only that file
+      expect(exact(await runTestFilesTogether(repoRoot, "fixture", [pass], cleanEnv()))).toEqual([[pass, 0, undefined]]);
+      expect(exact(await runTestFilesTogether(repoRoot, "fixture", [pass, fail], cleanEnv()))).toEqual([[pass, 0, undefined], [fail, 1, undefined]]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("AC-AC-2 a batched run that exits 1 with no readable failing file is incomplete for every file, never all green or all red", () => {
+    const outcomes = outcomesOfTogetherRun([A, B], { status: 1, output: "something broke before any test ran", durationMs: 1 });
+    expect(outcomes.map((o) => [o.exit_code, o.incomplete !== undefined])).toEqual([[1, true], [1, true]]);
+    // coloured output (FORCE_COLOR) is read the same as plain output
+    const esc = String.fromCharCode(27);
+    const coloured = outcomesOfTogetherRun([A, B], { status: 1, output: ` ${esc}[41m${esc}[1m FAIL ${esc}[22m${esc}[49m  ${B} > case\n`, durationMs: 1 });
+    expect(coloured.map((o) => o.exit_code)).toEqual([0, 1]);
   });
 });
 

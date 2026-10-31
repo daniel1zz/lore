@@ -66,7 +66,9 @@ const SUITE_TIMEOUT_MS = 60 * 60 * 1000;
 const KILL_GRACE_MS = 10 * 1000;
 /** After the child exited or the group was killed, how long to wait for the stdio pipes before closing them ourselves. */
 const PIPE_DRAIN_MS = 2000;
-const SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"] as const;
+/** ANSI colour escape sequences (`ESC [ ... m`). */
+const ANSI_COLOR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
+const SOURCE_EXTENSIONS =[".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"] as const;
 
 /** Time limits of one spawned command; the defaults are the production values. */
 export interface ProcessLimits {
@@ -427,15 +429,6 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv, 
       }),
   );
 
-  /** Fails (inside a cache `use`, so as an `err`) when the commit's package.json has no per-file script. */
-  const requireFileScript = (root: string, commit: string): void => {
-    const manifestPath = join(root, "package.json");
-    const manifest = existsSync(manifestPath) ? (JSON.parse(readFileSync(manifestPath, "utf8")) as { scripts?: Record<string, string> }) : {};
-    if (manifest.scripts?.[FILE_TEST_SCRIPT] === undefined) {
-      throw new Error(`package.json at ${commit} defines no "${FILE_TEST_SCRIPT}" script, so single test files cannot be re-run`);
-    }
-  };
-
   return {
     resolveCommit: async (ref) => {
       const repo = await repoRootOf();
@@ -489,16 +482,45 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv, 
       }),
 
     runFilesTogether: async (commit, files) =>
-      worktrees.use(commit, async (root) => {
-        requireFileScript(root, commit);
-        const startedMs = Date.now();
-        const ran = await spawn("bun", ["run", FILE_TEST_SCRIPT, ...files], root, suiteChildEnv(env), limits);
-        const incomplete = ran.killFailure ?? (ran.timeout !== undefined ? `timed out after ${String(ran.timeout.elapsedMs)} ms` : undefined);
-        return outcomesOfTogetherRun(files, { status: ran.status, output: ran.output, durationMs: Date.now() - startedMs, ...(incomplete !== undefined ? { incomplete } : {}) });
-      }),
+      worktrees.use(commit, (root) => runTestFilesTogether(root, commit, files, env, limits)),
 
     disposeWorktrees: () => worktrees.disposeAll(),
   };
+}
+
+/** Throws (inside a cache `use`, so it surfaces as an `err`) when the checkout's package.json has no per-file script. */
+function requireFileScript(root: string, commit: string): void {
+  const manifestPath = join(root, "package.json");
+  const manifest = existsSync(manifestPath) ? (JSON.parse(readFileSync(manifestPath, "utf8")) as { scripts?: Record<string, string> }) : {};
+  if (manifest.scripts?.[FILE_TEST_SCRIPT] === undefined) {
+    throw new Error(`package.json at ${commit} defines no "${FILE_TEST_SCRIPT}" script, so single test files cannot be re-run`);
+  }
+}
+
+/**
+ * Runs `files` together in ONE `bun run test:file f1 f2 ...` invocation inside the prepared checkout `root` and reports one
+ * outcome per file ({@link outcomesOfTogetherRun}). This is the whole production path of `runFilesTogether` after the worktree
+ * exists, exported so it can be driven against a real test runner.
+ *
+ * @param root - a prepared checkout holding the files and a `test:file` script
+ * @param commit - the commit `root` is at (named in the missing-script error)
+ * @param files - repo-relative test files
+ * @param env - the environment (harness variables are removed before the spawn)
+ * @param limits - time limits of the invocation
+ * @throws when the checkout defines no `test:file` script
+ */
+export async function runTestFilesTogether(
+  root: string,
+  commit: string,
+  files: readonly string[],
+  env: NodeJS.ProcessEnv,
+  limits: ProcessLimits = DEFAULT_LIMITS,
+): Promise<FileRunOutcome[]> {
+  requireFileScript(root, commit);
+  const startedMs = Date.now();
+  const ran = await spawn("bun", ["run", FILE_TEST_SCRIPT, ...files], root, suiteChildEnv(env), limits);
+  const incomplete = ran.killFailure ?? (ran.timeout !== undefined ? `timed out after ${String(ran.timeout.elapsedMs)} ms` : undefined);
+  return outcomesOfTogetherRun(files, { status: ran.status, output: ran.output, durationMs: Date.now() - startedMs, ...(incomplete !== undefined ? { incomplete } : {}) });
 }
 
 /**
@@ -526,7 +548,8 @@ export function outcomesOfTogetherRun(
   if (run.incomplete !== undefined) return files.map((file) => outcome(file, 1, run.incomplete));
   if (run.status === 0) return files.map((file) => outcome(file, 0));
   if (run.status !== 1) return files.map((file) => outcome(file, run.status));
-  const failing = parseFailingTestFiles(run.output);
+  // reason: a runner that colours its output (FORCE_COLOR) wraps `FAIL` and the path in escape codes; the line pattern needs plain text.
+  const failing = parseFailingTestFiles(run.output.replace(ANSI_COLOR, ""));
   const isFailing = (file: string): boolean => failing.some((f) => f === file || f.endsWith(`/${file}`) || file.endsWith(`/${f}`));
   if (!files.some(isFailing)) {
     return files.map((file) => outcome(file, 1, "the batched run failed (exit 1) but no failing test file could be read from its output"));
