@@ -19,7 +19,7 @@
  *               after a template revision to @2 a document pinned to @1 stays clean and show returns @2
  *   REGRESSION: show --blank --json and the YAML agree on the dimension ids
  *
- * @spec_ref spec-every-document-is-stored-as-structured-fields-validated-by AC-ST-3
+ * @spec_ref spec-every-document-is-stored-as-structured-fields-validated-by
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
