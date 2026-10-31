@@ -13,6 +13,7 @@
 import { describe, expect, it } from "vitest";
 import { MILESTONE_DIMENSIONS, ok, type DocRecord, type MilestoneDimension, type MilestoneReview, type PlanBundle } from "@lore/core";
 import { InMemoryStore } from "../../src/store/in-memory-store.js";
+import { coverFailedDimensions } from "../../src/service/milestone-review-inputs.js";
 import { ReviewLeases, planLeaseKey } from "../../src/service/review-batch-lease.js";
 import { ReviewBatchRunner, type BatchErrorRecord, type BatchRunPorts } from "../../src/service/review-batch-service.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint } from "../../src/service/milestone-review.js";
@@ -42,7 +43,7 @@ async function runWithoutFiling(slug: string, failing: MilestoneDimension | unde
   const runner = new ReviewBatchRunner({
     getPlanBundle: async () => ok(bundle),
     listReviewDocs: async () => ok(docs),
-    issueCoverage: async () => ok([]),
+    issueCoverage: async (_planId, failed) => ok(coverFailedDimensions(failed, [])),
   });
   const ports: BatchRunPorts = {
     acquirePlanLease: (planId) => lease.acquire(planLeaseKey(planId)),
