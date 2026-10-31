@@ -60,6 +60,8 @@ import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { archivePlanWithoutCascade } from "../helpers/archive-plan-legacy.js";
+import { execFileSync } from "child_process";
+import { landTask, type TaskWorld } from "./support/land-task.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -103,10 +105,38 @@ function parseSlug(stdout: string): string {
  * task-archive-sweep-gate-disable-is-silently-inert-a-wholesale regression).
  */
 function disablePlanCloseGate(dir: string): void {
-  patchLoreConfig(dir, ["workflow:", "  gates:", '    "plan-close":', "      enabled: false", ""].join("\n"));
+  patchLoreConfig(
+    dir,
+    [
+      "workflow:", "  gates:", '    "plan-close":', "      enabled: false",
+      // approve compiles each straggler's done contract from these commands (a code task needs all three)
+      "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"', "",
+    ].join("\n"),
+  );
 }
 
 let tmpDir: string;
+const wtRoots: string[] = [];
+let landingSeq = 0;
+
+/**
+ * The floors judge the stored contract (AC-DCS1-7): the straggler is approved, claimed on a branch of its own, landed on main and,
+ * when `passes` is true, holds a runner pass for every contract oracle; its claim is then released so the sweep sees an unclaimed task.
+ */
+async function landStraggler(task: string, passes: boolean): Promise<void> {
+  landingSeq += 1;
+  const branch = `straggler-${landingSeq}`;
+  const wtRoot = mkdtempSync(join(tmpdir(), "lore-archive-sweep-wt-"));
+  wtRoots.push(wtRoot);
+  const world: TaskWorld = {
+    dir: tmpDir,
+    git: (args) => execFileSync("git", [...args], { cwd: tmpDir, encoding: "utf8" }).trim(),
+    lore: (args) => runLore([...args], tmpDir),
+  };
+  await landTask(world, { slug: task, branch, worktree: join(wtRoot, branch), claimValue: "branch", session: "sweep", recordPasses: passes });
+  const released = runLore(["release", task], tmpDir);
+  expect(released.exitCode, released.stderr).toBe(0);
+}
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-archive-sweep-cli-test-"));
@@ -121,13 +151,14 @@ beforeEach(() => {
 afterEach(() => {
   try {
     rmSync(tmpDir, { recursive: true, force: true });
+    for (const root of wtRoots.splice(0)) rmSync(root, { recursive: true, force: true });
   } catch {
     // best-effort
   }
 });
 
 describe("lore archive — HAPPY/STATE (sweep -> apply -> re-sweep)", () => {
-  it("AC-097-3: sweep reports a done_plan_straggler with a literal repair, apply archives it, re-sweep is clean", () => {
+  it("AC-097-3: sweep reports a done_plan_straggler with a literal repair, apply archives it, re-sweep is clean", async () => {
     disablePlanCloseGate(tmpDir);
 
     const prdResult = runLore(["create", "prd", "--title", "Archive Sweep PRD", "--content", "root", "--no-ai"], tmpDir);
@@ -173,11 +204,7 @@ describe("lore archive — HAPPY/STATE (sweep -> apply -> re-sweep)", () => {
     // D3's "unconditional" sentence). D8 supersedes that sentence — the sweep now archives a straggler only if
     // `lore done` would — so the HAPPY straggler carries a runner-captured pass. The evidence-less path is
     // pinned by the floor-refused case below.
-    const evidenceResult = runLore(
-      ["evidence", taskSlug, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"],
-      tmpDir,
-    );
-    expect(evidenceResult.exitCode).toBe(0);
+    await landStraggler(taskSlug, true);
     archivePlanWithoutCascade(tmpDir, planSlug);
 
     const sweepResult = runLore(["archive", "--sweep", "--json"], tmpDir);
@@ -210,7 +237,7 @@ describe("lore archive — HAPPY/STATE (sweep -> apply -> re-sweep)", () => {
 });
 
 describe("lore archive — NEGATIVE/STATE (a floor-refused straggler stays open; D8 / BR-1072 / #173)", () => {
-  it("an evidence-less straggler is skipped with its floor, stays open, --json carries floor, --sweep still lists it (exit 3), and a handoff still archives", () => {
+  it("an evidence-less straggler is skipped with its floor, stays open, --json carries floor, --sweep still lists it (exit 3), and a handoff still archives", async () => {
     disablePlanCloseGate(tmpDir);
     const prdSlug = parseSlug(
       runLore(["create", "prd", "--title", "Floor Sweep PRD", "--content", "root", "--no-ai"], tmpDir).stdout,
@@ -230,6 +257,7 @@ describe("lore archive — NEGATIVE/STATE (a floor-refused straggler stays open;
         tmpDir,
       ).stdout,
     );
+    await landStraggler(taskSlug, false);
 
     // Expired handoff under the archived plan (created_at backdated past the 7-day default TTL).
     const handoffSlug = parseSlug(runLore(["handoff", "--next", "resume", "--plan", planSlug], tmpDir).stdout);

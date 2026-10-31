@@ -12,7 +12,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { Database } from "bun:sqlite";
+import { landTask, type TaskWorld } from "./support/land-task.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -93,19 +95,41 @@ function createTask(title: string): string {
   return slugOf(r.stdout);
 }
 
-function addAttestedPass(taskSlug: string): void {
-  const r = runLore(
-    ["evidence", taskSlug, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"],
-    tmpDir,
-  );
-  expect(r.exitCode, `${r.stdout}\n${r.stderr}`).toBe(0);
+const wtRoots: string[] = [];
+let landingSeq = 0;
+
+/**
+ * The floors judge the stored contract (AC-DCS1-7): the task is approved, claimed on a branch of its own and landed on main;
+ * with `passes` it also holds a runner pass for every contract oracle (the old `addAttestedPass`), without it none. The claim is then
+ * released, so a bulk verb sees an unclaimed task. A task that went through this is no longer `draft` (approve moved it on).
+ */
+async function landAttested(taskSlug: string, passes = true): Promise<void> {
+  landingSeq += 1;
+  const branch = `bulk-${landingSeq}`;
+  const wtRoot = mkdtempSync(join(tmpdir(), "lore-bulk-lifecycle-wt-"));
+  wtRoots.push(wtRoot);
+  const world: TaskWorld = {
+    dir: tmpDir,
+    git: (args) => execFileSync("git", [...args], { cwd: tmpDir, encoding: "utf8" }).trim(),
+    lore: (args) => runLore([...args], tmpDir),
+  };
+  await landTask(world, { slug: taskSlug, branch, worktree: join(wtRoot, branch), claimValue: "branch", session: "bulk", recordPasses: passes });
+  const released = runLore(["release", taskSlug], tmpDir);
+  expect(released.exitCode, released.stderr).toBe(0);
 }
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-bulk-lifecycle-test-"));
   makeCleanTreeRepo(tmpDir);
   expect(runLore(["init"], tmpDir).exitCode).toBe(0);
-  patchLoreConfig(tmpDir, "workflow:\n  review:\n    judgment_required_types: []\n");
+  // approve compiles each task's done contract from these commands (a code task needs all three)
+  patchLoreConfig(
+    tmpDir,
+    [
+      "workflow:", "  review:", "    judgment_required_types: []",
+      "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"', "",
+    ].join("\n"),
+  );
   const prd = runLore(["create", "prd", "--title", "Bulk PRD", "--content", "root", "--no-ai"], tmpDir);
   expect(prd.exitCode).toBe(0);
   prdSlug = slugOf(prd.stdout);
@@ -116,30 +140,32 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(tmpDir, { recursive: true, force: true });
+  for (const root of wtRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 describe("bulk lifecycle: preview then apply", () => {
-  it("preview then apply: ids preview exits 3 writing nothing, apply writes each row once with the reason on its audit", () => {
+  it("preview then apply: ids preview exits 3 writing nothing, apply writes each row once with the reason on its audit", async () => {
     const [a, b, c] = [createTask("Alpha"), createTask("Beta"), createTask("Gamma")] as [string, string, string];
-    // archive goes through the same `lore done` floors as every other write: an archived task holds an attested pass.
-    for (const slug of [a, b, c]) addAttestedPass(slug);
+    // archive goes through the same `lore done` floors as every other write: an archived task is landed and holds its contract passes.
+    for (const slug of [a, b, c]) await landAttested(slug);
+    const start = statusOf(a, tmpDir); // approve moved the tasks past draft
     const versionsBefore = [a, b, c].map((s) => versionOf(s, tmpDir));
 
     const preview = bulkJson(["archive", a, b, c], tmpDir);
     expect(preview.exitCode).toBe(3);
     expect(preview.mode).toBe("preview");
     expect(preview.rows.map((r) => r.slug).sort()).toEqual([a, b, c].sort());
-    expect(preview.rows.every((r) => r.target === "archived" && r.status === "draft")).toBe(true);
+    expect(preview.rows.every((r) => r.target === "archived" && r.status === start)).toBe(true);
     // STATE: a preview writes nothing.
-    expect([a, b, c].map((s) => statusOf(s, tmpDir))).toEqual(["draft", "draft", "draft"]);
+    expect([a, b, c].map((s) => statusOf(s, tmpDir))).toEqual([start, start, start]);
     expect([a, b, c].map((s) => versionOf(s, tmpDir))).toEqual(versionsBefore);
 
     // --where selects the same rows through the lore list filters.
-    const byWhere = bulkJson(["archive", "--where", "type=task,status=draft"], tmpDir);
+    const byWhere = bulkJson(["archive", "--where", `type=task,status=${start}`], tmpDir);
     expect(byWhere.exitCode).toBe(3);
     expect(byWhere.rows.map((r) => r.slug).sort()).toEqual([a, b, c].sort());
     // BOUNDARY: nothing matches -> exit 0.
-    expect(bulkJson(["archive", "--where", "type=task,status=active"], tmpDir).exitCode).toBe(0);
+    expect(bulkJson(["archive", "--where", "type=task,status=in-review"], tmpDir).exitCode).toBe(0);
     // older-than keeps only rows older than N days: every fixture row is minutes old.
     expect(bulkJson(["archive", "--where", "type=task,older-than=30d"], tmpDir).exitCode).toBe(0);
 
@@ -149,7 +175,7 @@ describe("bulk lifecycle: preview then apply", () => {
     expect(runLore(["bulk", "archive", "--apply", "--reason", "x"], tmpDir).exitCode).toBe(2);
     expect(runLore(["bulk", "nuke", a], tmpDir).exitCode).toBe(2);
     expect(runLore(["bulk", "archive", "--where", "colour=red"], tmpDir).exitCode).toBe(2);
-    expect(statusOf(a, tmpDir)).toBe("draft");
+    expect(statusOf(a, tmpDir)).toBe(start);
 
     const apply = bulkJson(["archive", a, b, c, "--apply", "--reason", "sprint cleanup"], tmpDir);
     expect(apply.exitCode).toBe(0);
@@ -243,10 +269,12 @@ describe("bulk lifecycle: preview then apply", () => {
 });
 
 describe("bulk lifecycle: row fails alone", () => {
-  it("row fails alone: a stale row and a gate-refused row FAIL, the third is written, exit 1", () => {
+  it("row fails alone: a stale row and a gate-refused row FAIL, the third is written, exit 1", async () => {
     const [ok, stale, gated] = [createTask("Fine"), createTask("Moves"), createTask("NoEvidence")] as [string, string, string];
-    addAttestedPass(ok);
-    addAttestedPass(stale);
+    await landAttested(ok);
+    await landAttested(stale);
+    await landAttested(gated, false); // landed, but no runner pass of its contract: the attested-pass floor refuses it
+    const start = statusOf(stale, tmpDir);
 
     // The preview the apply is pinned to.
     const preview = bulkJson(["done", ok, stale, gated], tmpDir);
@@ -275,8 +303,8 @@ describe("bulk lifecycle: row fails alone", () => {
 
     // The failed rows wrote nothing: statuses unchanged and the stale row kept only the title edit's version.
     expect(statusOf(ok, tmpDir)).toBe("archived");
-    expect(statusOf(stale, tmpDir)).toBe("draft");
-    expect(statusOf(gated, tmpDir)).toBe("draft");
+    expect(statusOf(stale, tmpDir)).toBe(start);
+    expect(statusOf(gated, tmpDir)).toBe(start);
     expect(versionOf(stale, tmpDir)).toBe(staleVersionNow);
     // No retry: asking again does not rescue the stale row (its pinned version is still behind).
     const retry = bulkJson(["done", `${stale}@${pinned.get(stale)}`, "--apply"], tmpDir);
@@ -313,9 +341,9 @@ describe("bulk lifecycle: draft can be abandoned", () => {
     expect(runLore(["audit", plan, "--json"], tmpDir).stdout).toContain("no longer wanted");
   });
 
-  it("draft can be abandoned: archived -> deprecated is INVALID_TRANSITION (set exits 4, bulk row FAILED, exit 1)", () => {
+  it("draft can be abandoned: archived -> deprecated is INVALID_TRANSITION (set exits 4, bulk row FAILED, exit 1)", async () => {
     const task = createTask("Already archived");
-    addAttestedPass(task);
+    await landAttested(task);
     expect(bulkJson(["archive", task, "--apply", "--reason", "done with it"], tmpDir).exitCode).toBe(0);
     expect(runLore(["set", task, "--status", "deprecated"], tmpDir).exitCode).toBe(4);
     const bulk = bulkJson(["deprecate", task, "--apply", "--reason", "too late"], tmpDir);
@@ -327,13 +355,14 @@ describe("bulk lifecycle: draft can be abandoned", () => {
 });
 
 describe("bulk lifecycle: archive --apply exit code", () => {
-  it("lore done refuses a task with no attested pass (the CLI half of the former lore_done parity case)", () => {
+  it("lore done refuses a task with no attested pass (the CLI half of the former lore_done parity case)", async () => {
     const without = createTask("Refused via CLI");
-    expect(statusOf(without, tmpDir)).toBe("draft");
+    await landAttested(without, false); // landed, with no runner pass of its contract
+    const before = statusOf(without, tmpDir);
     const cliRefusal = runLore(["done", without], tmpDir);
     expect(cliRefusal.exitCode).toBe(4);
     expect(cliRefusal.stderr).toContain("[floor: attested-pass]");
-    expect(statusOf(without, tmpDir)).toBe("draft");
+    expect(statusOf(without, tmpDir)).toBe(before);
   });
 
   it("lore archive --apply exits 1 when a candidate failed (INVALID_TRANSITION), 0 when none did", () => {
@@ -341,8 +370,16 @@ describe("bulk lifecycle: archive --apply exit code", () => {
     expect(runLore(["set", planSlug, "--status", "approved"], tmpDir).exitCode).toBe(0);
     // An open task under an archived plan is an R4 candidate; in-review -> archived is not a legal step. BR-1379 no
     // longer lets the write path create it under an archived plan, so the plan is archived directly afterwards.
-    const straggler = createTask("Straggler in review");
-    addAttestedPass(straggler);
+    // reason: a task is approved with its contract before it can be archived, and approved -> in-review is not a lifecycle step, so
+    // the failing candidate here is an expired handoff (R3) parked in review: the same illegal archive step, with no contract.
+    const straggler = slugOf(runLore(["handoff", "--next", "resume", "--plan", planSlug], tmpDir).stdout);
+    const handoffId = (JSON.parse(runLore(["get", straggler, "--json"], tmpDir).stdout) as { data: { doc: { id: string } } }).data.doc.id;
+    const db = new Database(join(tmpDir, ".lore", "lore.db"));
+    try {
+      db.query("UPDATE docs SET created_at = ? WHERE id = ?").run(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), handoffId);
+    } finally {
+      db.close();
+    }
     expect(runLore(["set", straggler, "--status", "in-review"], tmpDir).exitCode).toBe(0);
     archivePlanWithoutCascade(tmpDir, planSlug);
     expect(runLore(["archive", "--sweep"], tmpDir).exitCode).toBe(3);

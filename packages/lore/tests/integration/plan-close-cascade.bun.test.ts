@@ -20,8 +20,8 @@
  *
  * RE-BASELINED by spec-approval-and-plan-closure-go-through-the-same-checks-on
  * (AC-AP-4, BR-1072, issue #47). The cascade now archives a member task only when
- * it clears every floor `lore done` checks (attested pass, red-first, no-new-tests,
- * unfiltered-run), checked through the injected DoneFloorPort. Locked AC-097-2's
+ * it clears every floor `lore done` checks (attested pass, red-first,
+ * unfiltered-run, contract-oracles, judged by the stored contract), checked through the injected DoneFloorPort. Locked AC-097-2's
  * oracle stays green for floor-clearing tasks: the HAPPY case and the REGRESSION
  * case below used to archive a task holding NO evidence at all (original assertion:
  * `cascade.archived` ids equal [task, handoff] and `cascade.skipped` equals [] for
@@ -48,7 +48,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync } from "fs";
+import { appendFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "fs";
+import { execFileSync } from "child_process";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp, type App } from "../../src/app.js";
@@ -60,12 +61,26 @@ import { runOfName } from "../helpers/test-run-identity.js";
 import { passMilestoneReview } from "../helpers/plan-review-fixture.js";
 
 let tmpDir: string;
+/** The commit the fixture's check tasks compile their contract at, and main's tip: the commit a runner pass of a check task is taken on. */
+let rootCommit = "";
+let mainHead = "";
 
 beforeEach(() => {
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-plan-close-cascade-test-")));
+  // reason: a check task is judged by the contract compiled at a commit and by passes taken on a main commit that contains it
+  // (AC-DCS1-19), so the corpus lives in a git repository on main
+  const git = (...args: string[]): string =>
+    execFileSync("git", ["-c", "user.email=fixture@example.invalid", "-c", "user.name=fixture", ...args], { cwd: tmpDir, encoding: "utf8" }).trim();
+  git("init", "-q", "-b", "main");
+  appendFileSync(join(tmpDir, ".git", "info", "exclude"), ".lore/\n");
+  writeFileSync(join(tmpDir, "README.md"), "fixture\n");
+  git("add", "-A");
+  git("commit", "-q", "-m", "fixture base");
+  rootCommit = git("rev-parse", "HEAD");
+  mainHead = rootCommit;
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
-  const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());
+  const app = createApp(join(loreDir, "lore.db"), undefined, { ...liveAmbient(), cwd: tmpDir }, liveWriteContext());
   app.close();
 });
 
@@ -91,7 +106,7 @@ function openApp(extra: Record<string, unknown> = {}): App {
     ...extra,
     workflow: { review: { judgment_required_types: [] }, ...extraWorkflow },
   } as unknown as LoreConfig;
-  return createApp(dbPath(), config, liveAmbient(), liveWriteContext()) as App;
+  return createApp(dbPath(), config, { ...liveAmbient(), cwd: tmpDir }, liveWriteContext()) as App;
 }
 
 /** A runner-attested pass — the only shape that clears `lore done`'s attested-pass floor. */
@@ -102,7 +117,8 @@ function attestedPass(): VerifiedEvidenceInput {
     result: "pass",
     recorded_by: "runner",
     capture_source: "runner",
-    attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+    // reason: AC-DCS1-19 — a check task's pass counts when it ran on a main commit that contains the contract's compile commit
+    attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, head_sha: mainHead },
   };
 }
 
@@ -138,13 +154,32 @@ async function makeApprovedPlan(app: App): Promise<DocRecord> {
   return approved.value;
 }
 
-async function makeTask(app: App, plan: DocRecord, title: string): Promise<DocRecord> {
+/**
+ * A task holding the stored contract `lore approve` would compile (stored straight into this corpus: its config has no commands to
+ * compile from). A check task (default) is never claimed and lands nothing; a `code` task is the one a claim can hold (`fresh claim`).
+ * `redRequired` keeps the red run required, which only a runner-produced red row satisfies.
+ */
+async function makeTask(app: App, plan: DocRecord, title: string, opts: { kind?: "check" | "code"; redRequired?: boolean } = {}): Promise<DocRecord> {
+  const kind = opts.kind ?? "check";
   return mustCreate(app, {
     type: "task",
     title,
     parent_id: plan.id,
     content: "## Task\n\nbody",
-    extra: { kind: "check", plan_id: plan.id },
+    extra: {
+      kind,
+      plan_id: plan.id,
+      done_contract: {
+        compiled_at_commit: rootCommit,
+        kind,
+        base_branch: "main",
+        oracles: [],
+        red_required: opts.redRequired === true,
+        landing_route: kind === "code" ? "main" : "none",
+        new_symbols: [],
+        added_oracles: [],
+      },
+    },
   } as CreateDocInput);
 }
 
@@ -213,9 +248,10 @@ describe("plan-close cascade (R1) — NEGATIVE", () => {
     const app = openApp();
     try {
       const plan = await makeApprovedPlan(app);
-      const freshTask = await makeTask(app, plan, "Fresh-claimed task");
+      // a code task: a check task is never claimed (AC-DCS1-14), and a code claim names its branch
+      const freshTask = await makeTask(app, plan, "Fresh-claimed task", { kind: "code" });
 
-      const claimResult = await app.taskWorkflowService.claim(freshTask.id, { by: "agent:holder", harnessRun: runOfName("agent:holder") });
+      const claimResult = await app.taskWorkflowService.claim(freshTask.id, { by: "agent:holder", harnessRun: runOfName("agent:holder"), worktree: "wt-fresh-claimed" });
       expect(claimResult.ok).toBe(true);
 
       await passMilestoneReview(app.corpusService, plan.id);
@@ -330,10 +366,10 @@ async function seedFloorFixture(app: App): Promise<FloorFixture> {
   const t1 = await makeTask(app, plan, "T1 attested");
   await giveAttestedPass(app, t1);
   const t2 = await makeTask(app, plan, "T2 no evidence");
-  const t3 = await makeTask(app, plan, "T3 red-first without red row");
+  const t3 = await makeTask(app, plan, "T3 red-first without red row", { redRequired: true });
   await giveAttestedPass(app, t3);
-  const t4 = await makeTask(app, plan, "T4 fresh claim");
-  const claimed = await app.taskWorkflowService.claim(t4.id, { by: "agent:holder", harnessRun: runOfName("agent:holder") });
+  const t4 = await makeTask(app, plan, "T4 fresh claim", { kind: "code" });
+  const claimed = await app.taskWorkflowService.claim(t4.id, { by: "agent:holder", harnessRun: runOfName("agent:holder"), worktree: "wt-t4-fresh" });
   if (!claimed.ok) throw new Error(`claim failed: ${JSON.stringify(claimed.error)}`);
   const handoffResult = await app.sessionService!.writeHandoff({
     by: "tester",

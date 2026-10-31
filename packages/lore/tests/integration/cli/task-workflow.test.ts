@@ -216,7 +216,7 @@ describe("lore claim — HAPPY", () => {
     const planSlug = createPlan("Workflow Plan");
     const taskSlug = createTask(planSlug, "Claimable Task");
 
-    const result = runLore(["claim", taskSlug], tmpDir, "alice");
+    const result = runLore(["claim", taskSlug, "--worktree", `wt-${taskSlug}`], tmpDir, "alice");
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Claimed");
@@ -227,7 +227,7 @@ describe("lore claim — HAPPY", () => {
     const planSlug = createPlan("Workflow Plan JSON");
     const taskSlug = createTask(planSlug, "Claimable Task JSON");
 
-    const result = runLore(["claim", taskSlug, "--json"], tmpDir, "alice");
+    const result = runLore(["claim", taskSlug, "--worktree", `wt-${taskSlug}`, "--json"], tmpDir, "alice");
 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as { ok: boolean; data?: { doc?: { extra?: Record<string, unknown> } } };
@@ -243,8 +243,8 @@ describe("lore claim — NEGATIVE", () => {
     const planSlug = createPlan("Conflict Plan");
     const taskSlug = createTask(planSlug, "Contested Task");
 
-    runLore(["claim", taskSlug], tmpDir, "alice");
-    const result = runLore(["claim", taskSlug], tmpDir, "bob");
+    runLore(["claim", taskSlug, "--worktree", `wt-${taskSlug}`], tmpDir, "alice");
+    const result = runLore(["claim", taskSlug, "--worktree", `wt-${taskSlug}`], tmpDir, "bob");
 
     expect(result.exitCode).toBe(5);
     expect(result.stderr).toContain(sessionActorFor("alice"));
@@ -254,8 +254,8 @@ describe("lore claim — NEGATIVE", () => {
     const planSlug = createPlan("Steal Plan");
     const taskSlug = createTask(planSlug, "Stealable Task");
 
-    runLore(["claim", taskSlug], tmpDir, "alice");
-    const result = runLore(["claim", taskSlug, "--steal"], tmpDir, "bob");
+    runLore(["claim", taskSlug, "--worktree", `wt-${taskSlug}`], tmpDir, "alice");
+    const result = runLore(["claim", taskSlug, "--worktree", `wt-${taskSlug}`, "--steal"], tmpDir, "bob");
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain(sessionActorFor("bob"));
@@ -274,7 +274,7 @@ describe("lore release", () => {
     const planSlug = createPlan("Release Plan");
     const taskSlug = createTask(planSlug, "Released Task");
 
-    runLore(["claim", taskSlug], tmpDir, "alice");
+    runLore(["claim", taskSlug, "--worktree", `wt-${taskSlug}`], tmpDir, "alice");
     const result = runLore(["release", taskSlug], tmpDir, "alice");
 
     expect(result.exitCode).toBe(0);
@@ -285,7 +285,7 @@ describe("lore release", () => {
     const planSlug = createPlan("Release Conflict Plan");
     const taskSlug = createTask(planSlug, "Guarded Task");
 
-    runLore(["claim", taskSlug], tmpDir, "alice");
+    runLore(["claim", taskSlug, "--worktree", `wt-${taskSlug}`], tmpDir, "alice");
     const result = runLore(["release", taskSlug], tmpDir, "bob");
 
     expect(result.exitCode).toBe(5);
@@ -295,7 +295,7 @@ describe("lore release", () => {
     const planSlug = createPlan("Release Force Plan");
     const taskSlug = createTask(planSlug, "Forcibly Released Task");
 
-    runLore(["claim", taskSlug], tmpDir, "alice");
+    runLore(["claim", taskSlug, "--worktree", `wt-${taskSlug}`], tmpDir, "alice");
     const result = runLore(["release", taskSlug, "--force"], tmpDir, "bob");
 
     expect(result.exitCode).toBe(0);
@@ -558,7 +558,7 @@ describe("lore tree / lore list — workflow badges (AC-WF-9)", () => {
   it("a claimed task shows a claimed: badge in `lore tree <plan>`", () => {
     const planSlug = createPlan("Badge Plan");
     const taskSlug = createTask(planSlug, "Badged Task");
-    runLore(["claim", taskSlug], tmpDir, "alice");
+    runLore(["claim", taskSlug, "--worktree", `wt-${taskSlug}`], tmpDir, "alice");
 
     const result = runLore(["tree", planSlug], tmpDir);
     expect(result.exitCode).toBe(0);

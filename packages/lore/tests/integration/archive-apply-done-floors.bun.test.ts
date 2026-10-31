@@ -37,6 +37,8 @@ import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { archivePlanWithoutCascade } from "../helpers/archive-plan-legacy.js";
+import { execFileSync } from "child_process";
+import { landTask, type TaskWorld } from "./support/land-task.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -91,6 +93,11 @@ function disablePlanCloseGate(dir: string): void {
       "      enabled: false",
       "  review:",
       "    judgment_required_types: []",
+      // approve compiles each straggler's done contract from these commands (a code task needs all three)
+      "  done_contract:",
+      '    install: "echo install-ok"',
+      '    typecheck: "echo typecheck-ok"',
+      '    test_file: "echo Ran 1 tests in {file}"',
       "",
     ].join("\n"),
   );
@@ -124,8 +131,9 @@ interface Fixture {
 }
 
 let tmpDir: string;
+const wtRoots: string[] = [];
 
-function buildFixture(dir: string): Fixture {
+async function buildFixture(dir: string): Promise<Fixture> {
   disablePlanCloseGate(dir);
   const prd = parseSlug(mustRun(["create", "prd", "--title", "Apply Floors PRD", "--content", "root", "--no-ai"], dir));
   const planSlug = parseSlug(
@@ -142,10 +150,19 @@ function buildFixture(dir: string): Fixture {
     );
   const t1 = createTask("Floor Straggler Attested");
   const t2 = createTask("Floor Straggler Bare");
-  mustRun(
-    ["evidence", t1, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"],
+  // reason: the floors judge the stored contract (AC-DCS1-7): each straggler is approved, claimed on a branch of its own and landed on
+  // main; T1 also holds a runner pass for every contract oracle, T2 none. The claims are released so the sweep sees unclaimed tasks.
+  const world: TaskWorld = {
     dir,
-  );
+    git: (args) => execFileSync("git", [...args], { cwd: dir, encoding: "utf8" }).trim(),
+    lore: (args) => runLore([...args], dir),
+  };
+  const wtRoot = mkdtempSync(join(tmpdir(), "lore-archive-apply-wt-"));
+  wtRoots.push(wtRoot);
+  await landTask(world, { slug: t1, branch: "straggler-t1", worktree: join(wtRoot, "straggler-t1"), claimValue: "branch", session: "aad" });
+  await landTask(world, { slug: t2, branch: "straggler-t2", worktree: join(wtRoot, "straggler-t2"), claimValue: "branch", session: "aad", recordPasses: false });
+  mustRun(["release", t1], dir);
+  mustRun(["release", t2], dir);
 
   const handoffOut = mustRun(["handoff", "--next", "resume the floor work", "--plan", planSlug], dir);
   const r3 = parseSlug(handoffOut);
@@ -168,14 +185,15 @@ beforeEach(() => {
 afterEach(() => {
   try {
     rmSync(tmpDir, { recursive: true, force: true });
+    for (const root of wtRoots.splice(0)) rmSync(root, { recursive: true, force: true });
   } catch {
     // best-effort
   }
 });
 
 describe("lore archive --apply — honours the lore done floors (AC-AP-10, BR-1072)", () => {
-  it("(a) NEGATIVE: leaves the evidence-less straggler T2 open and prints '[SKIPPED] <T2> — refused by attested-pass'", () => {
-    const { t2 } = buildFixture(tmpDir);
+  it("(a) NEGATIVE: leaves the evidence-less straggler T2 open and prints '[SKIPPED] <T2> — refused by attested-pass'", async () => {
+    const { t2 } = await buildFixture(tmpDir);
 
     const apply = runLore(["archive", "--apply"], tmpDir);
 
@@ -184,8 +202,8 @@ describe("lore archive --apply — honours the lore done floors (AC-AP-10, BR-10
     expect(statusOf(t2, tmpDir)).not.toBe("archived");
   });
 
-  it("(b) HAPPY: archives the attested-pass straggler T1 in the same --apply", () => {
-    const { t1 } = buildFixture(tmpDir);
+  it("(b) HAPPY: archives the attested-pass straggler T1 in the same --apply", async () => {
+    const { t1 } = await buildFixture(tmpDir);
 
     const apply = runLore(["archive", "--apply"], tmpDir);
 
@@ -194,8 +212,8 @@ describe("lore archive --apply — honours the lore done floors (AC-AP-10, BR-10
     expect(statusOf(t1, tmpDir)).toBe("archived");
   });
 
-  it("(c) ERROR: --apply --json carries floor 'attested-pass' on T2's outcome and no floor on T1's", () => {
-    const { t1, t2 } = buildFixture(tmpDir);
+  it("(c) ERROR: --apply --json carries floor 'attested-pass' on T2's outcome and no floor on T1's", async () => {
+    const { t1, t2 } = await buildFixture(tmpDir);
 
     const apply = runLore(["archive", "--apply", "--json"], tmpDir);
 
@@ -210,8 +228,8 @@ describe("lore archive --apply — honours the lore done floors (AC-AP-10, BR-10
     expect(t1Outcome?.floor).toBeUndefined();
   });
 
-  it("(d) STATE: a following --sweep exits exactly 3 and still lists T2 with its refusing floor (never silent)", () => {
-    const { t1, t2 } = buildFixture(tmpDir);
+  it("(d) STATE: a following --sweep exits exactly 3 and still lists T2 with its refusing floor (never silent)", async () => {
+    const { t1, t2 } = await buildFixture(tmpDir);
     runLore(["archive", "--apply"], tmpDir);
 
     const sweep = runLore(["archive", "--sweep"], tmpDir);
@@ -222,8 +240,8 @@ describe("lore archive --apply — honours the lore done floors (AC-AP-10, BR-10
     expect(sweep.stdout).not.toContain(t1);
   });
 
-  it("(e) REGRESSION: the expired handoff R3 is archived by the same --apply", () => {
-    const { r3 } = buildFixture(tmpDir);
+  it("(e) REGRESSION: the expired handoff R3 is archived by the same --apply", async () => {
+    const { r3 } = await buildFixture(tmpDir);
 
     const apply = runLore(["archive", "--apply"], tmpDir);
 
