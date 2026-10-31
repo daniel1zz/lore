@@ -26,9 +26,10 @@
  * AI default (SPEC-026 §3 D5): assess has no non-AI mode. It runs with AI on every surface by default; only an
  * EXPLICIT `ai.default_per_surface.<surface> = false` config override requires `--ai`. `--no-ai` is always exit 2.
  *
- * Inputs measured once per batch (Part D): before the first review `assess` runs `bun run check:plan-close` and
- * `bun run test` ONCE on main's HEAD in a throwaway worktree (`assess-suite-runner.ts`) and hands that one result to
- * every plan's regression dimension. `--file-issues` then files the failed findings BY ROOT CAUSE (BR-1379): one GitHub
+ * Inputs measured once per batch (Part D): before the first review `assess` does the head-bound work (stale cited-rule
+ * refresh, plan criteria) once in a throwaway worktree of main's HEAD (`assess-suite-runner.ts`). No review runs the full suite:
+ * each plan's regression runs the selector's tests for its own changed paths at the commit holding its last landing
+ * (`assess-selection.ts`, `regression-at-head.ts`). `--file-issues` then files the failed findings BY ROOT CAUSE (BR-1379): one GitHub
  * issue per fingerprint (title `<dimension>: <cause> [fp:<12 hex>]`, full fingerprint in the body), an open issue with
  * the fingerprint is linked instead of duplicated, and each issue is linked to every plan sharing it
  * (`IssueFilingService` over `assess-file-issues.ts`); plan close accepts a failing review when every failed dimension
@@ -62,6 +63,7 @@ import { SpawnDecisionGitPort } from "../../../service/decision-git-port.js";
 import { GateAcceptanceService } from "../../../service/gate-acceptance-service.js";
 import type { App } from "../../../app.js";
 import { createGitCommitSuiteRunner } from "../assess-suite-runner.js";
+import { createGitTestSelection } from "../assess-selection.js";
 import { regressionAtHead } from "../../../service/regression-at-head.js";
 import { measurePlanCriteriaAtHead, resolveAssessedCommit, type ListDocsPort } from "../assess-attestation-wiring.js";
 import { createGitHeadCriteriaRunner } from "../assess-landing-attester.js";
@@ -267,9 +269,7 @@ export default defineLoreCommand({
       }
       const refs = { ok: true as const, value: planRefs };
 
-      // reason: Part D — the plan-close chain and the full suite run ONCE for the whole batch on main's HEAD (in a
-      // throwaway worktree, never this checkout) and every plan's regression dimension reads that one result.
-      // reason: main's head as the one batch suite run measured it (set by `measureSuite`); regression reads that commit, never a newer main.
+      // reason: main's head as the batch resolved it once (set by `measureSuite`); the regression head recheck reads that commit, never a newer main.
       let assessedCommit: string | undefined;
       type CriteriaFacts = Pick<MilestoneFacts, "attestation" | "criteria_attestation_ids" | "ai_criteria" | "failing_fact_files" | "criteria_run">;
       // reason: why the suite's worktree did not run a plan's criteria (set by `measureSuite`), so the fallback to a worktree of
@@ -316,20 +316,17 @@ export default defineLoreCommand({
                   inv.io.stderr.write(`Warning: could not re-verify ${failure.acIds.join(", ")} for ${failure.plan}: ${failure.message}\n`);
                 }
               };
-        // reason: BR-1497 — main's HEAD is looked up in the suite-result store first; the suite runs only when that
-        // commit has no measured result, so a second batch at the same commit runs nothing. No suite runs at a landing
-        // commit: the batch measures nothing per landing (spec D1). The app's suite service is already bound to the suite leases (BR-1511).
+        // reason: BR-1497 — no review runs the full suite; file runs are stored per (commit, file) by the app's suite service,
+        // already bound to the suite leases (BR-1511). The batch measures nothing per landing (spec D1).
         const suiteResults = app.suiteResultService;
         if (suiteResults === undefined) return { status: "not_measured", reason: "the suite-result store is not wired in this app" };
         const runner = createGitCommitSuiteRunner(inv.cwd, inv.env);
         // reason: ONE worktree at the assessed commit serves the stale cited-rule refresh (only when some plan cites a stale
-        // rule) and the plans' script criteria (BR-1498, AC-AO-3): `lookupOrRunWith` rides the suite's own worktree on a fresh
-        // run and opens one worktree for this work alone on a stored hit, so criteria run once per review either way.
+        // rule) and the plans' script criteria (BR-1498, AC-AO-3), so criteria run once per review.
         const stale = refreshStale === undefined ? ok(false) : await reviewService.hasStaleCitations(suiteRefs);
         if (!stale.ok) return { status: "not_measured", reason: formatErrorFor(inv, stale.error) };
-        // reason: BR-1496 (#534) — the batch no longer runs the full suite at main's head: each plan's regression reads the stored
-        // suite that contains ITS landings (a full suite runs at head only when none is stored or in flight). What the batch still
-        // does once is the head-bound work: the stale cited-rule refresh and the plans' criteria (BR-1498), in one worktree of head.
+        // reason: BR-1496 (#540) — no review runs the full suite: each plan's regression runs the selector's tests at the commit
+        // holding ITS last landing. What the batch does once is the head-bound work: the stale cited-rule refresh and the plans' criteria (BR-1498), in one worktree of head.
         const resolvedHead = await runner.resolveCommit("main");
         if (!resolvedHead.ok) {
           criteriaFallbackReason = `main's head could not be resolved: ${formatErrorFor(inv, resolvedHead.error)}`;
@@ -378,8 +375,6 @@ export default defineLoreCommand({
         readonly diffSource: DiffSourceRecord;
         readonly facts: MilestoneFacts;
         readonly rerunCriterion: ReturnType<typeof createAppCriterionRerunner> | undefined;
-        /** The stored suite the regression read as M; absent when none was read. */
-        readonly suite: SuiteRun | undefined;
       }
       /** Measures one plan's diff and facts: the one measurement both the hand run and the batch use. */
       const measurePlanFacts = async (ref: string): Promise<Result<MeasuredPlan, LoreError>> => {
@@ -406,12 +401,10 @@ export default defineLoreCommand({
           verifyRunner === undefined
             ? undefined
             : createAppCriterionRerunner(app, verifyRunner, { executionRoot: inv.cwd, by: actor, nowIso: () => new Date().toISOString() });
-        // reason: BR-1496 — regression is measured at the assessed commit: main's head suite (stored per commit, so a second plan at
-        // the same head runs nothing), each red file confirmed once and bisected alone; without the suite-result store regression
-        // stays not-measured, never pass.
+        // reason: BR-1496 — regression is measured on the selector's tests for the plan's changed paths at the commit holding its last
+        // landing (stored per (commit, file), so a second review runs nothing); red files are rechecked at the assessed head, bisected
+        // and confirmed alone. No full suite runs. Without the suite-result store regression stays not-measured, never pass.
         const suiteResults = app.suiteResultService;
-        // reason: the suite the regression read (M) is the one the judge and the main-red ledger see for THIS plan (BR-1496).
-        let reviewSuite: SuiteRun | undefined;
         let regressionFacts: Pick<MilestoneFacts, "regression" | "regression_files" | "head_suite_result_id" | "single_file_run_ids" | "assessed_commit" | "failing_fact_files" | "regression_causes"> = {};
         // reason: BR-1509 — when no task changes code, regression is `na` with no suite to run, so it is measured even without
         // the suite-result store.
@@ -426,6 +419,7 @@ export default defineLoreCommand({
               return await regressionAtHead(derivation.landings, derivation.unlanded_tasks, {
                 suites: suiteResults,
                 runner: regressionRunner,
+                selectTests: createGitTestSelection(inv.cwd, inv.env),
                 // reason: the head the batch resolved once, so main moving mid-run cannot move the recheck or the history under one review.
                 headRef: assessedCommit ?? "main",
                 firstParentHistory: createGitFirstParentHistory(inv.cwd, inv.env),
@@ -438,18 +432,16 @@ export default defineLoreCommand({
             }
           })();
           if (measured.ok) {
-            reviewSuite = measured.value.suite;
             const chargedFiles = [...new Set(measured.value.charged.map((c) => c.file))].sort();
             regressionFacts = {
               regression: measured.value.rows,
               regression_files: chargedFiles,
               regression_causes: measured.value.causes,
-              ...(measured.value.head !== undefined ? { head_suite_result_id: measured.value.head.result_id } : {}),
               single_file_run_ids: measured.value.single_file_run_ids,
               // reason: a plan kept open by a red file is re-reviewed when a later landing changes that file (BR-1379); the batch
               // compares these files with main's changes since the assessed commit.
               failing_fact_files: chargedFiles,
-              ...(measured.value.head !== undefined ? { assessed_commit: measured.value.head.commit } : {}),
+              ...(measured.value.assessed_commit !== undefined ? { assessed_commit: measured.value.assessed_commit } : {}),
             };
           } else {
             inv.io.stderr.write(`Warning: regression at head not measured for ${ref}: ${formatErrorFor(inv, measured.error)}\n`);
@@ -488,7 +480,7 @@ export default defineLoreCommand({
           ...(noTaskChangesCode ? { no_task_changes_code: true } : {}),
           not_seen_files: derivation.not_seen_files,
         };
-        return ok({ derivation, diffSource, facts, rerunCriterion, suite: reviewSuite });
+        return ok({ derivation, diffSource, facts, rerunCriterion });
       };
 
       /** Judges one plan from its landed diff: the one review step both the hand run and the batch use. */
@@ -496,8 +488,7 @@ export default defineLoreCommand({
         const measured = await measurePlanFacts(ref);
         if (!measured.ok) return measured;
         const { derivation, diffSource, facts, rerunCriterion } = measured.value;
-        // reason: the plan's own regression suite (M) wins over a batch-level one: reuse means each plan reads the suite that contains its landings.
-        const suiteOfPlan = measured.value.suite ?? suiteForPlan;
+        const suiteOfPlan = suiteForPlan;
         return reviewService.review(ref, {
           facts,
           ...(rerunCriterion !== undefined ? { rerunCriterion } : {}),

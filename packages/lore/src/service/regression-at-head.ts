@@ -1,22 +1,27 @@
 /**
- * Regression measured from a stored suite that contains the plan's landings, then attributed by batched bisection
- * (BR-1496, BR-1497; spec D1/D2/D6 of the earlier spec and D1-D3 of `spec-a-plan-s-regression-reuses-a-stored-suite-that-contains`).
+ * Regression measured on the selector's tests for a plan's changed paths at the commit holding its last landing, then attributed
+ * by batched bisection (BR-1496, BR-1497; spec `spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach` "Selection at close",
+ * "Accounting"; attribution as `spec-a-plan-s-regression-reuses-a-stored-suite-that-contains` D1-D3).
  *
- * Purpose: decide which test files main has red BECAUSE of a plan. The full suite is read at M, the newest stored measured
- *   suite at a main first-parent commit that contains every landing of the plan (a suite in flight that contains them is
- *   joined; a full suite runs at main's head only when neither exists, and is stored for the next plan). Files red at M are
- *   rechecked at head in one batched run; the files still red are bisected TOGETHER, one batched invocation per probed
- *   commit, and each charge rests on single-file runs. Only a transition at one of the plan's landing commits is the plan's regression.
- * Public surface: regressionAtHead, RegressionLandingInput, RegressionAtHeadPorts, HeadSuitePort, RegressionFinding,
- *   FileRegression, RegressionAtHead, regressionBisectionBudget.
+ * Purpose: decide which test files main has red BECAUSE of a plan, without ever running the full suite. The selection (the
+ *   selector's tests for the union of the landings' changed paths, read from L's tree) runs at L in one batched invocation;
+ *   files red at L are rechecked at main's head in one batched run; the files still red are bisected TOGETHER, one batched
+ *   invocation per probed commit, and each charge rests on single-file runs. Only a transition at one of the plan's landing
+ *   commits is the plan's regression. A test file the selection did not name is never run and never charged.
+ * Public surface: regressionAtHead, RegressionLandingInput, RegressionAtHeadPorts, HeadSuitePort, TestSelection, TestSelectionPort,
+ *   RegressionFinding, FileRegression, RegressionAtHead, regressionBisectionBudget.
  * Invariants:
- *   - M: the newest stored `measured` suite whose commit is on main's first-parent history at or above the position of the
- *     plan's LATEST landing (so it contains every landing); else the newest containing suite in flight (a live `suite:<sha>`
- *     lease), waited for and read from the store (never an unrunnable result; then look again, else run); else the full
- *     suite at head. A landing no main commit can be found for disables reuse (containment cannot be shown): the suite runs at head.
- *   - Head recheck (M is not head): every file red at M is run in ONE batched invocation at head; a file green there is run
- *     once alone at head before it is dropped; green alone = `green-at-head` (not looked at), red alone stays. A file green
- *     at M and red at head is never looked at.
+ *   - L: the main first-parent commit that contains the plan's LATEST landing (`firstParentCommitContaining` for a landing
+ *     off the chain). A landing no main commit can be found for makes regression `not-measured` (`unmappable`): L would not
+ *     contain it.
+ *   - Selection accounting: an unparseable test file makes regression `not-measured` and is named; an empty selection is `na`
+ *     with "no test reaches this plan's changes", never `pass`; a test the plan removed, an alias import resolving to nothing and a
+ *     changed path in no tree are named in the stored accounting and change no verdict. The accounting text rides the
+ *     selection row ("regression measured on N selected test files of M (selector accounting stored)").
+ *   - Selected files run at L in ONE batched invocation (`test:file` routes Bun and Node files itself), stored per (L, file)
+ *     with kind `batch`; a selection holding a declared-spawn test builds first. A later review reuses the stored rows.
+ *   - Head recheck (L is not head): every file red at L is run in ONE batched invocation at head; a file green there is run
+ *     once alone at head before it is dropped; green alone = `green-at-head` (not looked at), red alone stays.
  *   - Per remaining file: lower bound = the plan's earliest landing's first parent, or a newer commit with a stored
  *     SINGLE-FILE pass (or a measured suite not failing the file); the floor is decided by a single-file run (red = red-before,
  *     never charged). A stored `batch` row is only used as the result of a search step at a probed commit, never as the floor,
@@ -26,29 +31,21 @@
  *   - Confirmation: both ends of a found transition are re-run once each, each file ALONE (kind `confirm`); a disagreement
  *     (red in a batch but green alone, or red alone at the parent) is `not-measured` (`flaky-bisection`), never charged.
  *   - A file absent at a commit counts as not red there (no run), so a test the plan added is charged to the landing that added it.
- *   - A step that cannot complete (suite unrunnable, history unreadable, a run erroring or timing out) makes that file
- *     `not-measured` (and the gate not-measured); it is never a pass.
- *   - Fact rows: one for the suite read, one per red file, one per unlanded task. The dimension verdict is their fold (fail > not-measured > pass).
- *   - The review fingerprint hashes M's suite id and the stored run ids the verdict used (the head recheck's rows, the
+ *   - A step that cannot complete (history unreadable, a run erroring or timing out) makes that file `not-measured` (and the
+ *     gate not-measured); it is never a pass.
+ *   - Fact rows: one selection row, one per red file, one per unlanded task. The dimension verdict is their fold (fail > not-measured > pass).
+ *   - The review fingerprint hashes the stored run ids the verdict used (the selection's rows at L, the head recheck's rows, the
  *     floor, bisect and confirm runs); search-step batch rows are not hashed, they decide nothing.
- * Side-effect class: IO through the injected ports only (suite runs and joins, single-file and batched runs, store writes via the suite service).
+ * Side-effect class: IO through the injected ports only (selection, batched and single-file runs, store writes via the suite service).
  *
  * Reference: Google TAP / Chromium culprit finder: bisect the failing targets together over one build per revision, confirm the culprit alone.
- * @spec_ref spec-a-plan-s-regression-reuses-a-stored-suite-that-contains (AC-AC-1, AC-AC-2, AC-AC-3, BR-1496, BR-1497)
+ * @spec_ref spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach (AC-SC-3, AC-SC-4, BR-1496, BR-1497)
  */
 
 import { err, ok, type LoreError, type MilestoneFactRow, type RegressionNotMeasuredCause, type Result } from "@lore/core";
 import type { SuiteFileRunRecord, SuiteResultRecord } from "../store/store-interface.js";
 import { noCodeRegressionRow } from "./corpus-only-task.js";
-import type { SuiteRun } from "./milestone-review-inputs.js";
-import {
-  loreErrorText,
-  newestMeasuredAtOrAbove,
-  singleFileRunKey,
-  suiteRunOfResult,
-  type CommitSuiteRunnerPort,
-  type SingleFileRunKind,
-} from "./suite-result-service.js";
+import { loreErrorText, singleFileRunKey, type CommitSuiteRunnerPort, type RunBatchOptions, type SingleFileRunKind } from "./suite-result-service.js";
 
 /** One landing of the plan, as `deriveLandingDiffForPlan` reports it. */
 export interface RegressionLandingInput {
@@ -61,21 +58,41 @@ export interface RegressionLandingInput {
 
 /** The slice of `SuiteResultService` this module drives. */
 export interface HeadSuitePort {
-  readonly lookupOrRun: (ref: string, runner: CommitSuiteRunnerPort) => Promise<Result<SuiteResultRecord, LoreError>>;
+  /** Stored suite results (what an earlier measurement knows about a commit); never run here. */
   readonly listResults: () => Promise<Result<SuiteResultRecord[], LoreError>>;
   readonly listFileRuns: (key: string) => Promise<Result<SuiteFileRunRecord[], LoreError>>;
   readonly runSingleFile: (commit: string, file: string, kind: SingleFileRunKind, runner: CommitSuiteRunnerPort) => Promise<Result<SuiteFileRunRecord, LoreError>>;
   /** Runs the files together at a commit in ONE invocation, stored per (commit, file) with kind `batch`; one row per file, in the order given. */
-  readonly runBatch: (commit: string, files: readonly string[], runner: CommitSuiteRunnerPort) => Promise<Result<SuiteFileRunRecord[], LoreError>>;
-  /** The commits whose full suite is running now (live `suite:<sha>` leases). */
-  readonly listLiveSuiteCommits: () => Promise<Result<string[], LoreError>>;
-  /** Waits for the suite in flight at a commit and returns what is stored for it afterwards (measured, else the latest attempt, else null); runs nothing. */
-  readonly awaitSuiteResult: (commit: string) => Promise<Result<SuiteResultRecord | null, LoreError>>;
+  readonly runBatch: (commit: string, files: readonly string[], runner: CommitSuiteRunnerPort, options?: RunBatchOptions) => Promise<Result<SuiteFileRunRecord[], LoreError>>;
 }
+
+/**
+ * What the selector chose at the selection commit, as the service reads it (the adapter fills it from `scripts/changed-tests.ts`
+ * `selectForCommit`; the service never imports a script).
+ */
+export interface TestSelection {
+  /** The commit sha the selection was computed at (L). */
+  readonly commit: string;
+  /** The selected test files, sorted; `needsCompiledBinary` = the test declares `@spawns dist/lore`. */
+  readonly selected: readonly { readonly path: string; readonly needsCompiledBinary: boolean }[];
+  /** Every test file in the selector's universe at L (the M of "N selected test files of M"). */
+  readonly totalTestFiles: number;
+  /** Test files at L whose declaration block could not be parsed. */
+  readonly unparseable: readonly { readonly path: string; readonly message: string }[];
+  /** Selected through a parent tree and absent at L: the plan removed them; named, not run. */
+  readonly removedTests: readonly { readonly path: string }[];
+  /** The selector's own accounting text (per-runner counts, a reason per file, what it could not see); stored on the selection row. */
+  readonly accounting: string;
+}
+
+/** Selects the tests the landings' changed paths reach, from L's tree (git objects, never the working tree). */
+export type TestSelectionPort = (input: { readonly commit: string; readonly landingCommits: readonly string[] }) => Promise<Result<TestSelection, LoreError>>;
 
 /** Everything {@link regressionAtHead} calls out to. */
 export interface RegressionAtHeadPorts {
   readonly suites: HeadSuitePort;
+  /** The selector's tests for the landings' changed paths, at a commit. */
+  readonly selectTests: TestSelectionPort;
   readonly runner: CommitSuiteRunnerPort;
   /** The ref whose suite result is the assessed commit (`main`). */
   readonly headRef: string;
@@ -96,25 +113,24 @@ export interface RegressionFinding {
   readonly landing: string;
 }
 
-/** What was found for one red file of the suite read. */
+/** What was found for one file red at the selection commit. */
 export type FileRegression =
   | { readonly file: string; readonly outcome: "regression"; readonly landing: string }
   | { readonly file: string; readonly outcome: "other-commit"; readonly commit: string }
   | { readonly file: string; readonly outcome: "red-before"; readonly commit: string }
   | { readonly file: string; readonly outcome: "green-at-head"; readonly commit: string }
-  | { readonly file: string; readonly outcome: "no-landing" }
   | { readonly file: string; readonly outcome: "not-measured"; readonly reason: string; readonly cause: RegressionNotMeasuredCause };
 
 /** The measured regression facts of a plan. */
 export interface RegressionAtHead {
-  /** The suite the review read (M) and its stored result; `undefined` when no suite could be run. */
-  readonly head: { readonly commit: string; readonly result_id: string } | undefined;
-  /** The suite run of M as the judge reads it; `undefined` when `head` is. */
-  readonly suite: SuiteRun | undefined;
+  /** Main's head as this measurement resolved it (the head recheck's commit); `undefined` when no landing was measured. */
+  readonly assessed_commit: string | undefined;
+  /** The selection commit L and the counts the output states; `undefined` when no selection was made. */
+  readonly selection: { readonly commit: string; readonly selected: number; readonly total: number } | undefined;
   readonly files: readonly FileRegression[];
   /** Files charged to the plan (these fail the gate). */
   readonly charged: readonly RegressionFinding[];
-  /** Every stored run the verdict read or made, keyed `<file>@<commit>:<kind>`; the review fingerprint hashes them (BR-1497). M's own id is `head.result_id`. */
+  /** Every stored run the verdict read or made, keyed `<file>@<commit>:<kind>`; the review fingerprint hashes them (BR-1497). */
   readonly single_file_run_ids: readonly { readonly key: string; readonly id: string }[];
   /** Fact rows for `MilestoneFacts.regression`. */
   readonly rows: readonly MilestoneFactRow[];
@@ -138,6 +154,9 @@ function causesOf(rows: readonly MilestoneFactRow[]): RegressionNotMeasuredCause
 export function regressionBisectionBudget(commitsInRange: number): number {
   return Math.ceil(Math.log2(Math.max(1, commitsInRange))) + 4;
 }
+
+/** The reason of a `na` regression whose selection is empty (spec "Accounting"; AC-SC-4 asserts this text). */
+const NO_TEST_REACHES = "no test reaches this plan's changes";
 
 type FileState = "green" | "red";
 type Step<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly reason: string };
@@ -246,10 +265,10 @@ interface Attribution {
   readonly chargedCommits: ReadonlySet<string>;
   /** Index of the earliest main commit the plan can have changed; the bisection floor is the commit below it. */
   readonly earliestIndex: number;
-  /** Index of the latest main commit that brought a landing in: a suite at or above it contains every (mapped) landing. */
+  /** Index of the latest main commit that brought a landing in: the selection commit L sits there. */
   readonly latestIndex: number;
-  /** The unmappable landing that could have landed earliest; a transition after `afterIndex` may be it. */
-  readonly unmapped: { readonly landing: string; readonly afterIndex: number; readonly reason: string } | undefined;
+  /** The first landing no main commit could be found for, with why; L cannot be shown to contain it. */
+  readonly unmapped: { readonly landing: string; readonly reason: string } | undefined;
 }
 
 /** Maps every landing to the main first-parent commit that brought it in; an unmappable one only bounds where it could be. */
@@ -258,7 +277,7 @@ async function attributeLandings(real: readonly RegressionLandingInput[], histor
   const chargedCommits = new Set<string>();
   let earliestIndex = Number.MAX_SAFE_INTEGER;
   let latestIndex = -1;
-  let unmapped: { landing: string; afterIndex: number; reason: string } | undefined;
+  let unmapped: { landing: string; reason: string } | undefined;
   for (const landing of real) {
     const direct = position.get(landing.landing_commit);
     let mapped = direct === undefined ? undefined : landing.landing_commit;
@@ -275,38 +294,10 @@ async function attributeLandings(real: readonly RegressionLandingInput[], histor
       latestIndex = Math.max(latestIndex, index);
       continue;
     }
-    // reason: a landing reaches main AFTER the commit main stood at before it, so its transition cannot be at or below that commit.
-    const afterIndex = position.get(landing.main_before) ?? -1;
-    earliestIndex = Math.min(earliestIndex, afterIndex + 1);
-    if (unmapped === undefined || afterIndex < unmapped.afterIndex) unmapped = { landing: landing.landing_commit, afterIndex, reason };
+    // reason: a landing no main commit contains has no selection commit: L would not hold it, so the selection cannot be made (not-measured, never a guess).
+    unmapped ??= { landing: landing.landing_commit, reason };
   }
   return { chargedCommits, earliestIndex, latestIndex, unmapped };
-}
-
-/**
- * M: the newest stored measured suite containing every landing, else the newest containing suite in flight (joined), else `undefined`.
- * An unrunnable joined run is never M: the search then looks again (stored, then in flight), and `undefined` means "run at head".
- */
-async function findContainingSuite(ports: RegressionAtHeadPorts, history: readonly string[], minIndex: number): Promise<Result<SuiteResultRecord | undefined, LoreError>> {
-  const position = new Map(history.map((commit, index) => [commit, index] as const));
-  const tried = new Set<string>();
-  for (;;) {
-    const results = await ports.suites.listResults();
-    if (!results.ok) return results;
-    const stored = newestMeasuredAtOrAbove(results.value, history, minIndex, tried);
-    if (stored !== undefined) return ok(stored);
-    const live = await ports.suites.listLiveSuiteCommits();
-    if (!live.ok) return live;
-    // reason: only a run whose commit is on the chain at or above the latest landing contains every landing; one that misses a
-    // landing would read M without it (a file that landing turned red would be green there and never rechecked).
-    const joinable = live.value.filter((commit) => !tried.has(commit) && (position.get(commit) ?? -1) >= minIndex).sort((a, b) => (position.get(b) ?? -1) - (position.get(a) ?? -1));
-    const target = joinable[0];
-    if (target === undefined) return ok(undefined);
-    tried.add(target);
-    const awaited = await ports.suites.awaitSuiteResult(target);
-    if (!awaited.ok) return awaited;
-    if (awaited.value !== null && awaited.value.status === "measured") return ok(awaited.value);
-  }
 }
 
 /** One red file's search interval: `low` is known green, `high` is known red (history positions). */
@@ -546,10 +537,7 @@ async function decideFile(active: Active, history: readonly string[], attributio
     return notMeasured(`flaky during bisection: the confirmation runs disagree with the bisection at ${first} (confirm there alone: ${firstConfirm.value}; at its parent alone: ${parentConfirm.value})`, "flaky-bisection");
   }
   if (attribution.chargedCommits.has(first)) return { file, outcome: "regression", landing: first };
-  const unmapped = attribution.unmapped;
-  if (unmapped !== undefined && high > unmapped.afterIndex) {
-    return notMeasured(`red since ${first}, where landing ${unmapped.landing} could have reached main: it is not on main's first-parent history and no main commit containing it was found (${unmapped.reason}), so the transition cannot be attributed`, "unmappable");
-  }
+  // reason: every landing is mapped here (an unmapped one stops the measurement before any run), so a transition at a commit that is not a landing's is another commit's.
   return { file, outcome: "other-commit", commit: first };
 }
 
@@ -562,16 +550,15 @@ function rowOfFile(f: FileRegression): MilestoneFactRow {
     case "red-before":
       return { subject: f.file, verdict: "pass", detail: `red before the plan's first landing, at ${f.commit} (not charged)` };
     case "green-at-head":
-      return { subject: f.file, verdict: "pass", detail: `red in the suite read but green at main's head ${f.commit} (alone as well): the final state is green (not charged)` };
-    case "no-landing":
-      return { subject: f.file, verdict: "pass", detail: `red at main's head; the plan has no landing on main, so it is not this plan's (not charged)` };
+      return { subject: f.file, verdict: "pass", detail: `red at the selection commit but green at main's head ${f.commit} (alone as well): the final state is green (not charged)` };
     case "not-measured":
       return { subject: f.file, verdict: "not-measured", detail: f.reason, cause: f.cause };
   }
 }
 
 /**
- * Measures regression for a plan from a stored suite that contains its landings and decides what the gate charges.
+ * Measures regression for a plan on the selector's tests at the commit holding its last landing and decides what the gate charges.
+ * Runs no full suite on any path.
  *
  * @param landings - the plan's landings (one per landing commit)
  * @param unlandedTasks - tasks with no usable landing record (their changes have no measured diff: not-measured)
@@ -589,7 +576,7 @@ export async function regressionAtHead(
   // reason: BR-1509 — when every task is corpus-only no task changes code: nothing to bisect and no suite to run; the
   // regression dimension is `na`, never pass. A corpus-only task beside landed or unlanded tasks contributes nothing.
   if (landings.length === 0 && unlandedTasks.length === 0 && noCodeTasks.length > 0) {
-    return ok({ head: undefined, suite: undefined, files: [], charged: [], single_file_run_ids: [], rows: [noCodeRegressionRow(noCodeTasks)], causes: [] });
+    return ok({ assessed_commit: undefined, selection: undefined, files: [], charged: [], single_file_run_ids: [], rows: [noCodeRegressionRow(noCodeTasks)], causes: [] });
   }
   if (landings.length === 0 && unlandedTasks.length === 0) {
     return err({ code: "VALIDATION_ERROR", field: "landings", message: "regression at head needs at least one landing or unlanded task", rule: "BR-1496" });
@@ -600,82 +587,75 @@ export async function regressionAtHead(
     detail: `task ${slug} has no landing record, so its changes have no measured diff`,
     cause: "unlanded",
   }));
-  const unmeasured = (subject: string, detail: string): Result<RegressionAtHead, LoreError> => {
-    const rows: MilestoneFactRow[] = [{ subject, verdict: "not-measured", detail, cause: "unrunnable" }, ...unlandedRows];
-    return ok({ head: undefined, suite: undefined, files: [], charged: [], single_file_run_ids: [], rows, causes: causesOf(rows) });
+  const unmeasured = (subject: string, detail: string, cause: RegressionNotMeasuredCause = "unrunnable"): Result<RegressionAtHead, LoreError> => {
+    const rows: MilestoneFactRow[] = [{ subject, verdict: "not-measured", detail, cause }, ...unlandedRows];
+    return ok({ assessed_commit: undefined, selection: undefined, files: [], charged: [], single_file_run_ids: [], rows, causes: causesOf(rows) });
+  };
+  /** A verdict with no selection to run: `na`, with the reason (never `pass`). */
+  const nothingToRun = (subject: string, detail: string, selection: RegressionAtHead["selection"], assessed: string | undefined): Result<RegressionAtHead, LoreError> => {
+    const rows: MilestoneFactRow[] = [{ subject, verdict: "na", detail }, ...unlandedRows];
+    return ok({ assessed_commit: assessed, selection, files: [], charged: [], single_file_run_ids: [], rows, causes: causesOf(rows) });
   };
 
-  // reason: a plan with no landing on main has no containment to show and no history to search: it reads (or runs) the suite at head as before.
-  let headCommit = ports.headRef;
-  if (real.length > 0) {
-    const resolvedHead = await ports.runner.resolveCommit(ports.headRef);
-    if (!resolvedHead.ok) return unmeasured(ports.headRef, `the suite could not be run at ${ports.headRef}: ${loreErrorText(resolvedHead.error)}`);
-    headCommit = resolvedHead.value.commit;
-  }
-
-  const historyResult = real.length > 0 ? await ports.firstParentHistory(headCommit) : undefined;
-  let attribution: Attribution | undefined;
-  let suite: SuiteResultRecord | undefined;
-  if (historyResult?.ok === true) {
-    attribution = await attributeLandings(real, historyResult.value, ports);
-    // reason: a landing no main commit can be found for cannot be shown contained in any stored suite: reuse is off, the suite runs at head.
-    if (attribution.unmapped === undefined) {
-      const containing = await findContainingSuite(ports, historyResult.value, attribution.latestIndex);
-      if (!containing.ok) return unmeasured(headCommit, `the stored suites could not be searched: ${loreErrorText(containing.error)}`);
-      suite = containing.value;
-    }
-  }
-  if (suite === undefined) {
-    const looked = await ports.suites.lookupOrRun(ports.headRef, ports.runner);
-    if (!looked.ok) return unmeasured(ports.headRef, `the suite could not be run at ${ports.headRef}: ${loreErrorText(looked.error)}`);
-    suite = looked.value;
-  }
-  if (suite.status !== "measured") {
-    // reason: an unrunnable attempt is a stored row too (new id per attempt), so its id is part of the facts fingerprint (BR-1497).
-    const row: MilestoneFactRow = { subject: suite.commit_sha, verdict: "not-measured", detail: `the suite could not run at ${suite.commit_sha}: ${suite.cause ?? "unrunnable"}`, cause: "unrunnable" };
-    const rows = [row, ...unlandedRows];
-    return ok({ head: { commit: suite.commit_sha, result_id: suite.id }, suite: suiteRunOfResult(suite), files: [], charged: [], single_file_run_ids: [], rows, causes: causesOf(rows) });
-  }
-  const head = { commit: suite.commit_sha, result_id: suite.id };
-  const suiteRun = suiteRunOfResult(suite);
-  const redFiles = [...new Set(suite.failing_test_files.map((f) => f.file))].sort();
-  const singleFileRunIds: { key: string; id: string }[] = [];
-  const atHead = suite.commit_sha === headCommit;
-  const headRow: MilestoneFactRow = {
-    subject: head.commit,
-    verdict: "pass",
-    detail:
-      redFiles.length === 0
-        ? `the suite is green at ${atHead ? "main's head" : "the stored suite commit"} ${head.commit}`
-        : `${String(redFiles.length)} red file(s) in the suite at ${atHead ? "main's head" : "the stored suite commit"} ${head.commit}, each examined below`,
-  };
-  if (redFiles.length === 0) {
-    const rows = [headRow, ...unlandedRows];
-    return ok({ head, suite: suiteRun, files: [], charged: [], single_file_run_ids: singleFileRunIds, rows, causes: causesOf(rows) });
-  }
-
-  const files: FileRegression[] = [];
-  const stopAll = (reason: string): void => {
-    for (const file of redFiles) files.push({ file, outcome: "not-measured", reason, cause: "unrunnable" });
-  };
+  // reason: a plan with no landing on main changed nothing there, so no test reaches its changes (spec "Accounting": empty selection = na).
   if (real.length === 0) {
-    // reason: a plan with no landing on main changed nothing there; nothing red at head can be its regression, and no bisection is needed.
-    for (const file of redFiles) files.push({ file, outcome: "no-landing" });
-  } else if (historyResult === undefined || !historyResult.ok || attribution === undefined) {
-    stopAll(`main's first-parent history could not be read: ${historyResult !== undefined && !historyResult.ok ? loreErrorText(historyResult.error) : "no history"}`);
-  } else {
-    const results = await ports.suites.listResults();
-    if (!results.ok) {
-      stopAll(`stored suite results could not be read: ${loreErrorText(results.error)}`);
-    } else {
-      const measuredByCommit = new Map<string, SuiteResultRecord>();
-      for (const r of results.value) if (r.status === "measured") measuredByCommit.set(r.commit_sha, r);
-      const attributed = await attributeRedFiles({ redFiles, history: historyResult.value, attribution, measuredByCommit, recheck: !atHead, ports });
-      files.push(...attributed.files);
-      singleFileRunIds.push(...attributed.consulted);
-    }
+    if (unlandedTasks.length > 0) return ok({ assessed_commit: undefined, selection: undefined, files: [], charged: [], single_file_run_ids: [], rows: unlandedRows, causes: causesOf(unlandedRows) });
+    return nothingToRun("selection", `${NO_TEST_REACHES}: the plan has no landing on main`, undefined, undefined);
   }
-  const charged = files.flatMap((f): RegressionFinding[] => (f.outcome === "regression" ? [{ file: f.file, landing: f.landing }] : []));
-  const rows = [headRow, ...files.map(rowOfFile), ...unlandedRows];
-  return ok({ head, suite: suiteRun, files, charged, single_file_run_ids: singleFileRunIds, rows, causes: causesOf(rows) });
+
+  const resolvedHead = await ports.runner.resolveCommit(ports.headRef);
+  if (!resolvedHead.ok) return unmeasured(ports.headRef, `main's head could not be resolved: ${loreErrorText(resolvedHead.error)}`);
+  const headCommit = resolvedHead.value.commit;
+  const historyResult = await ports.firstParentHistory(headCommit);
+  if (!historyResult.ok) return unmeasured(headCommit, `main's first-parent history could not be read: ${loreErrorText(historyResult.error)}`, "unmappable");
+  const history = historyResult.value;
+  const attribution = await attributeLandings(real, history, ports);
+  if (attribution.unmapped !== undefined) {
+    return unmeasured(
+      attribution.unmapped.landing,
+      `landing ${attribution.unmapped.landing} is not on main's first-parent history and no main commit containing it was found (${attribution.unmapped.reason}), so the selection commit cannot be fixed`,
+      "unmappable",
+    );
+  }
+  const selectionCommit = history[attribution.latestIndex];
+  if (selectionCommit === undefined) return unmeasured(headCommit, `history has no commit at position ${String(attribution.latestIndex)}`, "unmappable");
+
+  const selectionResult = await ports.selectTests({ commit: selectionCommit, landingCommits: real.map((l) => l.landing_commit) });
+  if (!selectionResult.ok) return unmeasured(selectionCommit, `the tests the plan's changes reach could not be selected at ${selectionCommit}: ${loreErrorText(selectionResult.error)}`, "unmappable");
+  const selection = selectionResult.value;
+  // reason: a test file the selector cannot parse might be one the plan broke; dropping it silently would read as green (spec "Accounting").
+  if (selection.unparseable.length > 0) {
+    const named = selection.unparseable.map((f) => `${f.path} (${f.message})`).join("; ");
+    return unmeasured(selectionCommit, `${String(selection.unparseable.length)} test file(s) at ${selectionCommit} could not be parsed by the selector, so the selection is incomplete: ${named}\n${selection.accounting}`, "unmappable");
+  }
+  if (selection.selected.length === 0) {
+    return nothingToRun(`selection@${selectionCommit}`, `${NO_TEST_REACHES} (0 of ${String(selection.totalTestFiles)} test files; selector accounting stored)\n${selection.accounting}`, { commit: selectionCommit, selected: 0, total: selection.totalTestFiles }, headCommit);
+  }
+  const selected = selection.selected.map((f) => f.path);
+  const summary = `regression measured on ${String(selected.length)} selected test files of ${String(selection.totalTestFiles)} (selector accounting stored)`;
+  const run = await ports.suites.runBatch(selectionCommit, selected, ports.runner, { buildFirst: selection.selected.some((f) => f.needsCompiledBinary) });
+  if (!run.ok) return unmeasured(selectionCommit, `the selected tests could not be run at ${selectionCommit}: ${loreErrorText(run.error)}`);
+  const singleFileRunIds: { key: string; id: string }[] = run.value.map((row) => ({ key: `${row.file}@${selectionCommit}:batch`, id: runIdOf(row) }));
+  const redFiles = run.value.filter((row) => stateOfExit(row.exit_code) === "red").map((row) => row.file).sort();
+  const selectionRow: MilestoneFactRow = {
+    subject: `selection@${selectionCommit}`,
+    verdict: "pass",
+    detail: `${summary}${redFiles.length === 0 ? "; all green at the selection commit" : `; ${String(redFiles.length)} red at the selection commit, each examined below`}\n${selection.accounting}`,
+  };
+  const selectionFacts = { commit: selectionCommit, selected: selected.length, total: selection.totalTestFiles };
+  const finish = (files: readonly FileRegression[], consulted: readonly { key: string; id: string }[]): Result<RegressionAtHead, LoreError> => {
+    const charged = files.flatMap((f): RegressionFinding[] => (f.outcome === "regression" ? [{ file: f.file, landing: f.landing }] : []));
+    const rows = [selectionRow, ...files.map(rowOfFile), ...unlandedRows];
+    return ok({ assessed_commit: headCommit, selection: selectionFacts, files, charged, single_file_run_ids: [...singleFileRunIds, ...consulted], rows, causes: causesOf(rows) });
+  };
+  if (redFiles.length === 0) return finish([], []);
+
+  const results = await ports.suites.listResults();
+  if (!results.ok) {
+    return finish(redFiles.map((file): FileRegression => ({ file, outcome: "not-measured", reason: `stored suite results could not be read: ${loreErrorText(results.error)}`, cause: "unrunnable" })), []);
+  }
+  const measuredByCommit = new Map<string, SuiteResultRecord>();
+  for (const r of results.value) if (r.status === "measured") measuredByCommit.set(r.commit_sha, r);
+  const attributed = await attributeRedFiles({ redFiles, history, attribution, measuredByCommit, recheck: selectionCommit !== headCommit, ports });
+  return finish(attributed.files, attributed.consulted);
 }

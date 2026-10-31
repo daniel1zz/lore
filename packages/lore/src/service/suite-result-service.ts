@@ -1,21 +1,19 @@
 /**
- * The suite-result store's service: one full-suite result per commit, looked up before it is ever run (BR-1497).
+ * The suite-result store's service: per-(commit, file) test runs stored once and reused, and the stored suite results older
+ * measurements left behind (BR-1497). No review runs the full suite (spec `spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach`).
  *
- * Purpose: make "what did the suite say at commit X" a stored fact: the first lookup of a commit runs the suite once and
- *   stores it, every later lookup reads the store and runs nothing; the main red/green state the review records is
- *   derived from the same rows, so there is no second record of one run.
- * Public surface: SuiteResultService (lookupOrRun, runSingleFile, runBatch, awaitSuiteResult, listLiveSuiteCommits), CommitSuiteRunnerPort,
- *   FileRunOutcome, SingleFileRunKind, FileRunKind, singleFileRunKey, newestMeasuredAtOrAbove, suiteRunOfResult, deriveMainCheckedRows.
+ * Purpose: make "what did this test file say at commit X" a stored fact: the first run of a (commit, file) stores it, every
+ *   later review reads the store and runs nothing; the main red/green state the review records is derived from the stored
+ *   suite results, so there is no second record of one run.
+ * Public surface: SuiteResultService (runSingleFile, runBatch, listFileRuns, listResults, listMainCheckedRows), CommitSuiteRunnerPort,
+ *   RunBatchOptions, FileRunOutcome, SingleFileRunKind, FileRunKind, singleFileRunKey, suiteRunOfResult, deriveMainCheckedRows.
  * Invariants:
- *   - A commit has at most one `measured` result. A run that could not complete (the runner reports not-measured or
- *     fails) is stored as `unrunnable` with its cause and attempt number, and the NEXT lookup runs again as a new
- *     result (new id, `attempt + 1`); an `unrunnable` result is never returned as a cached answer.
  *   - Stored rows are never edited. Per-file re-runs (`rerunFiles`) are separate rows attached to a result id.
- *   - A single-file run (`runSingleFile`, regression at the assessed commit) is stored keyed by (commit, file): its
- *     `suite_result_id` column holds {@link singleFileRunKey} (`file-<kind>@<commit>`), not a suite result id, so a commit
- *     that never had a full suite can still carry file runs and a later review reads them back (BR-1496).
- *   - A full-suite run at commit C runs under lease `suite:C`, a single-file run under `suite:C:F` (BR-1511): a caller that
- *     finds the key held waits, then reads the store and runs only when no measured result is stored after the wait.
+ *   - A file run (`runSingleFile`, `runBatch`) is stored keyed by (commit, file): its `suite_result_id` column holds
+ *     {@link singleFileRunKey} (`file-<kind>@<commit>`), not a suite result id, so a commit that never had a full suite
+ *     carries file runs and a later review reads them back (BR-1496).
+ *   - A single-file run under lease `suite:C:F` (BR-1511): a caller that finds the key held waits, then reads the store and
+ *     runs only when no row is stored after the wait.
  *   - Nothing here reads or writes the audit chain: main-red / main-red-green records stay audit rows (BR-1412), the
  *     "main was checked at <commit>" fact is {@link deriveMainCheckedRows} over the stored results.
  * Side-effect class: stateful (store writes, runner IO through the injected port).
@@ -27,7 +25,7 @@ import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { StoreInterface, SuiteFileRunRecord, SuiteResultRecord } from "../store/store-interface.js";
 import { MAIN_CHECKED_ACTION, classifySuiteForMainRed, type MainRedRow } from "./milestone-review.js";
 import type { SuiteRun } from "./milestone-review-inputs.js";
-import { suiteFileLeaseKey, suiteLeaseKey, type ReviewLeases } from "./review-batch-lease.js";
+import { suiteFileLeaseKey, type ReviewLeases } from "./review-batch-lease.js";
 
 /** One test file re-run at a commit. */
 export interface FileRunOutcome {
@@ -39,15 +37,16 @@ export interface FileRunOutcome {
   readonly incomplete?: string;
 }
 
-/** What the service needs from a git-backed runner: resolve a ref, run the suite at a commit, re-run named files at a commit. */
+/** How one batched invocation is prepared. */
+export interface RunBatchOptions {
+  /** Build the compiled binary (`bun run build`) in the worktree before the tests run: some file declares `@spawns dist/lore`. */
+  readonly buildFirst?: boolean;
+}
+
+/** What the service needs from a git-backed runner: resolve a ref, re-run named files at a commit (alone or together). */
 export interface CommitSuiteRunnerPort {
   /** The commit and tree sha a ref (`main`, a sha) names. */
   readonly resolveCommit: (ref: string) => Promise<Result<{ readonly commit: string; readonly tree: string }, LoreError>>;
-  /**
-   * Runs the project's plan-close chain and full suite at `commit` in a throwaway worktree.
-   * `inWorktree` is awaited after the measurement while the worktree still exists.
-   */
-  readonly runSuite: (commit: string, inWorktree?: (root: string, commit: string) => Promise<void>) => Promise<Result<SuiteRun, LoreError>>;
   /** Re-runs the named test files at `commit`, one outcome per file, in the order given. */
   readonly runFiles: (commit: string, files: readonly string[]) => Promise<Result<readonly FileRunOutcome[], LoreError>>;
   /**
@@ -59,7 +58,7 @@ export interface CommitSuiteRunnerPort {
    * Runs ALL the named test files at `commit` in ONE test-runner invocation (the files run beside each other) and reports
    * one outcome per file, in the order given. Optional: a runner without it cannot run a batch (BR-1496).
    */
-  readonly runFilesTogether?: (commit: string, files: readonly string[]) => Promise<Result<readonly FileRunOutcome[], LoreError>>;
+  readonly runFilesTogether?: (commit: string, files: readonly string[], options?: RunBatchOptions) => Promise<Result<readonly FileRunOutcome[], LoreError>>;
   /**
    * Ends the review's reuse of prepared worktrees: removes every worktree `runFiles` / `runFilesTogether` prepared (one per
    * commit per review). Optional: a runner that keeps no worktree has nothing to end.
@@ -67,20 +66,8 @@ export interface CommitSuiteRunnerPort {
   readonly disposeWorktrees?: () => Promise<Result<void, LoreError>>;
 }
 
-/** What {@link SuiteResultService.lookupOrRunWith} did: the commit's result and what happened to the extra work. */
-export interface LookupWithWorkOutcome {
-  readonly result: SuiteResultRecord;
-  /** Set when the work could not be run at all (no worktree); absent when it ran, whatever the work itself reported. */
-  readonly workError?: LoreError;
-  /** Where the work ran: the suite's own worktree (`suite`, a fresh run) or a worktree made for it alone (`own`, a stored hit). Absent when it did not run. */
-  readonly workIn?: "suite" | "own";
-}
-
 /** The slice of the store this service uses. */
-export type SuiteResultStorePort = Pick<
-  StoreInterface,
-  "insertSuiteResult" | "listSuiteResultsForCommit" | "listSuiteResults" | "getSuiteResult" | "insertSuiteFileRuns" | "listSuiteFileRuns"
->;
+export type SuiteResultStorePort = Pick<StoreInterface, "listSuiteResults" | "getSuiteResult" | "insertSuiteFileRuns" | "listSuiteFileRuns">;
 
 /** Injected collaborators (clock and id source are injected so tests are deterministic). */
 export interface SuiteResultServiceDeps {
@@ -151,33 +138,6 @@ export function singleFileRunKey(kind: FileRunKind, commit: string): string {
 }
 
 /**
- * The newest stored `measured` suite result at a commit of `history` at or above `minIndex`: the suite a plan's review
- * reads as M when `minIndex` is the position of the plan's latest landing on main (BR-1496).
- *
- * @param results - stored suite results
- * @param history - main's first-parent history, OLDEST FIRST
- * @param minIndex - the lowest history position a result may sit at (inclusive)
- * @param excluding - commits never returned (an unrunnable joined run's commit)
- * @returns the result at the highest position, or `undefined` when none qualifies
- */
-export function newestMeasuredAtOrAbove(
-  results: readonly SuiteResultRecord[],
-  history: readonly string[],
-  minIndex: number,
-  excluding: ReadonlySet<string> = new Set(),
-): SuiteResultRecord | undefined {
-  const position = new Map(history.map((commit, index) => [commit, index] as const));
-  let best: { index: number; result: SuiteResultRecord } | undefined;
-  for (const result of results) {
-    if (result.status !== "measured" || excluding.has(result.commit_sha)) continue;
-    const index = position.get(result.commit_sha);
-    if (index === undefined || index < minIndex) continue;
-    if (best === undefined || index > best.index) best = { index, result };
-  }
-  return best?.result;
-}
-
-/**
  * Whether a command's exit code is a TEST RESULT: 0 = everything passed, 1 = some test failed. Any other code (5 = the
  * oracle lock of the checkout was held by another run, 2/4 = usage or environment errors, 127 = not found) means the tests
  * did not run, so the run says nothing about any file and is never stored as a measurement (BR-1497).
@@ -200,112 +160,6 @@ export function loreErrorText(error: LoreError): string {
 /** Stores and serves one suite result per commit. */
 export class SuiteResultService {
   constructor(private readonly deps: SuiteResultServiceDeps) {}
-
-  /**
-   * The stored suite result of the commit `ref` names; runs the suite only when no `measured` result exists.
-   *
-   * @param ref - `main` or a commit sha
-   * @param runner - runs the suite when the store has no measured result
-   * @param inWorktree - optional work in the throwaway worktree after a FRESH run (never called on a stored hit)
-   * @returns the measured result, or the `unrunnable` one this call just stored; `err` when the ref does not resolve or the store fails
-   */
-  async lookupOrRun(
-    ref: string,
-    runner: CommitSuiteRunnerPort,
-    inWorktree?: (root: string, commit: string) => Promise<void>,
-  ): Promise<Result<SuiteResultRecord, LoreError>> {
-    const resolved = await runner.resolveCommit(ref);
-    if (!resolved.ok) return resolved;
-    const { commit, tree } = resolved.value;
-    const stored = await this.deps.store.listSuiteResultsForCommit(commit);
-    if (!stored.ok) return stored;
-    const measured = stored.value.find((r) => r.status === "measured");
-    if (measured !== undefined) return ok(measured);
-    const leases = this.deps.leases;
-    if (leases === undefined) return this.runAndStore(commit, tree, runner, inWorktree);
-    // reason: BR-1511 — `suite:<commit>` single-flights the run. The holder (and each waiter, once the key is free)
-    // re-reads the store before running: a waiter that skipped the re-read would run the suite a second time.
-    return leases.withWaiting(suiteLeaseKey(commit), async () => {
-      const again = await this.deps.store.listSuiteResultsForCommit(commit);
-      if (!again.ok) return again;
-      const done = again.value.find((r) => r.status === "measured");
-      if (done !== undefined) return ok(done);
-      return this.runAndStore(commit, tree, runner, inWorktree);
-    });
-  }
-
-  /** Runs the suite at `commit` and stores the result as the next attempt of that commit (never returns a cached row). */
-  private async runAndStore(
-    commit: string,
-    tree: string,
-    runner: CommitSuiteRunnerPort,
-    inWorktree?: (root: string, commit: string) => Promise<void>,
-  ): Promise<Result<SuiteResultRecord, LoreError>> {
-    const stored = await this.deps.store.listSuiteResultsForCommit(commit);
-    if (!stored.ok) return stored;
-    const attempt = (stored.value.at(-1)?.attempt ?? 0) + 1;
-
-    const startedMs = this.deps.clockMs();
-    const ran = await runner.runSuite(commit, inWorktree);
-    const durationMs = Math.max(0, Math.round(this.deps.clockMs() - startedMs));
-    const base = { id: this.deps.newId(), commit_sha: commit, tree_sha: tree, attempt, duration_ms: durationMs, measured_at: this.deps.now() };
-    let record: SuiteResultRecord;
-    const nonRun = ran.ok && ran.value.status === "measured" ? ran.value.commands.find((c) => !isTestResultExit(c.exit_code)) : undefined;
-    if (ran.ok && ran.value.status === "measured" && nonRun === undefined) {
-      record = {
-        ...base,
-        status: "measured",
-        cause: null,
-        commands: ran.value.commands.map((c) => ({ ...c })),
-        skipped: ran.value.skipped.map((s) => ({ ...s })),
-        failing_test_files: ran.value.failing_test_files.map((f) => ({ file: f.file, imports: [...f.imports] })),
-      };
-    } else {
-      // reason: an incomplete run is a stored fact with its cause, not a missing row, so the attempt count survives and
-      // the review can say "unrunnable (attempt 2): <cause>" instead of silently treating it as green (BR-1497).
-      // reason: a command that exited outside {0, 1} never ran the tests; stored `measured` it read as "every file passed" (exit 5 = oracle lock contended).
-      const cause = nonRun !== undefined ? nonRunCause(nonRun.command, nonRun.exit_code, nonRun.output_tail) : ran.ok ? (ran.value.status === "not_measured" ? ran.value.reason : "the suite run did not complete") : loreErrorText(ran.error);
-      record = { ...base, status: "unrunnable", cause, commands: [], skipped: [], failing_test_files: [] };
-    }
-    const inserted = await this.deps.store.insertSuiteResult(record);
-    if (!inserted.ok) return inserted;
-    return ok(record);
-  }
-
-  /**
-   * {@link lookupOrRun} plus work that must run at the commit in a throwaway worktree EXACTLY once per call, whether the
-   * suite result was cached or not: on a fresh run it rides the suite's own worktree (no second checkout or install); on a
-   * stored hit it gets a worktree of its own. The post-landing batch uses it for landed-criteria attestation, and `assess`
-   * for the stale cited-rule refresh (A1 noted the refresh was skipped on a stored hit).
-   *
-   * @param ref - `main` or a commit sha
-   * @param runner - runs the suite on a miss; must implement `withWorktree` for the stored-hit case
-   * @param work - awaited with the worktree root and the commit
-   * @returns the commit's result; `workError` set when the work could not be run (the worktree could not be made, or an
-   *   unrunnable fresh run left none); `err` when the lookup itself fails
-   */
-  async lookupOrRunWith(
-    ref: string,
-    runner: CommitSuiteRunnerPort,
-    work: (root: string, commit: string) => Promise<void>,
-  ): Promise<Result<LookupWithWorkOutcome, LoreError>> {
-    let workRan = false;
-    const looked = await this.lookupOrRun(ref, runner, async (root, commit) => {
-      workRan = true;
-      await work(root, commit);
-    });
-    if (!looked.ok) return looked;
-    const result = looked.value;
-    if (workRan) return ok({ result, workIn: "suite" });
-    if (result.status !== "measured") {
-      return ok({ result, workError: { code: "STORE_ERROR", message: `the suite could not run at ${result.commit_sha}, so there is no worktree to work in: ${result.cause ?? "unrunnable"}` } });
-    }
-    if (runner.withWorktree === undefined) {
-      return err({ code: "VALIDATION_ERROR", field: "runner.withWorktree", message: "the suite result of this commit is stored and the runner cannot open a worktree for the extra work", rule: "BR-1497" });
-    }
-    const ran = await runner.withWorktree(result.commit_sha, (root) => work(root, result.commit_sha));
-    return ran.ok ? ok({ result, workIn: "own" }) : ok({ result, workError: ran.error });
-  }
 
   /**
    * Re-runs the named test files at the commit of a stored result and stores one row per file attached to it.
@@ -414,22 +268,23 @@ export class SuiteResultService {
    * @param commit - the commit to run at (a full sha)
    * @param files - repo-relative test files (at least one)
    * @param runner - must implement `runFilesTogether`
+   * @param options - `buildFirst`: the runner builds the compiled binary in the worktree before the tests run (a selected file declares `@spawns dist/lore`)
    * @returns the first stored row of each file, in the order given; `err` when the runner cannot batch, fails, reports no or an incomplete outcome (nothing stored) or the store fails
    */
-  async runBatch(commit: string, files: readonly string[], runner: CommitSuiteRunnerPort): Promise<Result<SuiteFileRunRecord[], LoreError>> {
+  async runBatch(commit: string, files: readonly string[], runner: CommitSuiteRunnerPort, options: RunBatchOptions = {}): Promise<Result<SuiteFileRunRecord[], LoreError>> {
     if (files.length === 0) return err({ code: "VALIDATION_ERROR", field: "files", message: "runBatch needs at least one test file", rule: "BR-1496" });
     const key = singleFileRunKey("batch", commit);
     const stored = await this.storedRowsOf(key, files);
     if (!stored.ok) return stored;
     if (stored.value.every((row) => row !== null)) return ok(stored.value as SuiteFileRunRecord[]);
     const leases = this.deps.leases;
-    if (leases === undefined) return this.runBatchAndStore(commit, files, key, runner);
+    if (leases === undefined) return this.runBatchAndStore(commit, files, key, runner, options);
     // reason: BR-1511 — one lease per (commit, file set) single-flights the invocation; the re-read after acquiring lets a waiter reuse the holder's rows.
     return leases.withWaiting(suiteFileLeaseKey(commit, `batch:${[...files].sort().join(",")}`), async () => {
       const again = await this.storedRowsOf(key, files);
       if (!again.ok) return again;
       if (again.value.every((row) => row !== null)) return ok(again.value as SuiteFileRunRecord[]);
-      return this.runBatchAndStore(commit, files, key, runner);
+      return this.runBatchAndStore(commit, files, key, runner, options);
     });
   }
 
@@ -439,7 +294,7 @@ export class SuiteResultService {
     return ok(files.map((file) => rows.value.find((r) => r.file === file) ?? null));
   }
 
-  private async runBatchAndStore(commit: string, files: readonly string[], key: string, runner: CommitSuiteRunnerPort): Promise<Result<SuiteFileRunRecord[], LoreError>> {
+  private async runBatchAndStore(commit: string, files: readonly string[], key: string, runner: CommitSuiteRunnerPort, options: RunBatchOptions): Promise<Result<SuiteFileRunRecord[], LoreError>> {
     if (runner.runFilesTogether === undefined) {
       return err({ code: "VALIDATION_ERROR", field: "runner.runFilesTogether", message: "the runner cannot run several test files in one invocation", rule: "BR-1496" });
     }
@@ -448,7 +303,7 @@ export class SuiteResultService {
     if (!have.ok) return have;
     const missing = files.filter((_, index) => have.value[index] === null);
     if (missing.length === 0) return ok(have.value as SuiteFileRunRecord[]);
-    const ran = await runner.runFilesTogether(commit, missing);
+    const ran = await runner.runFilesTogether(commit, missing, options);
     if (!ran.ok) return ran;
     const measuredAt = this.deps.now();
     const rows: SuiteFileRunRecord[] = [];
@@ -469,28 +324,6 @@ export class SuiteResultService {
     const winners = after.value.filter((row): row is SuiteFileRunRecord => row !== null);
     if (winners.length !== files.length) return err({ code: "STORE_ERROR", message: `the batch run at ${commit} was not found after it was stored` });
     return ok(winners);
-  }
-
-  /** The commits whose full suite is running now (live `suite:<sha>` leases); `ok([])` when this service has no leases. */
-  async listLiveSuiteCommits(): Promise<Result<string[], LoreError>> {
-    return this.deps.leases === undefined ? ok([]) : this.deps.leases.listLiveSuiteCommits();
-  }
-
-  /**
-   * Waits for the full suite running at `commit` (the `suite:<sha>` lease wait, BR-1511) and returns what is stored for that
-   * commit afterwards, WITHOUT running anything: the measured result when there is one, else the latest stored attempt
-   * (`unrunnable`), else `null` (the holder stored nothing).
-   *
-   * @param commit - a full sha with a suite in flight
-   */
-  async awaitSuiteResult(commit: string): Promise<Result<SuiteResultRecord | null, LoreError>> {
-    const read = async (): Promise<Result<SuiteResultRecord | null, LoreError>> => {
-      const stored = await this.deps.store.listSuiteResultsForCommit(commit);
-      if (!stored.ok) return stored;
-      return ok(stored.value.find((r) => r.status === "measured") ?? stored.value.at(-1) ?? null);
-    };
-    const leases = this.deps.leases;
-    return leases === undefined ? read() : leases.withWaiting(suiteLeaseKey(commit), read);
   }
 
   /** The earliest stored row of `file` under `key`, or null when none is stored. */

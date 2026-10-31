@@ -5,12 +5,12 @@
  *   machines): one lease row per key, so reviews of different plans run concurrently while the same plan, the same
  *   commit's suite run and the same root cause's issue write each have one holder.
  * Public surface: {@link ReviewLeases}, {@link LeaseStorePort}, {@link LeaseHandle}, {@link LeaseOutcome}, the key builders
- *   {@link planLeaseKey} / {@link suiteLeaseKey} / {@link suiteFileLeaseKey} / {@link issueLeaseKey} / {@link issueWriteLeaseKey},
+ *   {@link planLeaseKey} / {@link suiteFileLeaseKey} / {@link issueLeaseKey} / {@link issueWriteLeaseKey},
  *   {@link REVIEW_LEASE_EXPIRY_MS}, {@link REVIEW_LEASE_RENEW_MS}, {@link LEASE_WAIT_POLL_MS}.
  * Invariants:
- *   - Keys: `plan:<id>`, `suite:<sha>`, `suite:<sha>:<file>`, `issue:<fingerprint>`, `issue-write:<n>`. The corpus-wide
+ *   - Keys: `plan:<id>`, `suite:<sha>:<file>`, `issue:<fingerprint>`, `issue-write:<n>`. The corpus-wide
  *     `review-batch` name is retired: nothing acquires it.
- *   - Lease order (no wait cycle): a holder of `plan:` may take `suite:`, `issue:` and `issue-write:` keys; a holder of one of
+ *   - Lease order (no wait cycle): a holder of `plan:` may take `suite:<sha>:<file>`, `issue:` and `issue-write:` keys; a holder of one of
  *     those takes no other key.
  *   - Expiry is 10 minutes; the holder renews every minute while it works. A live lease of another holder is `busy`; an
  *     expired one is taken over.
@@ -24,7 +24,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { err, ok, type LoreError, type Result } from "@lore/core";
+import { ok, type LoreError, type Result } from "@lore/core";
 import type { LeaseAcquisition, LeaseRecord } from "../store/store-shared.js";
 
 /** The lease verbs of the store. */
@@ -33,8 +33,6 @@ export interface LeaseStorePort {
   renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>>;
   releaseLease(name: string, holder: string): Promise<Result<void, LoreError>>;
   readLease(name: string): Promise<Result<LeaseRecord | null, LoreError>>;
-  /** Optional: only the app's full store lists leases; a narrower composition (`app.reviewLeaseStore`) cannot join a suite in flight. */
-  listLeases?: (prefix: string) => Promise<Result<LeaseRecord[], LoreError>>;
 }
 
 /** Lease lifetime without a renewal: 10 minutes. */
@@ -47,10 +45,6 @@ export const LEASE_WAIT_POLL_MS = 10 * 1000;
 /** The lease key of one plan's review and close. */
 export function planLeaseKey(planId: string): string {
   return `plan:${planId}`;
-}
-/** The lease key of the full-suite run at one commit. */
-export function suiteLeaseKey(commit: string): string {
-  return `suite:${commit}`;
 }
 /** The lease key of one test file's single-file run at one commit. */
 export function suiteFileLeaseKey(commit: string, file: string): string {
@@ -138,26 +132,6 @@ export class ReviewLeases {
       },
     };
     return ok({ state: "held", tookOver: taken.value.tookOver, handle });
-  }
-
-  /**
-   * The commits whose full suite is running right now: every live (unexpired) `suite:<sha>` lease, unordered. A
-   * `suite:<sha>:<file>` single-file lease is not a full suite and is not listed (BR-1511).
-   *
-   * @returns full shas; `err` when the store cannot be read
-   */
-  async listLiveSuiteCommits(): Promise<Result<string[], LoreError>> {
-    if (this.store.listLeases === undefined) {
-      return err({ code: "VALIDATION_ERROR", field: "leases.listLeases", message: "this lease store cannot list leases, so a suite in flight cannot be found", rule: "BR-1511" });
-    }
-    const rows = await this.store.listLeases("suite:");
-    if (!rows.ok) return rows;
-    const now = this.clock();
-    const commits = rows.value
-      .filter((row) => Date.parse(row.expires_at) > now)
-      .map((row) => row.name.slice("suite:".length))
-      .filter((rest) => rest.length > 0 && !rest.includes(":"));
-    return ok(commits);
   }
 
   /**

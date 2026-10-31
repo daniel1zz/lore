@@ -1,62 +1,47 @@
 /**
- * The real `SuiteRunnerPort` behind `lore assess`: the plan-close chain and the full test suite, run ONCE per batch on
- * main's HEAD in a throwaway worktree (BR-1372, spec-lean-governance-batch-verbs-judgment-only-at-milestones Part D).
+ * The real `CommitSuiteRunnerPort` behind `lore assess`: selected test files run at a commit, alone or together, in a prepared
+ * throwaway worktree (BR-1496, BR-1497). It never runs the full suite.
  *
- * Purpose: give every plan's regression dimension the same measured run, without ever running the suite in the shared
+ * Purpose: give every plan's regression dimension its measured file runs, without ever running tests in the shared
  *   checkout and without writing the repo's `.lore`.
- * Public surface: createGitSuiteRunner (main's HEAD), createGitCommitSuiteRunner (any commit: resolve, run the suite,
- *   re-run named test files one by one or together in one invocation, `disposeWorktrees`; BR-1497), outcomesOfTogetherRun, suiteChildEnv, PLAN_CLOSE_SCRIPT, FULL_TEST_SCRIPT, FILE_TEST_SCRIPT, resolveDirectImports.
+ * Public surface: createGitCommitSuiteRunner (resolve a commit, re-run named test files one by one or together in one
+ *   invocation, `withWorktree`, `disposeWorktrees`), runTestFilesTogether, outcomesOfTogetherRun, suiteChildEnv,
+ *   FILE_TEST_SCRIPT, runInThrowawayWorktree, prepareDependencies.
  * Invariants:
- *   - The commands are the project's own package.json scripts (`check:plan-close`, `test`) run with `bun run`; a script
- *     the project does not define is reported as skipped with that reason, never invented.
- *   - The run happens in `git worktree add --detach <tmp> main`; the worktree is removed afterwards, success or not.
- *   - The suite commands run with the harness/session variables removed (`suiteChildEnv`), like a clean shell.
+ *   - The commands are the project's own package.json scripts (`test:file`, and `build` before a batch with a declared
+ *     `@spawns dist/lore` test) run with `bun run`.
+ *   - Runs happen in `git worktree add --detach <tmp> <commit>`; the worktree is removed afterwards, success or not.
+ *   - Commands run with the harness/session variables removed (`suiteChildEnv`), like a clean shell.
  *   - Every command runs in its OWN process group; a timeout ends the whole group (SIGTERM, then SIGKILL after a grace), so
- *     the run returns within timeout + grace and no process of the tree survives. A timed-out suite is `not_measured` with
- *     "timed out after N ms" (stored `unrunnable`, retried by a later batch, BR-1497); a timed-out per-file re-run is a failed file with `incomplete` set.
+ *     the run returns within timeout + grace and no process of the tree survives. A timed-out file re-run is a failed file
+ *     with `incomplete` set (stored never; retried by a later review, BR-1497).
  *   - A failed group signal never escapes a timer callback (it would leave the promise unsettled): EPERM is followed by a
  *     liveness probe (macOS returns EPERM for a group holding only unreaped zombies); no live member = ended, otherwise the
- *     failure is recorded in the result (`killFailure`), the run is `not_measured` / a failed file with that cause.
+ *     failure is recorded in the result (`killFailure`), a failed file with that cause.
  *   - The throwaway worktree is removed on every exit path; a failed removal is returned as an error, never ignored.
  *   - A run that was killed leaves its worktree behind; every run first removes the registered `lore-assess-suite-*` worktrees
  *     whose directory is gone or whose owner pid (recorded in the directory name) is not alive, and never one a live process
  *     owns (`assess-stale-worktrees.ts`). A per-file re-run that times out or leaves its process group running is a
  *     failed file whose outcome carries `incomplete` (single-file bisection refuses it, BR-1496).
- *   - `bun run test` takes the checkout's oracle lock (keyed by the git common dir, shared by every worktree including this
- *     throwaway one). A run that finds it held exits 5 without running a test: the runner waits for the lock (poll
- *     `lockPollMs`, bounded by the suite timeout) and retries; if it is still held at the limit the run is `not_measured`
- *     naming the lock. It never runs without the lock and never reports the non-run as a result.
  *   - File runs (`runFiles`, `runFilesTogether`) share ONE prepared worktree per commit for the life of the runner (the review);
- *     the caller ends it with `disposeWorktrees` on every exit path (`PreparedWorktreeCache`). Suite runs and `withWorktree` keep a throwaway worktree each.
- *   - A run that cannot be set up (no `main`, no git, install failure) is `not_measured` with the reason, never a pass.
- *   - Failing test files carry their direct relative imports as read at the measured commit, so attribution to a plan
- *     needs no second checkout.
+ *     the caller ends it with `disposeWorktrees` on every exit path (`PreparedWorktreeCache`). `withWorktree` keeps a throwaway worktree.
+ *   - A batch with `buildFirst` runs `bun run build` in the worktree first; a failed or timed-out build makes every file of
+ *     the batch `incomplete` (not a test result), never red and never green.
  * Side-effect class: IO (spawns git/bun, creates and removes a temp directory).
  *
  * Reference: Kayenta automated canary analysis; `git worktree` for isolated builds.
- * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part D, AC-LG-12, BR-1372)
+ * @spec_ref spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach (AC-SC-3, BR-1496, BR-1497)
  */
 
 import { execFileSync, spawn as spawnChild } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, normalize } from "node:path";
+import { join } from "node:path";
 import { err, ok, type LoreError, type Result } from "@lore/core";
-import {
-  parseFailingTestFiles,
-  type FailingTestFile,
-  type SuiteCommandResult,
-  type SuiteRun,
-  type SuiteRunnerPort,
-} from "../../service/milestone-review-inputs.js";
-import { loreErrorText, type CommitSuiteRunnerPort, type FileRunOutcome } from "../../service/suite-result-service.js";
+import { parseFailingTestFiles } from "../../service/milestone-review-inputs.js";
+import type { CommitSuiteRunnerPort, FileRunOutcome, RunBatchOptions } from "../../service/suite-result-service.js";
 import { assessWorktreeDirPrefix, pruneStaleAssessWorktrees, type StaleWorktreePorts } from "./assess-stale-worktrees.js";
 import { PreparedWorktreeCache, type PreparedWorktree } from "./assess-worktree-cache.js";
-
-/** The plan-close chain script (`bun run check:plan-close`). */
-export const PLAN_CLOSE_SCRIPT = "check:plan-close";
-/** The full test script (`bun run test`). */
-export const FULL_TEST_SCRIPT = "test";
 
 const OUTPUT_TAIL_CHARS = 4000;
 /** Per-command output kept in memory (the tail): enough for failing-file parsing, bounded against a runaway child. */
@@ -68,7 +53,6 @@ const KILL_GRACE_MS = 10 * 1000;
 const PIPE_DRAIN_MS = 2000;
 /** ANSI colour escape sequences (`ESC [ ... m`). */
 const ANSI_COLOR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
-const SOURCE_EXTENSIONS =[".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"] as const;
 
 /** Time limits of one spawned command; the defaults are the production values. */
 export interface ProcessLimits {
@@ -78,16 +62,6 @@ export interface ProcessLimits {
   readonly graceMs: number;
   /** The group-signal primitive (`process.kill(-pid, signal)`); injectable so tests can make it fail. */
   readonly kill?: (pid: number, signal: NodeJS.Signals) => void;
-  /** How long to wait between attempts to take a contended oracle lock (default {@link LOCK_POLL_MS}); injectable so tests need not sleep. */
-  readonly lockPollMs?: number;
-}
-
-/** Between two attempts to take the checkout's oracle lock held by another run. */
-const LOCK_POLL_MS = 5 * 1000;
-
-/** `scripts/oracle-lock.ts` exits 5 and prints this when a live run holds the lock: no test ran. */
-function isLockContended(ran: { readonly status: number; readonly output: string; readonly timeout?: unknown }): boolean {
-  return ran.status === 5 && ran.timeout === undefined && /oracle-lock: contended/.test(ran.output);
 }
 
 const DEFAULT_LIMITS: ProcessLimits = { timeoutMs: SUITE_TIMEOUT_MS, graceMs: KILL_GRACE_MS };
@@ -233,66 +207,8 @@ export function suiteChildEnv(ambient: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(ambient).filter(([name]) => !HARNESS_ENV_PATTERN.test(name)));
 }
 
-function notMeasured(reason: string): Result<SuiteRun, LoreError> {
-  return ok({ status: "not_measured", reason });
-}
-
 function tail(text: string): string {
   return text.length <= OUTPUT_TAIL_CHARS ? text : text.slice(text.length - OUTPUT_TAIL_CHARS);
-}
-
-/**
- * The files a source file imports directly through a relative specifier, repo-relative, only those that exist.
- *
- * @param root - the checkout the file is read from
- * @param file - repo-relative path of the file
- * @returns repo-relative paths (`./x.js` resolves to `x.ts` when only that exists)
- */
-export function resolveDirectImports(root: string, file: string): string[] {
-  const absolute = join(root, file);
-  if (!existsSync(absolute)) return [];
-  const source = readFileSync(absolute, "utf8");
-  const specifiers = new Set<string>();
-  for (const match of source.matchAll(/(?:from\s+|import\s*\(\s*|import\s+)["'](\.{1,2}\/[^"']+)["']/g)) {
-    if (match[1] !== undefined) specifiers.add(match[1]);
-  }
-  const found = new Set<string>();
-  for (const specifier of specifiers) {
-    const base = normalize(join(dirname(file), specifier));
-    const stem = base.replace(/\.(?:[cm]?js|jsx)$/, "");
-    const candidates = [
-      base,
-      ...SOURCE_EXTENSIONS.map((ext) => `${stem}${ext}`),
-      ...SOURCE_EXTENSIONS.map((ext) => join(base, `index${ext}`)),
-    ];
-    const hit = candidates.find((candidate) => existsSync(join(root, candidate)) && !candidate.endsWith("/"));
-    if (hit !== undefined) found.add(hit);
-  }
-  return [...found];
-}
-
-/**
- * Builds the git-backed runner.
- *
- * @param cwd - any directory inside the project's checkout
- * @param env - the environment the commands run with
- * @param inWorktree - optional work done in the SAME throwaway worktree after the measurement
- * @returns a port whose `run` measures main's HEAD once per call; never throws
- */
-export function createGitSuiteRunner(
-  cwd: string,
-  env: NodeJS.ProcessEnv,
-  /** Awaited after the suite was measured while the throwaway worktree still exists (stale-evidence refresh). */
-  inWorktree?: (root: string, commit: string) => Promise<void>,
-): SuiteRunnerPort {
-  const runner = createGitCommitSuiteRunner(cwd, env);
-  return {
-    run: async (): Promise<Result<SuiteRun, LoreError>> => {
-      const resolved = await runner.resolveCommit("main");
-      if (!resolved.ok) return notMeasured(loreErrorText(resolved.error));
-      return runner.runSuite(resolved.value.commit, inWorktree);
-    },
-  };
 }
 
 /** The script a single test file is re-run with (`bun run test:file <file>`); a project without it cannot re-run files. */
@@ -379,13 +295,12 @@ export async function runInThrowawayWorktree<T>(
 }
 
 /**
- * The same measurement as {@link createGitSuiteRunner}, generalised to any commit: resolve a ref, run the suite at a
- * commit, re-run named test files at a commit. What is run does not change: `check:plan-close` then `test`, in a
- * throwaway worktree of that commit, under the harness-free environment.
+ * The git-backed runner for any commit: resolve a ref, re-run named test files at a commit (alone or together), open a
+ * throwaway worktree. It has no full-suite verb: no review runs the suite.
  *
  * @param cwd - any directory inside the project's checkout
  * @param env - the environment the commands run with
- * @param limits - time limits of each suite / install / per-file command (production defaults when omitted)
+ * @param limits - time limits of each install / build / file command (production defaults when omitted)
  * @returns a port; every method returns a Result and never throws
  */
 export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv, limits: ProcessLimits = DEFAULT_LIMITS): CommitSuiteRunnerPort {
@@ -441,19 +356,6 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv, 
       return ok({ commit: sha, tree: tree.output.trim() });
     },
 
-    runSuite: async (commit, inWorktree) => {
-      const ran = await inThrowawayWorktree(commit, async (root) => {
-        const measured = await measure(root, commit, suiteChildEnv(env), limits);
-        if (inWorktree !== undefined) await inWorktree(root, commit);
-        return measured;
-      });
-      // reason: a run that cannot be set up is `not_measured` with the reason (never a pass); an unexpected failure stays an err.
-      if (!ran.ok && ran.error.code === "STORE_ERROR" && loreErrorText(ran.error).startsWith("could not create the throwaway worktree")) {
-        return notMeasured(loreErrorText(ran.error));
-      }
-      return ran;
-    },
-
     withWorktree: async (commit, work) => {
       const ran = await inThrowawayWorktree(commit, async (root) => {
         const prepared = await prepareDependencies(root, suiteChildEnv(env), limits);
@@ -481,8 +383,8 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv, 
         return outcomes;
       }),
 
-    runFilesTogether: async (commit, files) =>
-      worktrees.use(commit, (root) => runTestFilesTogether(root, commit, files, env, limits)),
+    runFilesTogether: async (commit, files, options) =>
+      worktrees.use(commit, (root) => runTestFilesTogether(root, commit, files, env, limits, options)),
 
     disposeWorktrees: () => worktrees.disposeAll(),
   };
@@ -507,6 +409,7 @@ function requireFileScript(root: string, commit: string): void {
  * @param files - repo-relative test files
  * @param env - the environment (harness variables are removed before the spawn)
  * @param limits - time limits of the invocation
+ * @param options - `buildFirst`: run `bun run build` in `root` before the tests
  * @throws when the checkout defines no `test:file` script
  */
 export async function runTestFilesTogether(
@@ -515,9 +418,20 @@ export async function runTestFilesTogether(
   files: readonly string[],
   env: NodeJS.ProcessEnv,
   limits: ProcessLimits = DEFAULT_LIMITS,
+  options: RunBatchOptions = {},
 ): Promise<FileRunOutcome[]> {
   requireFileScript(root, commit);
   const startedMs = Date.now();
+  if (options.buildFirst === true) {
+    // reason: a selected test declares `@spawns dist/lore`; like `test:changed`, the binary is built before the tests run. A build that
+    // fails or does not complete says nothing about any test, so every file is `incomplete`, never red or green.
+    const built = await spawn("bun", ["run", "build"], root, suiteChildEnv(env), limits);
+    const buildIncomplete = built.killFailure ?? (built.timeout !== undefined ? `the build timed out after ${String(built.timeout.elapsedMs)} ms` : undefined);
+    if (built.status !== 0 || buildIncomplete !== undefined) {
+      const why = buildIncomplete ?? `\`bun run build\` exited ${String(built.status)}: ${tail(built.output).trim().split("\n").at(-1) ?? ""}`;
+      return outcomesOfTogetherRun(files, { status: 1, output: built.output, durationMs: Date.now() - startedMs, incomplete: why });
+    }
+  }
   const ran = await spawn("bun", ["run", FILE_TEST_SCRIPT, ...files], root, suiteChildEnv(env), limits);
   const incomplete = ran.killFailure ?? (ran.timeout !== undefined ? `timed out after ${String(ran.timeout.elapsedMs)} ms` : undefined);
   return outcomesOfTogetherRun(files, { status: ran.status, output: ran.output, durationMs: Date.now() - startedMs, ...(incomplete !== undefined ? { incomplete } : {}) });
@@ -566,62 +480,4 @@ export async function prepareDependencies(root: string, env: NodeJS.ProcessEnv, 
   if (!hasDependencies || existsSync(join(root, "node_modules"))) return undefined;
   const installed = await spawn("bun", ["install", "--frozen-lockfile"], root, env, limits);
   return installed.status === 0 ? undefined : `dependency install in the throwaway worktree failed: ${tail(installed.output).trim()}`;
-}
-
-async function measure(root: string, commit: string, env: NodeJS.ProcessEnv, limits: ProcessLimits): Promise<SuiteRun> {
-  const manifestPath = join(root, "package.json");
-  if (!existsSync(manifestPath)) {
-    return {
-      status: "measured",
-      commit,
-      commands: [],
-      skipped: [PLAN_CLOSE_SCRIPT, FULL_TEST_SCRIPT].map((c) => ({ command: `bun run ${c}`, reason: "the project has no package.json at main" })),
-      failing_test_files: [],
-    };
-  }
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
-    scripts?: Record<string, string>;
-    dependencies?: object;
-    devDependencies?: object;
-  };
-  const prepared = await prepareDependencies(root, env, limits);
-  if (prepared !== undefined) return { status: "not_measured", reason: prepared };
-  const commands: SuiteCommandResult[] = [];
-  const skipped: { command: string; reason: string }[] = [];
-  let combined = "";
-  for (const script of [PLAN_CLOSE_SCRIPT, FULL_TEST_SCRIPT]) {
-    const command = `bun run ${script}`;
-    if (manifest.scripts?.[script] === undefined) {
-      skipped.push({ command, reason: `package.json defines no "${script}" script` });
-      continue;
-    }
-    let ran = await spawn("bun", ["run", script], root, env, limits);
-    if (script === FULL_TEST_SCRIPT) {
-      // reason: `bun run test` takes the oracle lock of the CHECKOUT (keyed by the git common dir, shared by every worktree incl. this
-      // throwaway one, on purpose: AC-OX-4). Another run holding it makes ours exit 5 without running a test. We WAIT for the lock,
-      // bounded by the suite timeout, rather than run without it (the lock also guards fixed paths no worktree isolates) and never
-      // record the non-run as a result.
-      const deadline = Date.now() + limits.timeoutMs;
-      const pollMs = limits.lockPollMs ?? LOCK_POLL_MS;
-      while (isLockContended(ran) && Date.now() + pollMs < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, pollMs));
-        ran = await spawn("bun", ["run", script], root, env, limits);
-      }
-      if (isLockContended(ran)) {
-        return { status: "not_measured", reason: `\`${command}\` could not take the oracle lock before the ${limits.timeoutMs} ms limit: ${tail(ran.output).trim().split("\n").at(-1) ?? "held by another run"}` };
-      }
-    }
-    // reason: a run the timeout ended is incomplete, not red: stored `unrunnable` with this cause and retried by a later batch (BR-1497).
-    if (ran.killFailure !== undefined) {
-      // reason: a tree that could not be ended leaves stragglers that corrupt the measurement; incomplete, not red (A10).
-      return { status: "not_measured", reason: `\`${command}\` left its process group running: ${ran.killFailure}` };
-    }
-    if (ran.timeout !== undefined) {
-      return { status: "not_measured", reason: `\`${command}\` timed out after ${ran.timeout.elapsedMs} ms (limit ${ran.timeout.limitMs} ms); its process group was ended` };
-    }
-    combined += `\n${ran.output}`;
-    commands.push({ command, exit_code: ran.status, output_tail: tail(ran.output) });
-  }
-  const failing: FailingTestFile[] = parseFailingTestFiles(combined).map((file) => ({ file, imports: resolveDirectImports(root, file) }));
-  return { status: "measured", commit, commands, skipped, failing_test_files: failing };
 }
