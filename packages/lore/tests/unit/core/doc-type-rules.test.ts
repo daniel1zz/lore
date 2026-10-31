@@ -164,7 +164,8 @@ describe("PARENT_TYPE_CONTRACT — boundary values (AC-DOCTYPE-BOUNDARY)", () =>
     expect(keys).toContain("knowledge");
     expect(keys).toContain("phase");
     expect(keys).toContain("baseline");
-    expect(keys).toHaveLength(8);
+    expect(keys).toContain("template");
+    expect(keys).toHaveLength(9);
   });
 
   it("phase → plan is a valid parent relationship (SPEC-056 D1)", () => {

@@ -48,6 +48,7 @@ import { MIGRATION_042_ADD_COLUMNS, MIGRATION_042_SQL } from "./migrations/migra
 import { MIGRATION_043_SQL } from "./migrations/migration-043.js";
 import { MIGRATION_044_SQL } from "./migrations/migration-044.js";
 import { MIGRATION_045_SQL } from "./migrations/migration-045.js";
+import { MIGRATION_046_SQL } from "./migrations/migration-046.js";
 import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migration-017.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
@@ -1292,6 +1293,12 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 45) {
         // reason: migration-045 makes a single-file run unique per (key, file) (#528, BR-1497).
         await this.client.executeMultiple(MIGRATION_045_SQL);
+      }
+
+      if (currentVersion < 46) {
+        // reason: migration-046 widens docs.type to accept 'template' (a `docs` table-recreate, same shape as
+        // migration-013, applied the same way); idempotent on re-run (DROP TABLE IF EXISTS docs_new first).
+        await this.client.executeMultiple(MIGRATION_046_SQL);
       }
     })();
 

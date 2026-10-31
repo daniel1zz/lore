@@ -17,7 +17,7 @@ export type Slug = string;
 
 // ─── Enum-like Unions ──────────────────────────────────────────────────────
 
-export type DocType = "prd" | "spec" | "adr" | "plan" | "knowledge" | "task" | "phase" | "baseline";
+export type DocType = "prd" | "spec" | "adr" | "plan" | "knowledge" | "task" | "phase" | "baseline" | "template";
 
 export type DocRole = "intent" | "spec" | "decision" | "plan" | "knowledge";
 
@@ -457,4 +457,5 @@ export const DOC_TYPE_ROLE_MAP: Record<DocType, DocRole> = {
   task: "plan",
   phase: "plan",
   baseline: "intent",
+  template: "knowledge",
 } as const;

@@ -37,6 +37,8 @@ export type StandingRule =
 export const DOC_TYPE_STANDING: Record<DocType, StandingRule> = {
   prd: { kind: "fixed", standing: "living" },
   baseline: { kind: "fixed", standing: "living" },
+  // reason: a template is governed like a living document — revised in place; each approved revision is a numbered version.
+  template: { kind: "fixed", standing: "living" },
   spec: { kind: "fixed", standing: "record" },
   adr: { kind: "fixed", standing: "record" },
   task: { kind: "fixed", standing: "record" },
