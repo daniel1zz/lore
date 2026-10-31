@@ -478,7 +478,6 @@ describe("AC-AF-7 the acceptance is bound to the failure it accepted", () => {
 
   it("AC-AF-7 REGRESSION: the acceptance is a human decision in the decision log (class, subject and fingerprint), and writes no stored authority on the plan", async () => {
     const w = await worldWith({ security: "fail" });
-    const versionBefore = (await w.reload()).version;
     const accepted = await w.service().acceptGate(w.plan.slug, "security", FULL_DECISION);
     expect(accepted.ok).toBe(true);
     const rows = await w.store.listDecisionLog();
@@ -489,9 +488,8 @@ describe("AC-AF-7 the acceptance is bound to the failure it accepted", () => {
     expect(accepted.ok && accepted.value.decision_record).toBe(human[0]?.id);
     const asked = rows.value.find((r) => r.channel === "machine" && r.subject_id === `${w.plan.id}:security`);
     expect(asked?.detail ?? "").toContain("the finding is a false positive");
-    // no plan write carries the acceptance: the plan's known defects hold no `gate_accepted` and the version is unchanged
+    // no plan field carries the acceptance: filing links the issue as a plain known defect, which holds no `gate_accepted`
     const stored = await w.reload();
-    expect(stored.version).toBe(versionBefore);
     expect(readKnownDefects(stored.extra).some((e) => e.gate_accepted === true)).toBe(false);
   });
 });
