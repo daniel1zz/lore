@@ -1,0 +1,29 @@
+{
+  "doc_type": "baseline",
+  "kind": "module-card",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["purpose", "public_surface", "side_effect_class"],
+    "properties": {
+      "purpose": { "type": "string", "minLength": 1, "title": "Purpose", "description": "What the module is for, in one sentence." },
+      "paths": { "type": "array", "title": "Where it lives", "items": { "type": "string", "minLength": 1 }, "description": "Files or directories that make up the module." },
+      "public_surface": { "type": "array", "title": "Public surface", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "description": "The exported symbols, commands or endpoints other code may use." },
+      "invariants": { "type": "array", "title": "Invariants", "items": { "type": "string", "minLength": 1 }, "description": "What must always hold inside the module." },
+      "side_effect_class": { "type": "string", "title": "Side-effect class", "enum": ["pure", "io", "stateful"] },
+      "depends_on": { "type": "array", "title": "Depends on", "x-ref-list": true, "items": { "type": "string", "minLength": 1 }, "description": "Rule ids or module cards this module relies on." },
+      "must_not": { "type": "array", "title": "Must not", "items": { "type": "string", "minLength": 1 }, "description": "What the module must never do or depend on." }
+    }
+  },
+  "dimensions": [
+    { "id": "public-surface", "question": "What can another module call, and what stops it reaching past that?" },
+    { "id": "failure-behaviour", "question": "How does this module fail, and does the caller see it or does it fall back silently?" }
+  ],
+  "checks": ["refs-resolve"],
+  "render": [
+    { "heading": "Purpose", "fields": ["purpose", "paths"] },
+    { "heading": "Public surface", "fields": ["public_surface", "side_effect_class"] },
+    { "heading": "Invariants", "fields": ["invariants", "must_not"] },
+    { "heading": "Depends on", "fields": ["depends_on"] }
+  ]
+}

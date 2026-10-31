@@ -1,0 +1,45 @@
+{
+  "doc_type": "knowledge",
+  "kind": "research",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["question", "method", "findings", "conclusion", "confidence"],
+    "properties": {
+      "question": { "type": "string", "minLength": 1, "title": "Question", "description": "The question this research answers." },
+      "method": { "type": "string", "minLength": 1, "title": "Method", "description": "What was read, run or measured, and where." },
+      "findings": {
+        "type": "array",
+        "title": "Findings",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["claim", "source", "tier"],
+          "properties": {
+            "claim": { "type": "string", "minLength": 1 },
+            "source": { "type": "string", "minLength": 1 },
+            "tier": { "type": "string", "enum": ["S", "A", "B", "C", "D", "E"], "description": "S official, A measured here, B reputable secondary, C anecdote, D inference, E untrusted." }
+          }
+        }
+      },
+      "counter_evidence": { "type": "array", "title": "Counter-evidence", "items": { "type": "string", "minLength": 1 }, "description": "Findings that point the other way." },
+      "conclusion": { "type": "string", "minLength": 1, "title": "Conclusion" },
+      "confidence": { "type": "string", "title": "Confidence", "enum": ["established", "observed", "unconfirmed", "undecided"] },
+      "limits": { "type": "string", "title": "Limits", "description": "What this research did not cover, and when it goes stale." },
+      "related": { "type": "array", "title": "Related documents", "x-ref-list": true, "items": { "type": "string", "minLength": 1 } }
+    }
+  },
+  "dimensions": [
+    { "id": "evidence-tier", "question": "What tier is the evidence behind the conclusion, and is the weakest load-bearing claim marked?" },
+    { "id": "counter-evidence", "question": "What did you look for that would have disproved the conclusion, and what did you find?" },
+    { "id": "freshness", "question": "What would make this research out of date, and when was each source last checked?" }
+  ],
+  "checks": ["refs-resolve"],
+  "render": [
+    { "heading": "Question", "fields": ["question"] },
+    { "heading": "Method", "fields": ["method"] },
+    { "heading": "Findings", "fields": ["findings", "counter_evidence"] },
+    { "heading": "Conclusion", "fields": ["conclusion", "confidence", "limits"] },
+    { "heading": "Related documents", "fields": ["related"] }
+  ]
+}

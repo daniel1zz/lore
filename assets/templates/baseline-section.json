@@ -1,0 +1,30 @@
+{
+  "doc_type": "baseline",
+  "kind": "section",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["summary", "boundary"],
+    "properties": {
+      "summary": { "type": "string", "minLength": 1, "title": "Summary", "description": "The part of the system this architecture section covers (a layer, a subsystem)." },
+      "boundary": {
+        "type": "object",
+        "title": "Boundary",
+        "required": ["inside", "outside"],
+        "properties": {
+          "inside": { "type": "string", "minLength": 1, "description": "The modules and standards this section holds." },
+          "outside": { "type": "string", "minLength": 1, "description": "What belongs to another section." }
+        }
+      },
+      "dependency_direction": { "type": "string", "title": "Dependency direction", "description": "Which sections this one may depend on, and which may depend on it." }
+    }
+  },
+  "dimensions": [
+    { "id": "boundary", "question": "Which module could be filed under this section or its neighbour, and why does it belong here?" }
+  ],
+  "checks": [],
+  "render": [
+    { "heading": "Summary", "fields": ["summary"] },
+    { "heading": "Boundary", "fields": ["boundary", "dependency_direction"] }
+  ]
+}
