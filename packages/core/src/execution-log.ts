@@ -54,8 +54,13 @@ export const executionLogEntrySchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("removed-oracle"), at, oracle: z.string().min(1), path: z.string().min(1), reason: z.string().min(1), landed_commit: z.string().min(1) }).strict(),
   /** A criterion in the task's scope was corrected or superseded. */
   z.object({ kind: z.literal("superseded"), at, ac: z.string().min(1), reason: z.string().min(1), via: z.enum(["correction", "supersede"]) }).strict(),
-  /** The drift check changed something about the contract of the task. */
-  z.object({ kind: z.literal("drift"), at, detail: z.string().min(1) }).strict(),
+  /**
+   * The drift check at `lore start` changed the contract of the task. `old` and `new` hold the changed contract fields as typed
+   * values (the same keys in both; an oracle is keyed `oracles.<id>`, absent before as `null`); `detail` is the human line.
+   */
+  z
+    .object({ kind: z.literal("drift"), at, detail: z.string().min(1), old: z.record(z.string(), z.unknown()), new: z.record(z.string(), z.unknown()) })
+    .strict(),
   /** Evidence moved between files or tasks (a plan's log). */
   z.object({ kind: z.literal("evidence-moved"), at, from: z.string().min(1), to: z.string().min(1), task: z.string().min(1).optional() }).strict(),
 ]);

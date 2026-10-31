@@ -157,7 +157,7 @@ export function describeContractChanges(stored: DoneContract, next: DoneContract
 }
 
 /**
- * The `drift` entry for a stored change: `detail` is JSON holding both commits and every change with its old and new value.
+ * The `drift` entry for a stored change: `old` and `new` are typed maps of the changed contract fields, `detail` the human line.
  *
  * @param at - the write time
  * @param stored - the contract before
@@ -165,7 +165,13 @@ export function describeContractChanges(stored: DoneContract, next: DoneContract
  * @param changes - {@link describeContractChanges} of the two (non-empty)
  */
 export function driftLogEntry(at: string, stored: DoneContract, next: DoneContract, changes: readonly ContractChange[]): ExecutionLogEntry {
-  return { kind: "drift", at, detail: JSON.stringify({ from_commit: stored.compiled_at_commit, to_commit: next.compiled_at_commit, changes }) };
+  return {
+    kind: "drift",
+    at,
+    detail: `contract recompiled at start, ${stored.compiled_at_commit.slice(0, 12)} to ${next.compiled_at_commit.slice(0, 12)}: ${changes.map((change) => change.field).join(", ")}`,
+    old: Object.fromEntries(changes.map((change) => [change.field, change.old])),
+    new: Object.fromEntries(changes.map((change) => [change.field, change.new])),
+  };
 }
 
 /** What {@link deriveWriteSetAdditions} reads. */

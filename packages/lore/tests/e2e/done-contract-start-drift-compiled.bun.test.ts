@@ -311,9 +311,18 @@ describe("lore start checks drift since approve and never drops an oracle", () =
     // exactly one drift entry, holding the old and the new value
     const entries = await driftEntries(t.slug);
     expect(entries.length, JSON.stringify(entries)).toBe(1);
-    expect(entries[0]?.detail).toContain("echo typecheck-ok");
-    expect(entries[0]?.detail).toContain("echo typecheck-v2");
-    expect(entries[0]?.detail).toContain(t.compiledAt);
+    // typed old and new values (no string to parse): the changed contract fields, read back and compared with the contract before and after
+    const entry = entries[0] as unknown as { detail: string; old: Record<string, unknown>; new: Record<string, unknown> };
+    expect(typeof entry.detail).toBe("string");
+    expect(entry.detail.length).toBeGreaterThan(0);
+    const typecheckBefore = (stored["oracles"] as { id: string }[]).find((oracle) => oracle.id === "typecheck");
+    const typecheckAfter = contract.oracles.find((oracle) => oracle.id === "typecheck");
+    expect(typecheckBefore).toEqual({ id: "typecheck", command: "echo typecheck-ok" });
+    expect(Object.keys(entry.old)).toEqual(["oracles.typecheck"]);
+    expect(Object.keys(entry.new)).toEqual(["oracles.typecheck"]);
+    expect(entry.old["oracles.typecheck"]).toEqual(typecheckBefore);
+    expect(entry.new["oracles.typecheck"]).toEqual(typecheckAfter);
+    expect(typecheckAfter).toEqual({ id: "typecheck", command: "echo typecheck-v2" });
     // one write for contract + entry, then the claim's own write: two versions, and no version holds one without the other
     expect(after.version).toBe(versionBefore + 2);
     for (const extra of await versionExtras(t.slug)) {
