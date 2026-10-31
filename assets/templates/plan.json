@@ -1,0 +1,108 @@
+{
+  "doc_type": "plan",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["goal", "spec_ref", "phases", "task_criteria_map", "close_condition"],
+    "properties": {
+      "goal": {
+        "type": "object",
+        "x-goal": true,
+        "required": ["statement", "measure"],
+        "properties": {
+          "statement": { "type": "string", "minLength": 1, "description": "What the plan achieves." },
+          "measure": { "type": "string", "minLength": 1, "description": "The observable outcome that proves it, such as a command and its output." }
+        }
+      },
+      "spec_ref": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Slug of the spec this plan implements."
+      },
+      "issues": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "description": "Issues this plan resolves (for example #553)."
+      },
+      "phases": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["name", "description", "why_this_order"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "description": { "type": "string", "minLength": 1 },
+            "why_this_order": { "type": "string", "minLength": 1, "description": "Why this phase is here and not earlier or later." }
+          }
+        }
+      },
+      "task_criteria_map": {
+        "type": "array",
+        "minItems": 1,
+        "items": { "type": "string", "minLength": 1 },
+        "x-ref-list": true,
+        "description": "Every AC id of the spec that this plan delivers. Each must be owned by a task; list the owners in task_owners."
+      },
+      "task_owners": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["task", "acs"],
+          "properties": {
+            "task": { "type": "string", "minLength": 1 },
+            "phase": { "type": "string" },
+            "acs": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          }
+        },
+        "description": "Which task owns which ACs."
+      },
+      "corpus_steps": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "description": "Document work in the corpus (convert, supersede, archive) that the plan performs."
+      },
+      "after_landing_steps": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "description": "What happens once the branch lands: the full suite, rebuilds, handoffs."
+      },
+      "close_condition": {
+        "type": "string",
+        "minLength": 1,
+        "description": "What exactly closes the plan, including the plan's own documents and its tasks."
+      }
+    }
+  },
+  "dimensions": [
+    {
+      "id": "ordering",
+      "question": "Does any phase refuse or depend on something a later phase delivers? State the dependency chain."
+    },
+    {
+      "id": "criteria-coverage",
+      "question": "Is every AC of the spec owned by a task? Name the ACs and the tasks.",
+      "needs_refs": true
+    },
+    {
+      "id": "close-condition",
+      "question": "What exactly closes this plan, and which of its own documents must be in which state?"
+    },
+    {
+      "id": "concurrency",
+      "question": "Which files or claims do other sessions' plans share with this one, and how is the overlap handled?"
+    },
+    {
+      "id": "cost",
+      "question": "What does the plan cost in tasks, agent runs and verification, and what is the cheapest cut that still meets the goal?"
+    }
+  ],
+  "checks": ["refs-resolve", "goal-has-measure"],
+  "render": [
+    { "heading": "Goal", "fields": ["goal", "spec_ref", "issues"] },
+    { "heading": "Phases", "fields": ["phases"] },
+    { "heading": "Criteria coverage", "fields": ["task_criteria_map", "task_owners"] },
+    { "heading": "Corpus and landing", "fields": ["corpus_steps", "after_landing_steps"] },
+    { "heading": "Close condition", "fields": ["close_condition"] }
+  ]
+}

@@ -5,6 +5,8 @@
  * Dimensions: HAPPY (parse, sample documents validate), NEGATIVE (missing required field, bad `kind`),
  *   BOUNDARY (kind enum edges, optional system-filled fields), REGRESSION (render paths all resolve).
  *
+ * @reads assets/templates/plan.json
+ * @reads assets/templates/task.json
  * @spec_ref AC-ST-8
  */
 import { readFileSync } from "node:fs";

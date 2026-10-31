@@ -1,0 +1,115 @@
+{
+  "doc_type": "task",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["kind", "objective", "spec_ref", "ac_scope", "anchors", "done_condition"],
+    "properties": {
+      "kind": {
+        "type": "string",
+        "enum": ["code", "check", "corpus"],
+        "description": "What the task produces. code = source change proven by tests; check = a measurement or review with no product change; corpus = documents only. The done-contract compiler picks the oracle set and the red-first rule from this."
+      },
+      "objective": {
+        "type": "string",
+        "minLength": 1,
+        "description": "One paragraph: what changes and why, readable without the plan."
+      },
+      "spec_ref": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Slug of the governing spec."
+      },
+      "ac_scope": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "x-ref-list": true,
+        "description": "AC ids of the governing spec this task claims. A new-symbol AC carries its own falsifier (path, find, replace, exit code) on the AC; the task only refs the id."
+      },
+      "anchors": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "description": "Files or directories the task changes (file_anchors)."
+      },
+      "issues_resolved": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "description": "Issues this task resolves (for example #553); empty when it resolves none."
+      },
+      "done_condition": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The observable state that means done: a command and the output it must print, or a document state."
+      },
+      "approach": {
+        "type": "string",
+        "description": "Implementation notes: the route chosen and the traps already known."
+      },
+      "write_set": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "description": "Paths the claim may write. Optional: it defaults to anchors. Set it only when the claim must be wider or narrower than anchors."
+      },
+      "red_waiver_reason": {
+        "type": "string",
+        "description": "Why no red run precedes the implementation (a kind check or corpus task, or a change no test can observe red). Absent when red-first applies."
+      },
+      "done_contract": {
+        "type": "object",
+        "description": "Filled by the system when the task is approved; do not hand-write it. It is the compiled definition of done.",
+        "properties": {
+          "oracles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "oracle": { "type": "string" },
+                "command": { "type": "string" },
+                "ac": { "type": "string" }
+              }
+            },
+            "description": "The oracles that must pass, each with its command and the AC it proves."
+          },
+          "red_required": { "type": "boolean", "description": "True when a runner-produced red run must be on record before done." },
+          "red_waiver_reason": { "type": "string", "description": "Copied from red_waiver_reason when red_required is false." },
+          "contract_base": { "type": "string", "description": "The commit the contract was compiled against." }
+        }
+      },
+      "execution_log_refs": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "description": "References to the execution log: evidence versions, handoff ids, run ids. Appended during execution."
+      }
+    }
+  },
+  "dimensions": [
+    {
+      "id": "done-condition",
+      "question": "What exactly can a reviewer observe to say this task is done, and which command or document state shows it?"
+    },
+    {
+      "id": "red-first",
+      "question": "How does the oracle go red before the implementation lands? If it cannot, state why and fill red_waiver_reason."
+    },
+    {
+      "id": "scope-boundary",
+      "question": "Which files may this task touch, and which nearby files must it leave alone?"
+    },
+    {
+      "id": "concurrency",
+      "question": "Which claims or branches held by other sessions overlap these files, and what happens if one of them lands first?"
+    },
+    {
+      "id": "rollback",
+      "question": "If the task is blocked or must be abandoned, what is left behind and how is it undone?"
+    }
+  ],
+  "checks": ["refs-resolve"],
+  "render": [
+    { "heading": "Objective", "fields": ["objective", "spec_ref", "kind"] },
+    { "heading": "Scope", "fields": ["ac_scope", "anchors", "write_set", "issues_resolved"] },
+    { "heading": "Done condition", "fields": ["done_condition", "done_contract", "red_waiver_reason"] },
+    { "heading": "Approach", "fields": ["approach"] },
+    { "heading": "Execution log", "fields": ["execution_log_refs"] }
+  ]
+}
