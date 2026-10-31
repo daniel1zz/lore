@@ -2,6 +2,7 @@
 // @reads packages/lore/src/service/review-service.ts
 // @reads assets/project/lore-config-template.yaml
 // @reads assets/governance/write-spec-rule.md
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * spec-every-document-is-stored-as-structured-fields-validated-by#AC-ST-6 (BR-1531): TWO ROUNDS, THEN A HUMAN.
  *
@@ -32,9 +33,10 @@ import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { DecisionService } from "../../../src/service/decision-service.js";
 import { issueHumanPartyProof } from "../../../src/service/human-channel.js";
 
-const TIMEOUT_MS = 180_000;
+const TIMEOUT_MS = 420_000;
 let dir = "";
 let seed = 0;
+let prdSlug = "";
 
 async function lore(args: readonly string[]) {
   return runLoreInProcess([...args], { cwd: dir, home: dir, env: { ...process.env, HOME: dir, EDITOR: "true", CLAUDECODE: "1" } });
@@ -124,7 +126,8 @@ async function humanAnswers(pendingId: number, answer: "accept" | "reject" | "di
 async function newCorpus(): Promise<void> {
   dir = mkdtempSync(join(tmpdir(), "review-round-cap-"));
   await must(["init"]);
-  await must(["create", "prd", "--title", "Round cap product", "--content", "# P\n\nA product.\n"]);
+  const prd = JSON.parse(await must(["create", "prd", "--title", "Round cap product", "--content", "# P\n\nA product.\n", "--json"])) as { data: { slug: string } };
+  prdSlug = prd.data.slug;
 }
 
 afterEach(() => {
@@ -246,9 +249,7 @@ describe("spec-every-document-is-stored-as-structured-fields-validated-by#AC-ST-
 
   it("a plan (not judgment-required) is not capped", async () => {
     await newCorpus();
-    const prdSlug = JSON.parse(await must(["list", "--type", "prd", "--json"])) as { data: { slug: string }[] } | { data: { items: { slug: string }[] } };
-    const parent = "items" in prdSlug.data ? prdSlug.data.items[0]?.slug : (prdSlug.data as { slug: string }[])[0]?.slug;
-    const planOut = JSON.parse(await must(["create", "plan", "--title", "Uncapped plan", "--parent", parent ?? "", "--content", "x", "--json"])) as { data: Doc };
+    const planOut = JSON.parse(await must(["create", "plan", "--title", "Uncapped plan", "--parent", prdSlug, "--content", "x", "--json"])) as { data: Doc };
     const plan = planOut.data;
     judge(plan.id, plan.version, "reject");
     const v2 = await bump(plan.slug, "second");

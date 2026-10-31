@@ -36,6 +36,8 @@ export interface DecideFlowInput {
   readonly accept: boolean;
   readonly reject: boolean;
   readonly reason?: string;
+  /** `--direct <text>` (BR-1531, review-round-cap only): the human's direction; allows one more review round. */
+  readonly direct?: string;
 }
 
 export interface DecideFlowIo {
@@ -66,10 +68,12 @@ function usageRefusal(io: DecideFlowIo, message: string): number {
 
 /** Runs the flow and returns the process exit code (0 resolved, 4 refused or rejected input, store codes otherwise). */
 export async function runDecideFlow(inv: Invocation, input: DecideFlowInput, ports: HumanChannelPorts, io: DecideFlowIo = decideIoOf(inv.io)): Promise<number> {
-  if (input.accept === input.reject) return usageRefusal(io, "lore decide needs exactly one of --accept or --reject");
+  const direct = input.direct !== undefined;
+  if (Number(input.accept) + Number(input.reject) + Number(direct) !== 1) return usageRefusal(io, "lore decide needs exactly one of --accept, --reject or --direct <text>");
   const pendingId = input.id !== undefined && /^[1-9]\d*$/.test(input.id) ? Number(input.id) : null;
   if (pendingId === null) return usageRefusal(io, "lore decide needs the numeric id of a pending decision (see `lore pending`)");
-  const answer = input.accept ? "accept" : "reject";
+  const answer = direct ? "direct" : input.accept ? "accept" : "reject";
+  const reason = direct ? input.direct : input.reason;
 
   const pre = checkHumanChannelPreconditions(ports);
   if (!pre.ok) return usageRefusal(io, pre.error.message);
@@ -99,12 +103,12 @@ export async function runDecideFlow(inv: Invocation, input: DecideFlowInput, por
     const proof = confirmHumanNonce(ports, pre.value, withDetailLines(summary, target, target.id, inv));
     if (!proof.ok) return usageRefusal(io, proof.error.message);
 
-    const resolved = await service.resolvePending(target.id, answer, input.reason, proof.value);
+    const resolved = await service.resolvePending(target.id, answer, reason, proof.value);
     if (!resolved.ok) {
       io.stderr(formatErrorFor(inv, resolved.error) + "\n");
       return exitCode(resolved.error);
     }
-    io.stdout(`Decision ${target.id} ${answer === "accept" ? "accepted" : "rejected"} (channel human-tty, record ${resolved.value.id}). Re-run the operation to proceed.\n`);
+    io.stdout(`Decision ${target.id} ${answer === "accept" ? "accepted" : answer === "direct" ? "directed" : "rejected"} (channel human-tty, record ${resolved.value.id}). Re-run the operation to proceed.\n`);
     return 0;
   } finally {
     store.close();

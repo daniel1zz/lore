@@ -62,7 +62,11 @@ export function seedGovernedThresholds(): GovernedThresholds {
 
 /** The registry decide() takes, from a record. */
 export function registryOf(record: GovernedThresholds): OperationClassRegistry {
-  return record.classes;
+  // reason: a corpus seeded before a class joined the code table has a stored record without it; decide() would then refuse
+  // the class as unknown. A code-table class the record lacks is decided as the table declares it (the record still wins
+  // wherever it names the class). retireClass already refuses to retire a class the table still has, so nothing is undone.
+  const missing = Object.entries(OPERATION_CLASS_REGISTRY).filter(([id]) => !Object.hasOwn(record.classes, id));
+  return missing.length === 0 ? record.classes : { ...Object.fromEntries(missing), ...record.classes };
 }
 
 /**
