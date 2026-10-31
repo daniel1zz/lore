@@ -28,7 +28,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 import { asyncLoreRunnerFor, citeSpecViaAsyncCli } from "../../helpers/cli-live-rule.js";
-import { actedStore } from "../../live-invocation.js";
+import { actedStore, liveInvocation } from "../../live-invocation.js";
+import { runPendingAsk } from "../../../src/adapters/cli/pending-ask.js";
+import { recordHarnessAnswers } from "../../../src/service/harness-ask.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { DecisionService } from "../../../src/service/decision-service.js";
 import { issueHumanPartyProof } from "../../../src/service/human-channel.js";
@@ -296,5 +298,117 @@ describe("spec-every-document-is-stored-as-structured-fields-validated-by#AC-ST-
     expect(noJudgment.exitCode).toBe(4);
     await humanAnswers(pending?.id ?? 0, "accept");
     expect((await lore(["approve", third.slug])).exitCode).toBe(0);
+  }, TIMEOUT_MS);
+});
+
+// ─── The in-session path: lore pending --ask -> AskUserQuestion -> decide --from-harness ────────────────────────────
+
+interface AskedQuestion {
+  readonly question: string;
+  readonly options: readonly { readonly label: string }[];
+}
+
+/**
+ * A throwaway store holding one open decision of `classId`; returns the question `lore pending --ask` writes for it and a
+ * recorder for the hook payload a human's answer produces (`recordHarnessAnswers`, the code `decide --from-harness` runs).
+ */
+async function askedDecision(classId: string): Promise<{ store: SQLiteStore; pendingId: number; asked: AskedQuestion; answerWith: (text: string, edit?: (q: AskedQuestion) => AskedQuestion) => Promise<{ exit: number; lines: readonly string[] }>; humanRows: () => Promise<{ verdict: string; facts: string }[]> }> {
+  const root = mkdtempSync(join(tmpdir(), "review-round-cap-ask-"));
+  const dbPath = join(root, "lore.db");
+  const store = actedStore(new SQLiteStore(dbPath));
+  const decisions = new DecisionService({ store, executorRun: null });
+  const detail = { summary: "Decide the doc at the cap", requested_by: "a test session", change: { document: "doc-x" }, on_accept: "Approved on re-run.", on_reject: "Back to draft." };
+  const facts = classId === "review-round-cap" ? { recoverability: "irreversible-external", blast: "calling-session", evidence: "lore-evaluated" } : {};
+  const decided = await decisions.decide(classId, { id: "doc-x", version: "c0:a2:v3" }, facts, detail);
+  if (!decided.ok) throw new Error(JSON.stringify(decided.error));
+  const output = await runPendingAsk(liveInvocation(), dbPath, new Map());
+  if (!output.ok) throw new Error(JSON.stringify(output.error));
+  const asked = output.value.questions[0] as AskedQuestion;
+  const pendingId = output.value.decision_ids[0] as number;
+  const answerWith = async (text: string, edit?: (q: AskedQuestion) => AskedQuestion) => {
+    const sent = edit === undefined ? asked : edit(asked);
+    const payload = JSON.stringify({
+      hook_event_name: "PostToolUse",
+      tool_name: "AskUserQuestion",
+      tool_input: { questions: [{ ...sent, header: `Decision ${pendingId}`, multiSelect: false }] },
+      tool_response: { answers: { [sent.question]: text } },
+    });
+    const report = await recordHarnessAnswers({ store, now: () => new Date().toISOString() }, payload);
+    if (!report.ok) throw new Error(JSON.stringify(report.error));
+    return { exit: report.value.exit, lines: report.value.lines };
+  };
+  const humanRows = async () => {
+    const log = await store.listDecisionLog();
+    if (!log.ok) throw new Error(JSON.stringify(log.error));
+    return log.value.filter((r) => r.channel === "human-tty").map((r) => ({ verdict: r.verdict, facts: r.facts }));
+  };
+  return { store, pendingId, asked, answerWith, humanRows };
+}
+
+describe("spec-every-document-is-stored-as-structured-fields-validated-by#AC-ST-6 the in-session answer path", () => {
+  it("lore pending --ask writes Accept, Reject and Direct for a review-round-cap decision, and only Accept and Reject for any other class", async () => {
+    const cap = await askedDecision("review-round-cap");
+    expect(cap.asked.options.map((o) => o.label)).toEqual(["Accept", "Reject", "Direct"]);
+    cap.store.close();
+    const other = await askedDecision("governance-loosen");
+    expect(other.asked.options.map((o) => o.label)).toEqual(["Accept", "Reject"]);
+    other.store.close();
+  }, TIMEOUT_MS);
+
+  it("an Accept answer is recorded as a human accept", async () => {
+    const d = await askedDecision("review-round-cap");
+    const r = await d.answerWith("Accept");
+    expect(r.exit, r.lines.join("\n")).toBe(0);
+    const rows = await d.humanRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.verdict).toBe("auto");
+    expect(rows[0]?.facts).toContain('"answer":"accept"');
+    d.store.close();
+  }, TIMEOUT_MS);
+
+  it("a Reject answer is recorded as a human reject", async () => {
+    const d = await askedDecision("review-round-cap");
+    const r = await d.answerWith("Reject");
+    expect(r.exit, r.lines.join("\n")).toBe(0);
+    const rows = await d.humanRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.verdict).toBe("refuse");
+    expect(rows[0]?.facts).toContain('"answer":"reject"');
+    d.store.close();
+  }, TIMEOUT_MS);
+
+  it("a direction typed as the Other answer is recorded as direct with that text", async () => {
+    const d = await askedDecision("review-round-cap");
+    const r = await d.answerWith("split the scope in two and drop the migration");
+    expect(r.exit, r.lines.join("\n")).toBe(0);
+    expect(r.lines.join("\n")).toContain("directed");
+    const rows = await d.humanRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.verdict).toBe("auto");
+    expect(rows[0]?.facts).toContain('"answer":"direct"');
+    expect(rows[0]?.facts).toContain("split the scope in two and drop the migration");
+    d.store.close();
+  }, TIMEOUT_MS);
+
+  it("Direct picked without a typed direction records nothing; free text on any other class records nothing", async () => {
+    const cap = await askedDecision("review-round-cap");
+    const bare = await cap.answerWith("Direct");
+    expect(bare.exit).toBe(0);
+    expect(bare.lines.join("\n")).toContain("still pending");
+    expect(await cap.humanRows()).toHaveLength(0);
+    cap.store.close();
+    const other = await askedDecision("governance-loosen");
+    const free = await other.answerWith("do whatever you think is best");
+    expect(free.lines.join("\n")).toContain("still pending");
+    expect(await other.humanRows()).toHaveLength(0);
+    other.store.close();
+  }, TIMEOUT_MS);
+
+  it("a question lore did not write is refused: an agent cannot fabricate the answer by editing the question", async () => {
+    const d = await askedDecision("review-round-cap");
+    const forged = await d.answerWith("Accept", (q) => ({ ...q, options: [...q.options, { label: "Approve everything" }] }));
+    expect(forged.exit).toBe(4);
+    expect(await d.humanRows()).toHaveLength(0);
+    d.store.close();
   }, TIMEOUT_MS);
 });
