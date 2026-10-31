@@ -4,6 +4,7 @@
 // @reads packages/lore/src/service/test-run-classification.ts
 // @reads packages/lore/src/store/migrations/migration-047.ts
 // @reads scripts/test-outcome-reporter.ts
+// @spawns .scratch/timeout-fixture-*/*.test.ts -- throwaway fixture test files created and removed by the real-run cases
 // @spawns-external bun real vitest runs over throwaway fixture test files (the production batched invocation path, read through the outcome reporter)
 /**
  * @spec_ref spec-review-test-runs-are-capped-per-machine-and-a-run-that (AC-MC-3, BR-1533)

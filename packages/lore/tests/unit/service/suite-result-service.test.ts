@@ -256,11 +256,11 @@ describe("AC-AF-2 the runner's timeout ends the whole process tree", () => {
       expect(outcome.incomplete).toMatch(/timed out after \d+ ms/);
     }
     expect(await allGone(readPids(pidFile))).toBe(true);
-    // through the service: an incomplete batch is refused, so no row is stored and a later review runs it again
+    // through the service (BR-1533): a batch the time limit ended is stored as INCONCLUSIVE (cause timeout), which is no result, so a later review runs it again
     const stored = await service.runBatch(head, ["x.test.ts", "y.test.ts"], { ...runner, runFilesTogether: async () => together });
-    expect(stored.ok).toBe(false);
+    expect(stored.ok && stored.value.map((r) => [r.classification, r.inconclusive_cause])).toEqual([["inconclusive", "timeout"], ["inconclusive", "timeout"]]);
     const rows = await service.listFileRuns(`file-batch@${head}`);
-    expect(rows.ok && rows.value).toEqual([]);
+    expect(rows.ok && rows.value.every((r) => r.classification === "inconclusive")).toBe(true);
     const ended = await runner.disposeWorktrees?.();
     expect(ended?.ok).toBe(true);
     expect(worktreeCount(repo)).toBe(1);
