@@ -7,7 +7,7 @@
  *
  * @reads assets/templates/plan.json
  * @reads assets/templates/task.json
- * @spec_ref AC-ST-8
+ * Seed content of spec-every-document-is-stored-as-structured-fields-validated-by (task T4).
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
