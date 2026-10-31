@@ -656,6 +656,21 @@ const WorkflowConfigSchema = z
       .strict()
       .default({}),
     /**
+     * Structured documents (spec-every-document-is-stored-as-structured-fields-validated-by, BR-1528).
+     *
+     * @invariant `require_create: true` makes every NEW document be created structured (`--fields-file`, validated
+     *   against the latest approved template of its type and kind); a type with no approved template is refused.
+     *   `false` (default) leaves a plain create as it was: a create that supplies `extra.fields` is structured either
+     *   way, and a document that already has a `template_ref` is always validated on every write. The default flips
+     *   when the open documents are converted and every generator fills fields, not before.
+     */
+    structured_documents: z
+      .object({
+        require_create: z.boolean().default(false),
+      })
+      .strict()
+      .default({}),
+    /**
      * Turn-end review knobs (spec-interception-moves-off-every-tool-call-one-turn-end-review,
      * Scope 4a). Read by `assets/hooks/stop-turn-review.mjs`, which is a standalone script and so
      * scans `.lore/config.yaml` for exactly one path — `workflow.turn_end.main_session_source_edits`

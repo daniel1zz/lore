@@ -73,7 +73,9 @@ function questionFor(pending: PendingDecision, nonce: string, recommendation: As
     if (recommendation === undefined || recommendation.answer !== side) return { label, description };
     return { label: `${label}${t.recommendedMarker}`, description: `${recommendation.reason} ${description}` };
   };
-  const options = recommendation?.answer === "reject" ? [option("reject"), option("accept")] : [option("accept"), option("reject")];
+  const base = recommendation?.answer === "reject" ? [option("reject"), option("accept")] : [option("accept"), option("reject")];
+  // reason: BR-1531 — a review-round-cap decision has a third answer, Direct; the human's direction rides in the free-text Other answer.
+  const options = pending.class === "review-round-cap" ? [...base, { label: t.directLabel, description: t.directDescription }] : base;
   return { question: text, header: `Decision ${pending.id}`.slice(0, 12), options, multiSelect: false };
 }
 

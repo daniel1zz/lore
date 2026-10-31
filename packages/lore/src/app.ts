@@ -98,6 +98,7 @@ import type { RadiusDiffPort } from "./service/stamp-binding-reader.js";
 import { RunService } from "./service/run-service.js";
 import { WorktreeRemovalService, type WorktreeRemovalRunStore } from "./service/worktree-removal-service.js";
 import { DecisionService } from "./service/decision-service.js";
+import { ReviewRoundCap } from "./service/review-round-cap-service.js";
 import { createOverrideDecisionPort, type OverrideDecisionPort } from "./service/override-decision.js";
 import { createRealWorktreeProbe } from "./service/worktree-cleanup.js";
 import { createReadSessionHeartbeat, createWriteSessionHeartbeat } from "./adapters/session-heartbeat-port.js";
@@ -1003,6 +1004,8 @@ function buildAppFromSqlite(
   const retiredAcService = buildRetiredAcService(store, recordLockService, corpusService, ruleChangeService);
   wirePlanCloseRetirements(corpusService, retiredAcService);
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
+  // reason: BR-1531 — a judgment-required document's review rounds are capped per approval cycle; both roots wire it.
+  reviewService.setReviewRoundCap(new ReviewRoundCap({ store, judgments: judgmentService, decisions: new DecisionService({ store, executorRun: null }) }));
   // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
   reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
   taskWorkflowService.setOverrideDecisionPort(overrideDecisionPort);
@@ -1454,6 +1457,8 @@ function buildAppFromTurso(
   const retiredAcService = buildRetiredAcService(store, recordLockService, corpusService, ruleChangeService);
   wirePlanCloseRetirements(corpusService, retiredAcService);
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
+  // reason: BR-1531 — a judgment-required document's review rounds are capped per approval cycle; both roots wire it.
+  reviewService.setReviewRoundCap(new ReviewRoundCap({ store, judgments: judgmentService, decisions: new DecisionService({ store, executorRun: null }) }));
   // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
   reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
   taskWorkflowService.setOverrideDecisionPort(overrideDecisionPort);
@@ -1766,6 +1771,21 @@ function buildSuiteResultService(store: StoreInterface): SuiteResultService {
     now: () => new Date().toISOString(),
     newId: () => `suite-${randomUUID()}`,
     clockMs: () => performance.now(),
+  });
+}
+
+/**
+ * Arms template validation and body rendering on the one document write path (BR-1528/BR-1529): the
+ * `CorpusService` gets the `TemplateService` and the create policy from `workflow.structured_documents`.
+ * Both composition roots call it, so no surface is composed with an unvalidated write route.
+ */
+function wireStructuredWrite(app: App, config: LoreConfig | undefined): void {
+  if (app.templateService === undefined) return;
+  app.corpusService.setStructuredWrite({
+    templates: app.templateService,
+    // reason: inlined (same expression as `resolveRequireStructuredCreate`, @lore/core) because this function sits in the
+    // app.ts composition root, whose import block is held by another task's claim; the default is `false` either way.
+    requireStructuredCreate: config?.workflow?.structured_documents?.require_create ?? false,
   });
 }
 
@@ -2122,6 +2142,7 @@ function createAppUnscoped(
       // reason: D2 — a SQLite file is persistent, so verify runs in a worker over this same file (read-only).
       buildAuditVerifyRunner({ kind: "sqlite", dbPath }, { anchorRoot: repoRoot }),
     );
+    wireStructuredWrite(sqliteApp, config);
     wireIssueCloseOnArchive(sqliteApp, sqliteStore, config, ambient);
     wirePlanCloseIssues(sqliteApp, config, ambient, dbPath);
     return sqliteApp;
@@ -2235,6 +2256,7 @@ function createAppUnscoped(
         // opened without the remote URL (no second thread syncing the embedded replica).
         buildAuditVerifyRunner({ kind: "turso", localPath: dbPath }, { anchorRoot: repoRoot }),
       );
+    wireStructuredWrite(tursoApp, config);
     wireIssueCloseOnArchive(tursoApp, store, config, ambient);
     wirePlanCloseIssues(tursoApp, config, ambient, dbPath);
     return { ok: true, value: tursoApp };

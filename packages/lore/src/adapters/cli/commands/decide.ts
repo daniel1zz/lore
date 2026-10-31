@@ -29,6 +29,7 @@ export default defineLoreCommand({
     accept: { type: "boolean", description: "Accept: the operation may proceed when re-run (audit item: the auto decision was RIGHT)" },
     reject: { type: "boolean", description: "Reject: the operation stays refused (audit item: the auto decision was WRONG)" },
     reason: { type: "string", description: "Why (recorded with the answer)" },
+    direct: { type: "string", description: "Review round cap only (BR-1531): record this direction and allow one more review round" },
     "from-harness": {
       type: "boolean",
       description: "Record the answers of a PostToolUse AskUserQuestion payload read from stdin (used by the shipped hook; takes no id or answer flag)",
@@ -39,7 +40,7 @@ export default defineLoreCommand({
     const inv = invocationOf(context);
     const dbPath = findLoreDbPath(inv.io, inv);
     if (args["from-harness"] === true) {
-      const otherFlagsGiven = args.id !== undefined || args.accept === true || args.reject === true || args.reason !== undefined;
+      const otherFlagsGiven = args.id !== undefined || args.accept === true || args.reject === true || args.reason !== undefined || args.direct !== undefined;
       return runDecideFromHarness(inv, { dbPath, otherFlagsGiven });
     }
     const code = await runDecideFlow(
@@ -50,6 +51,7 @@ export default defineLoreCommand({
         accept: args.accept === true,
         reject: args.reject === true,
         ...(args.reason === undefined ? {} : { reason: String(args.reason) }),
+        ...(args.direct === undefined ? {} : { direct: String(args.direct) }),
       },
       createProductionHumanChannelPorts(inv),
     );

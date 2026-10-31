@@ -22,6 +22,7 @@
  * @spec_ref spec-every-document-is-stored-as-structured-fields-validated-by
  */
 
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -92,20 +93,29 @@ const goodDimensions = [
   { id: "evidence", status: "handled", answer: "see the sources", refs: ["summary"] },
 ];
 
+/**
+ * A templated document as it can sit in a corpus that `lore template check` is asked about: possibly INVALID (stored
+ * before its template was revised, or written outside the validating path). The validating write path refuses an
+ * invalid templated document (structured-documents T6, BR-1528), so the fixture creates a legacy row and then sets its
+ * `extra` straight in the database file, the way a pre-validation corpus held it.
+ */
 async function createDoc(title: string, extra: Record<string, unknown>): Promise<string> {
-  return await withApp(async (app) => {
+  const slug = await withApp(async (app) => {
     const created = await must(
-      app.corpusService.create({
-        type: "knowledge",
-        title,
-        content: "x",
-        parent_id: prdId,
-        extra: { sub_type: "reference", template_ref: `${templateSlug}@1`, ...extra },
-      } as never),
+      app.corpusService.create({ type: "knowledge", title, content: "x", parent_id: prdId, extra: { sub_type: "reference" } } as never),
       `create ${title}`,
     );
     return created.slug;
   });
+  const database = new Database(dbPath);
+  try {
+    database
+      .query("UPDATE docs SET extra = ? WHERE slug = ?")
+      .run(JSON.stringify({ sub_type: "reference", template_ref: `${templateSlug}@1`, ...extra }), slug);
+  } finally {
+    database.close();
+  }
+  return slug;
 }
 
 async function countDocsAndVersions(slug: string): Promise<{ docs: number; version: number; audit: number }> {

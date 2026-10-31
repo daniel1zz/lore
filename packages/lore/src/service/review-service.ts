@@ -5,6 +5,7 @@
  */
 
 import { requireOverrideAuto, type OverrideDecisionPort } from "./override-decision.js";
+import type { ReviewRoundCap, RoundCapState } from "./review-round-cap-service.js";
 import type {
   AuditEntry,
   DocId,
@@ -323,6 +324,82 @@ export class ReviewService {
   }
 
   private overrideDecisions: OverrideDecisionPort | undefined;
+
+  /**
+   * Wires the review round cap (BR-1531). Set by the composition root; absent (bare test construction) = no cap.
+   * ⛔ Production roots (`app.ts`) always wire it, so an unwired cap is never a production fallback.
+   */
+  setReviewRoundCap(cap: ReviewRoundCap): void {
+    this.roundCap = cap;
+  }
+
+  private roundCap: ReviewRoundCap | undefined;
+
+  /** The refusal of an action on a capped document: names the cap and the pending decision a human answers. */
+  private async roundCapRefusal(doc: DocRecord, state: RoundCapState, asked: string): Promise<LoreError> {
+    if (this.roundCap === undefined) return { code: "STORE_ERROR", message: "review round cap is not wired" };
+    const pendingId = await this.roundCap.ask(doc, state, asked);
+    if (!pendingId.ok) return pendingId.error;
+    return {
+      code: "VALIDATION_ERROR",
+      field: "review-round-cap",
+      message:
+        `${doc.slug} has used its ${state.allowed} review rounds this approval cycle (${state.roundsUsed} judged versions): ${asked} is refused.\n` +
+        `Pending decision ${pendingId.value} created (class review-round-cap). Ask the human in the session (lore pending --ask, then the interactive question tool). ` +
+        `Accept approves the current version (re-run lore approve), reject returns it to draft, direct records the direction and allows one more round.`,
+      value: { class: "review-round-cap", subject: state.subject, pending_id: pendingId.value, rounds_used: state.roundsUsed, rounds_allowed: state.allowed },
+      rule: "BR-1531",
+    };
+  }
+
+  /** Returns an in-review doc to draft after the human rejected it at the cap (a draft already is). */
+  private async returnToDraftAfterHumanReject(doc: DocRecord): Promise<Result<void, LoreError>> {
+    if (doc.status !== "in-review") return ok(undefined);
+    const rejected = await this.rejectWithOutcome(doc.id, { reason: "the human rejected the document at the review round cap (BR-1531)" });
+    return rejected.ok ? ok(undefined) : rejected;
+  }
+
+  /**
+   * BR-1531 for `lore review`: refuses a review that would start a round beyond the cycle's allowance.
+   *
+   * A no-op when no cap is wired, when `doc.type` is not judgment-required, when the rounds are not spent, or when the
+   * current version was already judged this cycle (re-reviewing a judged version is not a new round).
+   *
+   * @param idOrSlug - the document about to be reviewed
+   * @returns err(VALIDATION_ERROR, field review-round-cap, exit 4) naming the cap and the pending decision; for a human
+   *   reject the document is also returned to draft; err(store) when the state cannot be read
+   */
+  async assertReviewRoundAvailable(idOrSlug: string): Promise<Result<void, LoreError>> {
+    if (this.roundCap === undefined) return ok(undefined);
+    const found = await this.resolveDoc(idOrSlug);
+    if (!found.ok) return found;
+    const doc = found.value;
+    if (!(this.judgmentRequiredTypes ?? []).includes(doc.type)) return ok(undefined);
+    const state = await this.roundCap.measure(doc);
+    if (!state.ok) return state;
+    if (!state.value.spent || state.value.currentVersionJudged) return ok(undefined);
+    if (state.value.humanAnswer === "reject") {
+      const drafted = await this.returnToDraftAfterHumanReject(doc);
+      if (!drafted.ok) return drafted;
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "review-round-cap",
+        message: `The human rejected ${doc.slug} v${doc.version} at the review round cap; it is back in draft. Rework it: a reworked version is a further round and asks the human again (lore pending --ask).`,
+        value: { class: "review-round-cap", subject: state.value.subject, answer: "reject" },
+        rule: "BR-1531",
+      });
+    }
+    if (state.value.humanAnswer === "accept") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "review-round-cap",
+        message: `The human accepted ${doc.slug} v${doc.version} at the review round cap: no further review is needed, run lore approve ${doc.slug}.`,
+        value: { class: "review-round-cap", subject: state.value.subject, answer: "accept" },
+        rule: "BR-1531",
+      });
+    }
+    return err(await this.roundCapRefusal(doc, state.value, `lore review ${doc.slug}`));
+  }
 
   /**
    * Wires the measure of a leaf's declared commands against main's tree (task-approving-a-baseline-leaf-refuses-while-it-declares-a).
@@ -855,6 +932,34 @@ export class ReviewService {
       overrodeNoJudgment = true;
     }
 
+    // reason: BR-1531 — a judgment-required document whose review rounds are spent is decided by a HUMAN. The override flags
+    // are agent-usable escapes (the override-judgment class is a milestone class that applies at once), so on a capped
+    // document they must NOT bypass the cap: without a human accept of the current version the override is refused and the
+    // pending decision opened; with one, the accept itself approves (the judgment gate is skipped, no override needed).
+    let humanAcceptedAtCap = false;
+    if (this.roundCap !== undefined && (this.judgmentRequiredTypes ?? []).includes(doc.type)) {
+      const capState = await this.roundCap.measure(doc);
+      if (!capState.ok) return capState;
+      if (capState.value.spent) {
+        if (capState.value.humanAnswer === "reject") {
+          const drafted = await this.returnToDraftAfterHumanReject(doc);
+          if (!drafted.ok) return drafted;
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "review-round-cap",
+            message: `The human rejected ${doc.slug} v${doc.version} at the review round cap; it is back in draft and is not approved.`,
+            value: { class: "review-round-cap", subject: capState.value.subject, answer: "reject" },
+            rule: "BR-1531",
+          });
+        }
+        if (capState.value.humanAnswer === "accept") {
+          humanAcceptedAtCap = true;
+        } else if (overriddenJudgmentId !== undefined || overrodeNoJudgment) {
+          return err(await this.roundCapRefusal(doc, capState.value, `approve ${doc.slug} with an override`));
+        }
+      }
+    }
+
     // reason: AC-AU-7 — an override the actor can set is DECIDED, not granted: class override-judgment through decide()
     // BEFORE the gate is skipped or anything is written. The subject version names the doc version AND which escape,
     // so a re-run of the same command finds the same pending decision (nothing was written by the refusal).
@@ -881,7 +986,7 @@ export class ReviewService {
     }
 
     const gateResult = await this.enforceApprovalGate(baselinePlan?.gateDoc ?? doc, {
-      skipJudgmentGate: overriddenJudgmentId !== undefined || overrodeNoJudgment,
+      skipJudgmentGate: overriddenJudgmentId !== undefined || overrodeNoJudgment || humanAcceptedAtCap,
     });
     if (!gateResult.ok) return gateResult;
     // reason: spec-verify-reachability-plan-promote-early-warning §Scope M1 —
