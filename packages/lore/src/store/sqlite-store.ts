@@ -3905,6 +3905,16 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
+  async listLeases(prefix: string): Promise<Result<LeaseRecord[], LoreError>> {
+    try {
+      // reason: substr comparison, not LIKE, so a `_` or `%` in a prefix is never a wildcard.
+      const rows = this.db.query("SELECT name, holder, expires_at FROM review_leases WHERE substr(name, 1, length(?)) = ? ORDER BY name").all(prefix, prefix) as LeaseRecord[];
+      return ok(rows);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   async listReadCounts(sinceDay: string): Promise<Result<ReadDayCount[], LoreError>> {
     try {
       const rows = this.db

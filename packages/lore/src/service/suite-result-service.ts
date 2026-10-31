@@ -4,8 +4,8 @@
  * Purpose: make "what did the suite say at commit X" a stored fact: the first lookup of a commit runs the suite once and
  *   stores it, every later lookup reads the store and runs nothing; the main red/green state the review records is
  *   derived from the same rows, so there is no second record of one run.
- * Public surface: SuiteResultService, CommitSuiteRunnerPort, FileRunOutcome, SingleFileRunKind, singleFileRunKey, suiteRunOfResult,
- *   deriveMainCheckedRows.
+ * Public surface: SuiteResultService (lookupOrRun, runSingleFile, runBatch, awaitSuiteResult, listLiveSuiteCommits), CommitSuiteRunnerPort,
+ *   FileRunOutcome, SingleFileRunKind, FileRunKind, singleFileRunKey, newestMeasuredAtOrAbove, suiteRunOfResult, deriveMainCheckedRows.
  * Invariants:
  *   - A commit has at most one `measured` result. A run that could not complete (the runner reports not-measured or
  *     fails) is stored as `unrunnable` with its cause and attempt number, and the NEXT lookup runs again as a new
@@ -55,6 +55,16 @@ export interface CommitSuiteRunnerPort {
    * work that must happen at a commit whose suite result is already stored. Optional: a runner without it cannot do such work.
    */
   readonly withWorktree?: (commit: string, work: (root: string) => Promise<void>) => Promise<Result<void, LoreError>>;
+  /**
+   * Runs ALL the named test files at `commit` in ONE test-runner invocation (the files run beside each other) and reports
+   * one outcome per file, in the order given. Optional: a runner without it cannot run a batch (BR-1496).
+   */
+  readonly runFilesTogether?: (commit: string, files: readonly string[]) => Promise<Result<readonly FileRunOutcome[], LoreError>>;
+  /**
+   * Ends the review's reuse of prepared worktrees: removes every worktree `runFiles` / `runFilesTogether` prepared (one per
+   * commit per review). Optional: a runner that keeps no worktree has nothing to end.
+   */
+  readonly disposeWorktrees?: () => Promise<Result<void, LoreError>>;
 }
 
 /** What {@link SuiteResultService.lookupOrRunWith} did: the commit's result and what happened to the extra work. */
@@ -127,13 +137,44 @@ export function deriveMainCheckedRows(results: readonly SuiteResultRecord[]): Ma
 /** Why a single file was run at a commit: a bisection probe, or the confirmation of one end of a transition (spec D6). */
 export type SingleFileRunKind = "bisect" | "confirm";
 
+/** A stored per-(commit, file) run: a single-file run, or one file's outcome of a batched invocation (`batch`, a search step only). */
+export type FileRunKind = SingleFileRunKind | "batch";
+
 /**
  * The value stored in `suite_file_runs.suite_result_id` for a single-file run at `commit`.
  * reason: the table has no foreign key and no (commit, file) column pair of its own; keying by this string avoids a
- * migration and makes "what did this file do at this commit" one indexed read (`listFileRuns`).
+ * migration and makes "what did this file do at this commit" one indexed read (`listFileRuns`). `file-batch@<commit>`
+ * matches the same `file-%@%` predicate, so a batch outcome is stored once per (commit, file) with no schema change.
  */
-export function singleFileRunKey(kind: SingleFileRunKind, commit: string): string {
+export function singleFileRunKey(kind: FileRunKind, commit: string): string {
   return `file-${kind}@${commit}`;
+}
+
+/**
+ * The newest stored `measured` suite result at a commit of `history` at or above `minIndex`: the suite a plan's review
+ * reads as M when `minIndex` is the position of the plan's latest landing on main (BR-1496).
+ *
+ * @param results - stored suite results
+ * @param history - main's first-parent history, OLDEST FIRST
+ * @param minIndex - the lowest history position a result may sit at (inclusive)
+ * @param excluding - commits never returned (an unrunnable joined run's commit)
+ * @returns the result at the highest position, or `undefined` when none qualifies
+ */
+export function newestMeasuredAtOrAbove(
+  results: readonly SuiteResultRecord[],
+  history: readonly string[],
+  minIndex: number,
+  excluding: ReadonlySet<string> = new Set(),
+): SuiteResultRecord | undefined {
+  const position = new Map(history.map((commit, index) => [commit, index] as const));
+  let best: { index: number; result: SuiteResultRecord } | undefined;
+  for (const result of results) {
+    if (result.status !== "measured" || excluding.has(result.commit_sha)) continue;
+    const index = position.get(result.commit_sha);
+    if (index === undefined || index < minIndex) continue;
+    if (best === undefined || index > best.index) best = { index, result };
+  }
+  return best?.result;
 }
 
 /**
@@ -362,6 +403,94 @@ export class SuiteResultService {
     if (!stored.ok) return stored;
     if (stored.value === null) return err({ code: "STORE_ERROR", message: `the single-file run of ${file} at ${commit} was not found after it was stored` });
     return ok(stored.value);
+  }
+
+  /**
+   * Runs the named files together at `commit` in ONE invocation and stores each file's outcome with kind `batch`, once per
+   * (commit, file): a file that already has a stored batch row is not run again, and when every file has one nothing runs. A
+   * batch outcome is only a search step (never red-before, a confirmation or an interval start) because a file can fail only
+   * beside another file (BR-1496).
+   *
+   * @param commit - the commit to run at (a full sha)
+   * @param files - repo-relative test files (at least one)
+   * @param runner - must implement `runFilesTogether`
+   * @returns the first stored row of each file, in the order given; `err` when the runner cannot batch, fails, reports no or an incomplete outcome (nothing stored) or the store fails
+   */
+  async runBatch(commit: string, files: readonly string[], runner: CommitSuiteRunnerPort): Promise<Result<SuiteFileRunRecord[], LoreError>> {
+    if (files.length === 0) return err({ code: "VALIDATION_ERROR", field: "files", message: "runBatch needs at least one test file", rule: "BR-1496" });
+    const key = singleFileRunKey("batch", commit);
+    const stored = await this.storedRowsOf(key, files);
+    if (!stored.ok) return stored;
+    if (stored.value.every((row) => row !== null)) return ok(stored.value as SuiteFileRunRecord[]);
+    const leases = this.deps.leases;
+    if (leases === undefined) return this.runBatchAndStore(commit, files, key, runner);
+    // reason: BR-1511 — one lease per (commit, file set) single-flights the invocation; the re-read after acquiring lets a waiter reuse the holder's rows.
+    return leases.withWaiting(suiteFileLeaseKey(commit, `batch:${[...files].sort().join(",")}`), async () => {
+      const again = await this.storedRowsOf(key, files);
+      if (!again.ok) return again;
+      if (again.value.every((row) => row !== null)) return ok(again.value as SuiteFileRunRecord[]);
+      return this.runBatchAndStore(commit, files, key, runner);
+    });
+  }
+
+  private async storedRowsOf(key: string, files: readonly string[]): Promise<Result<(SuiteFileRunRecord | null)[], LoreError>> {
+    const rows = await this.deps.store.listSuiteFileRuns(key);
+    if (!rows.ok) return rows;
+    return ok(files.map((file) => rows.value.find((r) => r.file === file) ?? null));
+  }
+
+  private async runBatchAndStore(commit: string, files: readonly string[], key: string, runner: CommitSuiteRunnerPort): Promise<Result<SuiteFileRunRecord[], LoreError>> {
+    if (runner.runFilesTogether === undefined) {
+      return err({ code: "VALIDATION_ERROR", field: "runner.runFilesTogether", message: "the runner cannot run several test files in one invocation", rule: "BR-1496" });
+    }
+    // reason: files that already have a stored batch row are left out of the invocation (the store keeps the first row anyway).
+    const have = await this.storedRowsOf(key, files);
+    if (!have.ok) return have;
+    const missing = files.filter((_, index) => have.value[index] === null);
+    if (missing.length === 0) return ok(have.value as SuiteFileRunRecord[]);
+    const ran = await runner.runFilesTogether(commit, missing);
+    if (!ran.ok) return ran;
+    const measuredAt = this.deps.now();
+    const rows: SuiteFileRunRecord[] = [];
+    for (const file of missing) {
+      const outcome = ran.value.find((o) => o.file === file);
+      if (outcome === undefined) return err({ code: "STORE_ERROR", message: `the runner reported no outcome for ${file} in the batch at ${commit}` });
+      if (outcome.incomplete !== undefined) return err({ code: "STORE_ERROR", message: `${file} did not complete in the batch at ${commit}: ${outcome.incomplete}` });
+      if (!isTestResultExit(outcome.exit_code)) {
+        return err({ code: "STORE_ERROR", message: `${file} did not run in the batch at ${commit}: ${nonRunCause("bun run test:file", outcome.exit_code, outcome.output_tail)}` });
+      }
+      rows.push({ suite_result_id: key, commit_sha: commit, file, exit_code: outcome.exit_code, output_tail: outcome.output_tail, duration_ms: outcome.duration_ms, measured_at: measuredAt });
+    }
+    const inserted = await this.deps.store.insertSuiteFileRuns(rows);
+    if (!inserted.ok) return inserted;
+    // reason: the insert is ignored for a (key, file) a concurrent review stored first; read the winners back so every review sees one outcome.
+    const after = await this.storedRowsOf(key, files);
+    if (!after.ok) return after;
+    const winners = after.value.filter((row): row is SuiteFileRunRecord => row !== null);
+    if (winners.length !== files.length) return err({ code: "STORE_ERROR", message: `the batch run at ${commit} was not found after it was stored` });
+    return ok(winners);
+  }
+
+  /** The commits whose full suite is running now (live `suite:<sha>` leases); `ok([])` when this service has no leases. */
+  async listLiveSuiteCommits(): Promise<Result<string[], LoreError>> {
+    return this.deps.leases === undefined ? ok([]) : this.deps.leases.listLiveSuiteCommits();
+  }
+
+  /**
+   * Waits for the full suite running at `commit` (the `suite:<sha>` lease wait, BR-1511) and returns what is stored for that
+   * commit afterwards, WITHOUT running anything: the measured result when there is one, else the latest stored attempt
+   * (`unrunnable`), else `null` (the holder stored nothing).
+   *
+   * @param commit - a full sha with a suite in flight
+   */
+  async awaitSuiteResult(commit: string): Promise<Result<SuiteResultRecord | null, LoreError>> {
+    const read = async (): Promise<Result<SuiteResultRecord | null, LoreError>> => {
+      const stored = await this.deps.store.listSuiteResultsForCommit(commit);
+      if (!stored.ok) return stored;
+      return ok(stored.value.find((r) => r.status === "measured") ?? stored.value.at(-1) ?? null);
+    };
+    const leases = this.deps.leases;
+    return leases === undefined ? read() : leases.withWaiting(suiteLeaseKey(commit), read);
   }
 
   /** The earliest stored row of `file` under `key`, or null when none is stored. */

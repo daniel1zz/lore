@@ -24,7 +24,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { ok, type LoreError, type Result } from "@lore/core";
+import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { LeaseAcquisition, LeaseRecord } from "../store/store-shared.js";
 
 /** The lease verbs of the store. */
@@ -33,6 +33,8 @@ export interface LeaseStorePort {
   renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>>;
   releaseLease(name: string, holder: string): Promise<Result<void, LoreError>>;
   readLease(name: string): Promise<Result<LeaseRecord | null, LoreError>>;
+  /** Optional: only the app's full store lists leases; a narrower composition (`app.reviewLeaseStore`) cannot join a suite in flight. */
+  listLeases?: (prefix: string) => Promise<Result<LeaseRecord[], LoreError>>;
 }
 
 /** Lease lifetime without a renewal: 10 minutes. */
@@ -136,6 +138,26 @@ export class ReviewLeases {
       },
     };
     return ok({ state: "held", tookOver: taken.value.tookOver, handle });
+  }
+
+  /**
+   * The commits whose full suite is running right now: every live (unexpired) `suite:<sha>` lease, unordered. A
+   * `suite:<sha>:<file>` single-file lease is not a full suite and is not listed (BR-1511).
+   *
+   * @returns full shas; `err` when the store cannot be read
+   */
+  async listLiveSuiteCommits(): Promise<Result<string[], LoreError>> {
+    if (this.store.listLeases === undefined) {
+      return err({ code: "VALIDATION_ERROR", field: "leases.listLeases", message: "this lease store cannot list leases, so a suite in flight cannot be found", rule: "BR-1511" });
+    }
+    const rows = await this.store.listLeases("suite:");
+    if (!rows.ok) return rows;
+    const now = this.clock();
+    const commits = rows.value
+      .filter((row) => Date.parse(row.expires_at) > now)
+      .map((row) => row.name.slice("suite:".length))
+      .filter((rest) => rest.length > 0 && !rest.includes(":"));
+    return ok(commits);
   }
 
   /**

@@ -444,6 +444,11 @@ describe("AC-AF-2 the suite runner's timeout ends the whole process tree", () =>
     expect(ran.value[0]).toMatchObject({ file: "x.test.ts", exit_code: 1 });
     expect(ran.value[0]?.output_tail).toMatch(/timed out after \d+ ms/);
     expect(await allGone(readPids(pidFile))).toBe(true);
+    // spec-a-plan-s-regression-reuses-a-stored-suite-that-contains: the commit's prepared worktree is kept for the review's later
+    // runs and removed when the review ends (`disposeWorktrees`), success or not.
+    expect(worktreeCount(repo)).toBe(2);
+    const ended = await runner.disposeWorktrees?.();
+    expect(ended?.ok).toBe(true);
     expect(worktreeCount(repo)).toBe(1);
   }, 90_000);
 
