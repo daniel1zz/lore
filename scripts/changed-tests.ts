@@ -105,9 +105,9 @@ export interface ImportGraph {
  * Runtime SSOT for the selection-reason vocabulary; {@link SelectionReason} is derived from it.
  * Consumers that must recognise every reason at runtime read this array instead of transcribing the
  * union. Array order is enumeration order only; precedence lives in `selectAffectedTests`
- * (`changed-test` > `declared-spawn` > `declared-read` > `transitive`).
+ * (`changed-test` > `run-config` > `declared-spawn` > `declared-read` > `transitive`).
  */
-export const SELECTION_REASONS = ["changed-test", "transitive", "declared-read", "declared-spawn"] as const;
+export const SELECTION_REASONS = ["changed-test", "transitive", "declared-read", "declared-spawn", "run-config"] as const;
 
 /** Why a file was selected — derived from {@link SELECTION_REASONS}. */
 export type SelectionReason = (typeof SELECTION_REASONS)[number];
@@ -148,8 +148,98 @@ export interface SelectionResult {
   readonly changedFiles: readonly string[];
   /** Imports that matched a tsconfig alias rule but named no file (commit mode); empty otherwise. */
   readonly unresolvedAliases?: readonly UnresolvedAlias[];
+  /** Run-wide configuration hits (reason `run-config`) and unparseable vitest configs; present only when config sources were supplied. */
+  readonly runConfig?: RunConfigFinding;
   /** Test files whose declaration block could not be parsed (only filled with `onMalformedDeclaration: "collect"`; otherwise parsing throws). */
   readonly unparseable?: readonly { readonly path: string; readonly message: string }[];
+}
+
+/**
+ * The files that configure how EVERY test runs (spec-a-criterion-s-stamped-pass-carries-to-the-assessed-head,
+ * "Selector: run-wide configuration"; AS-24). A change to one is a change to an input of every test, so both
+ * selector modes select every test file with the reason `run-config`. The one list both modes read; the files a
+ * vitest config loads by path (setupFiles, globalSetup, environment modules + their imports) are added from the
+ * configs themselves by {@link collectConfigLoadedFiles}, never listed here.
+ */
+export const RUN_CONFIG_PATTERNS = [
+  "package.json",
+  "bun.lock",
+  "bunfig.toml",
+  "vitest*.config.*",
+  "vitest.*.ts",
+  "**/tsconfig*.json",
+  "tsconfig*.json",
+  "scripts/test-file.ts",
+  "scripts/run-tests.ts",
+] as const;
+
+/** Root-level files whose text is parsed for the files a vitest config loads. */
+const VITEST_CONFIG_PATTERNS = ["vitest*.config.*", "vitest.*.ts"] as const;
+const CONFIG_LOADING_KEYS = ["setupFiles", "globalSetup", "environment"] as const;
+
+/** `true` iff `path` is a root-level vitest configuration file (the files {@link collectConfigLoadedFiles} parses). */
+export function isVitestConfigPath(path: string): boolean {
+  return !path.includes("/") && matchesAnyPattern(path, VITEST_CONFIG_PATTERNS);
+}
+
+/** What the vitest configs say they load, and which configs could not be read statically. */
+export interface ConfigLoadedFiles {
+  /** Repo-relative paths named by string literals under setupFiles / globalSetup / environment. */
+  readonly files: ReadonlySet<string>;
+  /** Configs where a loading key had a non-literal value; any change under {@link ConfigLoadedFiles.fallbackDirs} then counts. */
+  readonly unparseable: readonly string[];
+  /** Directories of every referenced file, used only for the unparseable fallback. */
+  readonly fallbackDirs: readonly string[];
+}
+
+/**
+ * Statically read `setupFiles`, `globalSetup` and `environment` string literals from vitest config texts.
+ * A key whose value holds anything but string literals (a call, a variable) marks that config unparseable.
+ * Pure. Spread/imported shared configs are covered because every `vitest.*.ts` file is parsed too.
+ */
+export function collectConfigLoadedFiles(configs: FileMap): ConfigLoadedFiles {
+  const files = new Set<string>();
+  const unparseable: string[] = [];
+  for (const [configPath, text] of [...configs].sort(([a], [b]) => a.localeCompare(b))) {
+    for (const key of CONFIG_LOADING_KEYS) {
+      for (const match of text.matchAll(new RegExp(`\\b${key}\\s*:\\s*(\\[[^\\]]*\\]|[^,}\\n]+)`, "g"))) {
+        const value = match[1]!.trim();
+        const literals = [...value.matchAll(/(["'`])([^"'`$]*)\1/g)].map((m) => m[2]!);
+        const residue = value.replace(/(["'`])[^"'`$]*\1/g, "").replace(/[\s,[\]]/g, "");
+        if (residue.length > 0 || literals.length === 0) {
+          unparseable.push(configPath);
+          continue;
+        }
+        for (const literal of literals) files.add(posix.normalize(literal));
+      }
+    }
+  }
+  const fallbackDirs = [...new Set([...files].map((f) => posix.dirname(f)).filter((d) => d !== "."))].sort();
+  return { files, unparseable: [...new Set(unparseable)], fallbackDirs };
+}
+
+/** What a run-config check found: the changed files that hit, and the configs read as unparseable (named in accounting). */
+export interface RunConfigFinding {
+  readonly hits: readonly string[];
+  readonly unparseable: readonly string[];
+}
+
+/**
+ * The changed files that are run-wide configuration: {@link RUN_CONFIG_PATTERNS}, plus every file the vitest
+ * configs load (and their import closure over `graph`). Unparseable configs fall toward selecting more: any
+ * change under the directories they reference also counts. Pure.
+ */
+export function findRunConfigHits(changedFiles: readonly string[], configs: FileMap, graph: ImportGraph): RunConfigFinding {
+  const loaded = collectConfigLoadedFiles(configs);
+  const closure = forwardClosure([...loaded.files].filter((f) => graph.forward.has(f)), graph);
+  for (const file of loaded.files) closure.add(file);
+  const hits = changedFiles.filter(
+    (changed) =>
+      matchesAnyPattern(changed, RUN_CONFIG_PATTERNS) ||
+      closure.has(changed) ||
+      (loaded.unparseable.length > 0 && loaded.fallbackDirs.some((dir) => changed.startsWith(`${dir}/`))),
+  );
+  return { hits, unparseable: loaded.unparseable };
 }
 
 const FROM_IMPORT_RE = /\b(?:import|export)\b[^;'"()]*?\bfrom\s*["']([^"']+)["']/g;
@@ -376,6 +466,8 @@ export function selectAffectedTests(params: {
   readonly aliasRules?: readonly AliasRule[];
   /** `"throw"` (default): a malformed declaration block throws. `"collect"`: name the file in `unparseable` and go on. */
   readonly onMalformedDeclaration?: "throw" | "collect";
+  /** Root vitest config texts ({@link isVitestConfigPath}). Omitted = no run-config rule (callers of the CLI/commit modes always supply it). */
+  readonly vitestConfigSources?: FileMap;
 }): SelectionResult {
   const { changedFiles, fileMap, aliasMap } = params;
   const collectMalformed = params.onMalformedDeclaration === "collect";
@@ -394,6 +486,14 @@ export function selectAffectedTests(params: {
 
   for (const file of knownChanged) {
     if (isTestFile(file)) reasonByPath.set(file, "changed-test");
+  }
+
+  // run-config — a change to run-wide configuration is a change to an input of every test.
+  const runConfig = params.vitestConfigSources ? findRunConfigHits(changedFiles, params.vitestConfigSources, graph) : undefined;
+  if (runConfig && runConfig.hits.length > 0) {
+    for (const path of fileMap.keys()) {
+      if (isTestFile(path) && !reasonByPath.has(path)) reasonByPath.set(path, "run-config");
+    }
   }
 
   // declared inputs — escape the import graph; matched against the FULL raw changed list because a
@@ -451,6 +551,7 @@ export function selectAffectedTests(params: {
     changedFiles,
     unresolvedAliases: graph.unresolvedAliases,
     unparseable,
+    ...(runConfig ? { runConfig } : {}),
   };
 }
 
@@ -705,6 +806,15 @@ export function loadFileMap(repoRoot: string): FileMap {
   return contents;
 }
 
+/** Read the root vitest config files ({@link isVitestConfigPath}) of the working tree. */
+export function loadVitestConfigSources(repoRoot: string): FileMap {
+  const sources = new Map<string, string>();
+  for (const entry of readdirSync(repoRoot, { withFileTypes: true })) {
+    if (entry.isFile() && isVitestConfigPath(entry.name)) sources.set(entry.name, readFileSync(osJoin(repoRoot, entry.name), "utf8"));
+  }
+  return sources;
+}
+
 const PackageExportsSchema = z.object({
   exports: z.record(z.string(), z.string()).optional(),
 });
@@ -818,6 +928,8 @@ interface CommitTree {
   readonly files: FileMap;
   /** `tsconfig*.json` text by path. */
   readonly configs: ReadonlyMap<string, string>;
+  /** Root vitest config texts by path (read at this commit, never from the working tree). */
+  readonly vitestConfigs: FileMap;
 }
 
 /** Parse `git cat-file --batch` output for `shas` in order, failing loud on a short, missing or mismatched answer (a lost answer is never a result). */
@@ -851,7 +963,7 @@ function loadCommitTree(repoRoot: string, rev: string, spawn: GitBytesSpawn): Co
   const sha = resolveCommitSha(repoRoot, rev, spawn);
   const listing = runGitBytes(spawn, ["ls-tree", "-r", "-z", sha], repoRoot).toString("utf8");
   const allPaths = new Set<string>();
-  const wanted: { path: string; blob: string; config: boolean }[] = [];
+  const wanted: { path: string; blob: string; config: boolean; vitest: boolean }[] = [];
   for (const entry of listing.split("\0")) {
     if (entry.length === 0) continue;
     const tab = entry.indexOf("\t");
@@ -862,7 +974,8 @@ function loadCommitTree(repoRoot: string, rev: string, spawn: GitBytesSpawn): Co
     const segments = path.split("/");
     const underNodeModules = segments.includes("node_modules");
     const config = !underNodeModules && TSCONFIG_PATH_RE.test(path);
-    if (config || isUniversePath(path)) wanted.push({ path, blob, config });
+    const vitest = isVitestConfigPath(path);
+    if (config || vitest || isUniversePath(path)) wanted.push({ path, blob, config, vitest });
   }
   if (allPaths.size === 0) throw new ChangedTestsError("git", `git ls-tree -r ${sha} listed no files (lost answer or empty tree)`, { sha });
 
@@ -872,8 +985,12 @@ function loadCommitTree(repoRoot: string, rev: string, spawn: GitBytesSpawn): Co
   );
   const files = new Map<string, string>();
   const configs = new Map<string, string>();
-  wanted.forEach((w, i) => (w.config ? configs : files).set(w.path, texts[i]!));
-  return { sha, allPaths, files, configs };
+  const vitestConfigs = new Map<string, string>();
+  wanted.forEach((w, i) => {
+    // a root vitest.*.ts is both a config and a universe-free file: it is never in the universe (isUniversePath), so one bucket each
+    (w.vitest ? vitestConfigs : w.config ? configs : files).set(w.path, texts[i]!);
+  });
+  return { sha, allPaths, files, configs, vitestConfigs };
 }
 
 /** Strip `//` and block comments and trailing commas from JSONC, leaving string contents alone. */
@@ -978,6 +1095,7 @@ export function selectForCommit(input: CommitSelectionInput): CommitSelectionRes
     aliasMap: {},
     aliasRules: buildAliasRulesFromConfigs(tree.configs),
     onMalformedDeclaration: "collect",
+    vitestConfigSources: tree.vitestConfigs,
   });
 
   const selectedByPath = new Map<string, SelectedFile>(base.selected.map((f) => [f.path, f]));
@@ -995,6 +1113,7 @@ export function selectForCommit(input: CommitSelectionInput): CommitSelectionRes
       aliasMap: {},
       aliasRules: buildAliasRulesFromConfigs(parentTree.configs),
       onMalformedDeclaration: "collect",
+      vitestConfigSources: parentTree.vitestConfigs,
     });
     for (const file of viaParent.selected) {
       if (tree.files.has(file.path)) {
@@ -1021,6 +1140,7 @@ export function selectForCommit(input: CommitSelectionInput): CommitSelectionRes
     // selectAffectedTests always fills both (empty when none); the optional type only keeps pre-existing SelectionResult literals valid.
     unresolvedAliases: base.unresolvedAliases ?? [],
     unparseable: base.unparseable ?? [],
+    ...(base.runConfig ? { runConfig: base.runConfig } : {}),
     commit: tree.sha,
     removedTests: [...removedTests.entries()].map(([path, reason]) => ({ path, reason })).sort((a, b) => a.path.localeCompare(b.path)),
     unknownPaths: unassigned,
@@ -1138,7 +1258,7 @@ export function runCli(argv: readonly string[], cwd: string): number {
   const fileMap = loadFileMap(repoRoot);
   const aliasMap = loadCoreAliasMap(repoRoot);
 
-  const selection = selectAffectedTests({ changedFiles, fileMap, aliasMap });
+  const selection = selectAffectedTests({ changedFiles, fileMap, aliasMap, vitestConfigSources: loadVitestConfigSources(repoRoot) });
   console.log(formatAccounting(selection));
 
   // requirement 2 (task-test-changed-selects-nothing-for-any-scripts-change-and):
