@@ -103,7 +103,8 @@ beforeAll(async () => {
   buildImportGraph = mod.buildImportGraph;
   isTestFile = mod.isTestFile;
   isBunTestFile = mod.isBunTestFile;
-  selectAffectedTests = mod.selectAffectedTests;
+  // synthetic file maps in this file carry no vitest configs: the explicit empty source is the honest value
+  selectAffectedTests = (params) => mod.selectAffectedTests({ ...params, vitestConfigSources: new Map() });
   formatAccounting = mod.formatAccounting;
   isLoudZero = mod.isLoudZero;
   parseArgs = mod.parseArgs;
