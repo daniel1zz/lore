@@ -24,7 +24,10 @@
  *   marker                  read by                    field shape
  *   x-ref-list              refs-resolve               array of strings; each is a ref (AC id, rule id,
  *                                                      field path, doc slug). Dimension `refs` are checked too.
- *   x-refusal-list          refusal-has-ac             array of entries; each key must be cited by >= 1 AC
+ *   x-ref                   refs-resolve               a single string ref (e.g. `spec_ref`), resolved like a list entry.
+ *                                                      TOP-LEVEL string fields only; a string property inside a list
+ *                                                      item is not read (that generalisation is not one line)
+ *   x-refusal-list          refusal-has-ac            array of entries; each key must be cited by >= 1 AC
  *   x-rule-change-list      rule-change-has-ac         array of entries; each key must be cited by >= 1 AC
  *   x-decision-list         decision-has-rejected      array of objects `{decision|id, chosen?, rejected, why}`;
  *                                                      `rejected` = non-empty string or non-empty array of
@@ -372,6 +375,10 @@ const refsResolve: CrossFieldCheck = (view, ports) => {
     for (const ref of entryList(view, name)) {
       if (typeof ref === "string" && !resolves(ref)) findings.push({ check: "refs-resolve", entry: `${name}: ${ref}`, problem: "names no existing AC, rule, field or document" });
     }
+  }
+  for (const name of markedFields(view, "x-ref")) {
+    const ref = view.fields[name];
+    if (typeof ref === "string" && ref !== "" && !resolves(ref)) findings.push({ check: "refs-resolve", entry: `${name}: ${ref}`, problem: "names no existing AC, rule, field or document" });
   }
   for (const dimension of view.dimensions) {
     for (const ref of dimension.refs) {

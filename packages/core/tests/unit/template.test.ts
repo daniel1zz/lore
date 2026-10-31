@@ -291,6 +291,15 @@ describe("cross-field check library", () => {
     return runCrossFieldChecks(template, view, ports);
   }
 
+  it("refs-resolve: an x-ref string field naming a missing doc is a finding; an existing doc, a field path or an absent field is not", () => {
+    const props = { spec_ref: { type: "string", "x-ref": true }, other: { type: "string" } } as Record<string, JsonSchemaNode>;
+    const missing = run("refs-resolve", props, { spec_ref: "no-such-spec" });
+    expect(missing.map((f) => `${f.check} ${f.entry}`)).toEqual(["refs-resolve spec_ref: no-such-spec"]);
+    expect(run("refs-resolve", props, { spec_ref: "some-slug" })).toEqual([]);
+    expect(run("refs-resolve", props, { spec_ref: "other", other: "v" })).toEqual([]);
+    expect(run("refs-resolve", props, {})).toEqual([]);
+  });
+
   it("lists exactly the six library ids", () => {
     expect([...CROSS_FIELD_CHECK_IDS].sort()).toEqual(
       ["decision-has-rejected", "goal-has-measure", "out-of-scope-not-in-scope", "refs-resolve", "refusal-has-ac", "rule-change-has-ac"],
