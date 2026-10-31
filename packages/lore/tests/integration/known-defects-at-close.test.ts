@@ -34,6 +34,8 @@ import { CorpusService } from "../../src/service/corpus-service.js";
 import { GateEnforcer } from "../../src/service/gate-enforcer.js";
 import { RecordLockService } from "../../src/service/record-lock-service.js";
 import { rootCauseOf } from "../../src/service/root-cause-fingerprint.js";
+import { createGateAcceptanceLog } from "../../src/service/gate-acceptance-service.js";
+import { humanAcceptGate, noDecisionLog } from "../helpers/gate-acceptance-log.js";
 import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/service/issue-filing-service.js";
 import { KNOWN_DEFECT_ISSUE_WRITES_AUDIT_ACTION } from "../../src/service/known-defects-at-close.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint } from "../../src/service/milestone-review.js";
@@ -121,9 +123,14 @@ async function buildWorld(spec: WorldSpec) {
   const known = spec.entries.map((e) => {
     const verdict = spec.verdicts[e.dimension] ?? "fail";
     const variant = e.variant ?? spec.reviewVariants?.[e.dimension] ?? "";
-    return { repo_id: REPO_ID, number: e.number, dimension: e.dimension, fingerprint: fingerprintOf(e.dimension, verdict === "na" ? "fail" : verdict, variant), ...(e.gateAccepted === true ? { gate_accepted: true } : {}) };
+    return { repo_id: REPO_ID, number: e.number, dimension: e.dimension, fingerprint: fingerprintOf(e.dimension, verdict === "na" ? "fail" : verdict, variant) };
   });
   const plan = await seed(store, docOf("plan", "Closing plan", known.length > 0 ? { known_defects: known } : {}, "approved"));
+  // an accepted gate is a human accept in the decision log for this plan, gate and fingerprint (#538), never a stored flag
+  for (const [index, e] of spec.entries.entries()) {
+    const fingerprint = known[index]?.fingerprint;
+    if (e.gateAccepted === true && fingerprint !== undefined) await humanAcceptGate(store, plan.id, e.dimension, fingerprint);
+  }
   await seed(store, docOf("task", "Landed task", { plan_id: plan.id }, "archived", plan.id));
   if (spec.otherPlanIssues !== undefined) {
     const other = known.filter((k) => spec.otherPlanIssues?.includes(k.number)).map((k) => ({ ...k }));
@@ -320,6 +327,7 @@ describe("AC-AQ-2 which known defects a closing plan keeps", () => {
       },
       listReviewDocs: async () => ok([]),
       issueCoverage: async () => err<LoreError>({ code: "STORE_ERROR", message: "unused" }),
+      acceptanceLog: noDecisionLog(),
     });
     const lease = new ReviewLeases(store, "b", () => T0, () => () => undefined);
     const ports = {
@@ -375,6 +383,7 @@ describe("AC-AQ-3 the detach runs on every close path with one audit row", () =>
       getPlanBundle: (ref) => w.corpus.getPlanBundle(ref),
       listReviewDocs: (planId) => w.corpus.listMilestoneReviewDocs(planId),
       issueCoverage: (planId, failed) => w.corpus.coverageOfFailedDimensions(planId, failed),
+      acceptanceLog: createGateAcceptanceLog(w.store),
     });
     const run = await runner.runBatch([w.plan.slug], {
       acquirePlanLease: (planId) => lease.acquire(planLeaseKey(planId)),

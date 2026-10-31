@@ -31,8 +31,9 @@ export const knownDefectEntrySchema = z.object({
   dimension: z.enum(MILESTONE_DIMENSIONS),
   fingerprint: z.string().min(1),
   /**
-   * True when the entry records a GATE the plan was accepted with (`lore assess --accept-gate`, BR-1500): a plain entry
-   * (an issue the batch filed) never lets a plan close past a failed or not-measured gate; a flagged one does.
+   * A RECORD ONLY: `lore assess --accept-gate` flags the known defect once the decision log holds the human accept (BR-1500,
+   * "recorded on the plan"). No reader gives it any authority (#538): a gate is accepted only when the decision log holds an
+   * effective human accept for it, so a flag planted by a direct write of `extra` closes nothing.
    */
   gate_accepted: z.literal(true).optional(),
 });
@@ -91,15 +92,6 @@ export function readKnownDefects(extra: unknown): KnownDefectEntry[] {
     if (parsed.success) entries.push(parsed.data);
   }
   return entries;
-}
-
-/**
- * The dimensions the plan's known defects accept as gates (`gate_accepted`).
- *
- * @param entries - the plan's known-defect entries
- */
-export function acceptedGateDimensions(entries: readonly KnownDefectEntry[]): MilestoneDimension[] {
-  return [...new Set(entries.filter((e) => e.gate_accepted === true).map((e) => e.dimension))];
 }
 
 /** What the closing review says about one dimension, as {@link partitionKnownDefectsAtClose} reads it. */

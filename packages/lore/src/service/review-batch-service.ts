@@ -40,7 +40,7 @@
  * @spec_ref spec-plans-close-themselves-level-triggered-reconciliation-of (AC-PCR-3, AC-PCR-4, AC-PCR-5, BR-1379)
  */
 
-import { acceptedGatesOf } from "./gate-acceptance-service.js";
+import { acceptedGatesOf, pendingAcceptancesOf, type GateAcceptanceLog } from "./gate-acceptance-service.js";
 import { blockingGates, err, filableDimensions, milestoneReviewSchema, ok, regressionRetryCanChange, type DocRecord, type LoreError, type MilestoneReview, type PlanBundle, type Result } from "@lore/core";
 import { readStoredPlanProgress } from "../store/plan-progress.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, selectLatestMilestoneReview, type PlanRetirementState } from "./milestone-review.js";
@@ -100,7 +100,10 @@ export function classifyPlan(facts: PlanReviewFacts): PlanReviewNeed {
 }
 
 /** The ports the batch itself reads through (the runner never decides what is in the trigger set). */
-export type ReviewRunDeps = Pick<ReviewTriggerDeps, "getPlanBundle" | "listReviewDocs" | "issueCoverage">;
+export type ReviewRunDeps = Pick<ReviewTriggerDeps, "getPlanBundle" | "listReviewDocs" | "issueCoverage"> & {
+  /** The decision log reader the acceptance predicate reads (required: a composition with none wired passes `unwiredGateAcceptanceLog()`, which fails the close loud). */
+  readonly acceptanceLog: GateAcceptanceLog;
+};
 
 /** The ports the trigger side reads through and the landing's start writes through (a spawn). */
 export interface ReviewTriggerDeps {
@@ -335,8 +338,9 @@ export class ReviewBatchRunner {
     latest: { readonly doc: DocRecord; readonly review: MilestoneReview },
     ports: BatchRunPorts,
   ): Promise<Result<boolean, LoreError>> {
-    const accepted = acceptedGatesOf(plan, latest);
-    const blockers = blockingGates(review.dimensions).filter((gate) => !accepted.includes(gate));
+    const accepted = await acceptedGatesOf(plan, latest, this.deps.acceptanceLog);
+    if (!accepted.ok) return accepted;
+    const blockers = blockingGates(review.dimensions).filter((gate) => !accepted.value.includes(gate));
     if (blockers.length === 0) return ok(false);
     if (review.dimensions.regression.verdict === "not-measured") return ok(regressionRetryCanChange(review.regression_causes));
     const named = review.failing_fact_files ?? [];
@@ -437,10 +441,13 @@ export class ReviewBatchRunner {
     // finding already filed): the plan was reviewed just before this batch got its lease, and judging again would write a second
     // review document. A direct `lore assess <plan>` always reviews (BR-1379), so it never takes this skip.
     if (!direct && !planStateChanged && !factsChanged && latest !== undefined && uncoveredCount === 0 && (latest.review.retired_acs?.length ?? 0) === 0) {
-      const accepted = acceptedGatesOf(bundle.plan, latest);
-      const stillBlocked = blockingGates(latest.review.dimensions).filter((gate) => !accepted.includes(gate));
+      const accepted = await acceptedGatesOf(bundle.plan, latest, this.deps.acceptanceLog);
+      if (!accepted.ok) return fail("review", fingerprint, accepted.error, false);
+      const stillBlocked = blockingGates(latest.review.dimensions).filter((gate) => !accepted.value.includes(gate));
       if (stillBlocked.length > 0) {
-        return { plan: planSlug, outcome: "skipped", reviewed: false, review: latest.doc.slug, failed: filableDimensions(latest.review.dimensions), issues: [], detail: `skipped: already reviewed at the current state (${latest.doc.slug}); kept open by gate(s) ${stillBlocked.join(", ")}` };
+        const waiting = await pendingAcceptancesOf(bundle.plan, latest, this.deps.acceptanceLog);
+        if (!waiting.ok) return fail("review", fingerprint, waiting.error, false);
+        return { plan: planSlug, outcome: "skipped", reviewed: false, review: latest.doc.slug, failed: filableDimensions(latest.review.dimensions), issues: [], detail: `skipped: already reviewed at the current state (${latest.doc.slug}); kept open by gate(s) ${stillBlocked.join(", ")}${pendingNote(waiting.value, stillBlocked)}` };
       }
     }
     if (planStateChanged || factsChanged || direct) {
@@ -483,10 +490,13 @@ export class ReviewBatchRunner {
     }
     // reason: spec "Verdict and close" — a gate that failed or is not-measured keeps the plan open (its issue is filed above);
     // only a gate the plan accepted with a decision (`lore assess --accept-gate`, a gate_accepted known defect) may close.
-    const acceptedGates = acceptedGatesOf(bundle.plan, latest);
-    const blockers = blockingGates(review.dimensions).filter((gate) => !acceptedGates.includes(gate));
+    const acceptedGates = await acceptedGatesOf(bundle.plan, latest, this.deps.acceptanceLog);
+    if (!acceptedGates.ok) return fail("close", fingerprint, acceptedGates.error, reviewed, latest.doc.slug);
+    const blockers = blockingGates(review.dimensions).filter((gate) => !acceptedGates.value.includes(gate));
     const issueNumbers = [...new Set(issues)].sort((a, b) => a - b);
     if (blockers.length > 0) {
+      const waiting = await pendingAcceptancesOf(bundle.plan, latest, this.deps.acceptanceLog);
+      if (!waiting.ok) return fail("close", fingerprint, waiting.error, reviewed, latest.doc.slug);
       return {
         plan: planSlug,
         outcome: "kept-open",
@@ -494,7 +504,7 @@ export class ReviewBatchRunner {
         review: latest.doc.slug,
         failed,
         issues: issueNumbers,
-        detail: `kept open: gate(s) ${blockers.map((g) => `${g} ${review.dimensions[g].verdict}`).join(", ")} (a gate is accepted only with \`lore assess ${planSlug} --accept-gate <dimension>\` and a decision)`,
+        detail: `kept open: gate(s) ${blockers.map((g) => `${g} ${review.dimensions[g].verdict}`).join(", ")} (a gate is accepted only with \`lore assess ${planSlug} --accept-gate <dimension>\` and a decision; an agent's acceptance waits for a human)${pendingNote(waiting.value, blockers)}`,
       };
     }
     if (!(await fenced())) return lostRow(reviewed);
@@ -510,6 +520,12 @@ export class ReviewBatchRunner {
       detail: failed.length === 0 ? "accepted" : `accepted with known defects: ${failed.join(", ")}`,
     };
   }
+}
+
+/** "; acceptance pending <id> (<gate>)" for each blocking gate whose acceptance waits for a human; "" when none. */
+function pendingNote(pending: ReadonlyMap<string, number>, blockers: readonly string[]): string {
+  const parts = blockers.filter((gate) => pending.has(gate)).map((gate) => `acceptance pending ${String(pending.get(gate))} (${gate})`);
+  return parts.length === 0 ? "" : `; ${parts.join("; ")}`;
 }
 
 /** The facts {@link classifyPlan} decides from, read from the plan's current state. */

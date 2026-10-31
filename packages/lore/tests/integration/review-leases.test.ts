@@ -34,6 +34,7 @@ import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint } from "../../src/servi
 import type { MilestoneReviewResult } from "../../src/service/milestone-review-service.js";
 import * as leaseModule from "../../src/service/review-batch-lease.js";
 import { ReviewLeases, REVIEW_LEASE_EXPIRY_MS, LEASE_WAIT_POLL_MS, issueLeaseKey, planLeaseKey, suiteFileLeaseKey, suiteLeaseKey } from "../../src/service/review-batch-lease.js";
+import { noDecisionLog } from "../helpers/gate-acceptance-log.js";
 import { ReviewBatchRunner, skippedEveryPlan, type BatchRunPorts } from "../../src/service/review-batch-service.js";
 import { SuiteResultService, type CommitSuiteRunnerPort, type FileRunOutcome } from "../../src/service/suite-result-service.js";
 import type { FailedFinding } from "../../src/service/root-cause-fingerprint.js";
@@ -197,6 +198,7 @@ class BatchWorld {
     return new ReviewBatchRunner({
       getPlanBundle: async (ref) => ok(this.bundleOf(this.find(ref))),
       listReviewDocs: async (planId) => ok([...this.plans.values()].find((p) => p.bundle.plan.id === planId)?.docs ?? []),
+      acceptanceLog: noDecisionLog(),
       issueCoverage: async (planId, failed) => {
         const slug = [...this.plans.values()].find((p) => p.bundle.plan.id === planId)?.slug;
         const entries = this.issues.links.filter((l) => l.plan === slug).flatMap((l) => l.dimensions.map((dimension) => ({ number: l.issue, dimension, state: "open" as const })));
