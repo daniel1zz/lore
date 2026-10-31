@@ -50,9 +50,9 @@ import { createGithubIssuePort } from "../assess-file-issues.js";
 import { IssueFilingService } from "../../../service/issue-filing-service.js";
 import type { FailedFinding } from "../../../service/root-cause-fingerprint.js";
 import { retirementAssessFields } from "../../../service/retired-ac-service.js";
-import { BATCH_ERROR_AUDIT_ACTION, ReviewBatchRunner, skippedEveryPlan, type BatchPlanRow, type BatchRunPorts } from "../../../service/review-batch-service.js";
-import { leaseLostError, planLeaseKey, type LeaseHandle, type ReviewLeases } from "../../../service/review-batch-lease.js";
-import { buildReviewLeases, buildReviewTriggerService } from "../review-batch-wiring.js";
+import { BATCH_ERROR_AUDIT_ACTION, ReviewBatchRunner, skippedEveryPlan, type BatchPlanRow, type BatchRunPorts, type MachineBatchPorts, type MachineBatchRun } from "../../../service/review-batch-service.js";
+import { UNKNOWN_MACHINE_ID, batchLeaseKey, leaseLostError, planLeaseKey, type LeaseHandle, type ReviewLeases } from "../../../service/review-batch-lease.js";
+import { buildReviewLeases, buildReviewTriggerService, readBatchHandoff } from "../review-batch-wiring.js";
 import { ASSESS_EXIT_LEASE_HELD, renderAssessExitCodes } from "../assess-exit-codes.js";
 
 export { ASSESS_EXIT_CODES } from "../assess-exit-codes.js";
@@ -80,7 +80,8 @@ import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import { requireBulkLifecycleService } from "../../bulk-wiring.js";
 import { resolveBulkSelector, type BulkSelector } from "../../../service/bulk-lifecycle-service.js";
-import { failedDimensions, type MilestoneReview, type RetiredAcRef } from "@lore/core";
+import { failedDimensions, resolveMachineTestSlots, type MilestoneReview, type RetiredAcRef } from "@lore/core";
+import { ReviewTestSlots, slotCommitSuiteRunner, slotCriterionRerunner, slotStaleRefresher } from "../../../service/review-test-slots.js";
 import type { LoreError, MilestoneFacts, PlanBundle } from "@lore/core";
 
 /** One plan's row of the batch result. */
@@ -212,6 +213,8 @@ export default defineLoreCommand({
     }
 
     const { app, config } = loadLoreApp({ inv });
+    // reason: released on every exit path (an early return after the batch lease was taken must not leave it held for its 10-minute expiry).
+    let batchLease: LeaseHandle | undefined;
     try {
       const fileIssues = args["file-issues"] === true;
       let issueUpstream: GithubUpstreamCfg | undefined;
@@ -245,6 +248,37 @@ export default defineLoreCommand({
       if (leases === undefined) {
         inv.io.stderr.write("Error: this composition has no lease store, so review work cannot be leased and nothing ran.\n");
         return 1;
+      }
+      // reason: BR-1532 — every review test run on this machine takes one of `workflow.review.machine_test_slots` slots; the runners
+      // and rerunners below are built ONLY through the `slot*` decorators of this one `slots`, so no review run bypasses it.
+      const slots = new ReviewTestSlots({
+        leases,
+        slots: resolveMachineTestSlots(config),
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        clock: Date.now,
+        say: (line) => inv.io.stderr.write(`${line}\n`),
+      });
+      // reason: BR-1532 — a post-landing batch (`--where needs-review --close`) holds `batch:<machine>` for its whole run: the lease the
+      // landing took for it (handoff, one compare-and-set) or, for a hand run, one taken here; busy = another batch runs and covers the plans.
+      if (needsReview && args.close === true) {
+        const handoff = readBatchHandoff(inv.env);
+        if (!handoff.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, handoff.error) + "\n");
+          return exitCode(handoff.error);
+        }
+        const machine = await leases.machineId();
+        const key = batchLeaseKey(machine);
+        const granted = handoff.value !== undefined && handoff.value.key === key ? await leases.acquireHandedOff(key, handoff.value.holder) : await leases.acquire(key);
+        if (!granted.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, granted.error) + "\n");
+          return exitCode(granted.error);
+        }
+        if (granted.value.state === "busy") {
+          inv.io.stderr.write(`Another review batch holds ${key} (${granted.value.holder} until ${granted.value.expires_at}); it re-reads the trigger set when it finishes and covers these plans. Nothing ran.\n`);
+          return ASSESS_EXIT_LEASE_HELD;
+        }
+        batchLease = granted.value.handle;
+        printLine(inv.io.stdout, `review batch holds ${key}${machine === UNKNOWN_MACHINE_ID ? " (machine identity unreadable: every such process shares this key)" : ""}`);
       }
       let planRefs: string[];
       if (needsReview) {
@@ -286,7 +320,9 @@ export default defineLoreCommand({
           listDocsOf(app),
           bundle,
           { commit, ...(worktreeRoot !== undefined ? { worktreeRoot } : {}) },
-          createGitHeadCriteriaRunner(inv.cwd, inv.env, (executionRoot) => createAppCriterionRerunner(app, verifyRunner, { executionRoot, by: actor, nowIso: () => new Date().toISOString() })),
+          createGitHeadCriteriaRunner(inv.cwd, inv.env, (executionRoot) =>
+            slotCriterionRerunner(createAppCriterionRerunner(app, verifyRunner, { executionRoot, by: actor, nowIso: () => new Date().toISOString() }), slots),
+          ),
           createGitCarryPort(inv.cwd, inv.env),
         );
       };
@@ -297,6 +333,10 @@ export default defineLoreCommand({
 
       const measureSuite = async (suiteRefs: readonly string[]): Promise<SuiteRun | undefined> => {
         if (suiteRefs.length === 0) return undefined;
+        // reason: BR-1532 — a machine batch measures once per pass; nothing a previous pass measured may be read as this pass's facts.
+        criteriaByPlan.clear();
+        criteriaFallbackReason = undefined;
+        assessedCommit = undefined;
         // reason: stale cited evidence is re-verified in this SAME throwaway main worktree, once per batch, before any
         // plan is judged (Part D); a failed refresh leaves its rules stale, which the snapshot rule reads as n/a.
         const verifyRunner = app.verifyRunnerService;
@@ -304,11 +344,14 @@ export default defineLoreCommand({
           verifyRunner === undefined
             ? undefined
             : async (root: string): Promise<void> => {
-                const refresher = createAppStaleRefresher(app, verifyRunner, {
-                  executionRoot: root,
-                  by: actor,
-                  nowIso: () => new Date().toISOString(),
-                });
+                const refresher = slotStaleRefresher(
+                  createAppStaleRefresher(app, verifyRunner, {
+                    executionRoot: root,
+                    by: actor,
+                    nowIso: () => new Date().toISOString(),
+                  }),
+                  slots,
+                );
                 const refreshed = await reviewService.refreshStaleCitedRules(suiteRefs, refresher);
                 if (!refreshed.ok) {
                   inv.io.stderr.write(`Warning: stale cited-rule refresh failed: ${formatErrorFor(inv, refreshed.error)}\n`);
@@ -322,7 +365,7 @@ export default defineLoreCommand({
         // already bound to the suite leases (BR-1511). The batch measures nothing per landing (spec D1).
         const suiteResults = app.suiteResultService;
         if (suiteResults === undefined) return { status: "not_measured", reason: "the suite-result store is not wired in this app" };
-        const runner = createGitCommitSuiteRunner(inv.cwd, inv.env);
+        const runner = slotCommitSuiteRunner(createGitCommitSuiteRunner(inv.cwd, inv.env), slots);
         // reason: ONE worktree at the assessed commit serves the stale cited-rule refresh (only when some plan cites a stale
         // rule) and the plans' script criteria (BR-1498, AC-AO-3), so criteria run once per review.
         const stale = refreshStale === undefined ? ok(false) : await reviewService.hasStaleCitations(suiteRefs);
@@ -402,7 +445,7 @@ export default defineLoreCommand({
         const rerunCriterion =
           verifyRunner === undefined
             ? undefined
-            : createAppCriterionRerunner(app, verifyRunner, { executionRoot: inv.cwd, by: actor, nowIso: () => new Date().toISOString() });
+            : slotCriterionRerunner(createAppCriterionRerunner(app, verifyRunner, { executionRoot: inv.cwd, by: actor, nowIso: () => new Date().toISOString() }), slots);
         // reason: BR-1496 — regression is measured on the selector's tests for the plan's changed paths at the commit holding its last
         // landing (stored per (commit, file), so a second review runs nothing); red files are rechecked at the assessed head, bisected
         // and confirmed alone. No full suite runs. Without the suite-result store regression stays not-measured, never pass.
@@ -415,7 +458,7 @@ export default defineLoreCommand({
           regressionFacts = { regression: [noCodeRegressionRow(derivation.no_code_tasks)], regression_files: [], regression_causes: [], single_file_run_ids: [], failing_fact_files: [] };
         } else if (suiteResults !== undefined) {
           // reason: #535 — one runner per review: its file runs share one prepared worktree per commit, removed in `finally` whatever happened.
-          const regressionRunner = createGitCommitSuiteRunner(inv.cwd, inv.env);
+          const regressionRunner = slotCommitSuiteRunner(createGitCommitSuiteRunner(inv.cwd, inv.env), slots);
           const measured = await (async () => {
             try {
               return await regressionAtHead(derivation.landings, derivation.unlanded_tasks, {
@@ -505,7 +548,21 @@ export default defineLoreCommand({
         // reason: BR-1379 — the batch measures nothing per landing: no suite and no criterion attestation at a landing commit.
         // A kept-open plan is re-reviewed only when a landing touched a file its failing facts name (`changedFilesSince`).
         const changedFilesSince = createGitChangedFilesSince(inv.cwd, inv.env);
-        return await runBatchClose({ app, inv, actor, leases, direct: !needsReview && typeof args.where !== "string", planRefs, measureSuite, reviewOne, changedFilesSince, filing, json: args.json === true });
+        // reason: BR-1532 — a post-landing batch loops under its batch lease: it re-reads the trigger set after releasing it and takes plans landed during the run.
+        const machineBatch =
+          batchLease === undefined
+            ? undefined
+            : {
+                lease: batchLease,
+                retakeLease: async () => leases.acquire(batchLeaseKey(await leases.machineId())),
+                readTriggerSet: async () => {
+                  const trigger = buildReviewTriggerService(app, () => err({ code: "VALIDATION_ERROR", field: "spawn", message: "a hand run never spawns a batch" }));
+                  if (trigger === undefined) return err<LoreError>({ code: "VALIDATION_ERROR", field: "trigger", message: "this composition cannot compute the needs-review set" });
+                  const set = await trigger.computeTriggerSet();
+                  return set.ok ? ok(set.value.map((entry) => entry.plan)) : set;
+                },
+              };
+        return await runBatchClose({ app, inv, actor, leases, ...(machineBatch !== undefined ? { machineBatch } : {}), direct: !needsReview && typeof args.where !== "string", planRefs, measureSuite, reviewOne, changedFilesSince, filing, json: args.json === true });
       }
 
       // reason: BR-1511 — a hand review of a plan runs under that plan's lease, taken for every selected plan BEFORE any
@@ -639,6 +696,7 @@ export default defineLoreCommand({
         for (const handle of handles.values()) await handle.release();
       }
     } finally {
+      await batchLease?.release();
       app.close();
     }
   },
@@ -728,6 +786,8 @@ interface BatchCloseInput {
   /** True when the plans were named by id (a direct assess always reviews); false for `--where` (a batch). */
   readonly direct: boolean;
   readonly planRefs: readonly string[];
+  /** Set for a post-landing batch: the batch lease it holds and the ports of its re-read loop (BR-1532). */
+  readonly machineBatch?: Pick<MachineBatchPorts, "lease" | "retakeLease" | "readTriggerSet">;
   readonly measureSuite: (refs: readonly string[]) => Promise<SuiteRun | undefined>;
   readonly reviewOne: (ref: string, suite: SuiteRun | undefined) => ReturnType<NonNullable<App["milestoneReviewService"]>["review"]>;
   readonly changedFilesSince: BatchRunPorts["changedFilesSince"];
@@ -756,7 +816,7 @@ async function runBatchClose(input: BatchCloseInput): Promise<number> {
     issueCoverage: (planId, failed) => app.corpusService.coverageOfFailedDimensions(planId, failed),
     acceptanceLog: gateAcceptanceLogOf(app),
   });
-  const run = await service.runBatch(input.planRefs, {
+  const batchPorts: BatchRunPorts = {
     acquirePlanLease: (planId) => leases.acquire(planLeaseKey(planId)),
     mode: input.direct ? "direct" : "batch",
     settleRetirement: async (bundle) => {
@@ -781,13 +841,18 @@ async function runBatchClose(input: BatchCloseInput): Promise<number> {
       }),
     filing: input.filing,
     now: () => new Date().toISOString(),
-  });
+  };
+  const run = input.machineBatch === undefined ? await service.runBatch(input.planRefs, batchPorts) : await service.runMachineBatch(input.planRefs, { batch: batchPorts, ...input.machineBatch });
   if (!run.ok) {
     inv.io.stderr.write(formatErrorFor(inv, run.error) + "\n");
     return exitCode(run.error);
   }
   const rows: readonly BatchPlanRow[] = run.value.rows;
-  const heldEvery = skippedEveryPlan(run.value, input.planRefs.length);
+  const machineRun: MachineBatchRun | undefined = input.machineBatch === undefined ? undefined : (run.value as MachineBatchRun);
+  const heldEvery = skippedEveryPlan(run.value, machineRun?.selected ?? input.planRefs.length);
+  if (machineRun?.coveredBy !== undefined) {
+    inv.io.stderr.write(`Review batch ended: another batch (${machineRun.coveredBy.holder}) took the lease and will review what is left.\n`);
+  }
   if (input.json) {
     printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rows, suite_runs: run.value.suiteRuns } }, null, 2));
   } else if (rows.length === 0) {

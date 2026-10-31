@@ -1,0 +1,52 @@
+{
+  "doc_type": "knowledge",
+  "kind": "retro",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["summary", "went_wrong", "lessons"],
+    "properties": {
+      "summary": { "type": "string", "minLength": 1, "title": "Summary", "description": "What was done, over what period, and the outcome." },
+      "went_well": { "type": "array", "title": "Went well", "items": { "type": "string", "minLength": 1 } },
+      "went_wrong": {
+        "type": "array",
+        "title": "Went wrong",
+        "items": {
+          "type": "object",
+          "required": ["what", "root_cause"],
+          "properties": {
+            "what": { "type": "string", "minLength": 1 },
+            "root_cause": { "type": "string", "minLength": 1, "description": "The cause, not the symptom." }
+          }
+        }
+      },
+      "lessons": {
+        "type": "array",
+        "title": "Lessons",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["lesson", "action"],
+          "properties": {
+            "lesson": { "type": "string", "minLength": 1 },
+            "action": { "type": "string", "minLength": 1, "description": "The concrete change that applies the lesson." },
+            "owner": { "type": "string" }
+          }
+        }
+      },
+      "related": { "type": "array", "title": "Related documents", "x-ref-list": true, "items": { "type": "string", "minLength": 1 } }
+    }
+  },
+  "dimensions": [
+    { "id": "root-cause", "question": "For each thing that went wrong, what is the cause one level below the symptom?" },
+    { "id": "follow-up", "question": "Which lesson has an action that will actually be done, and where is it tracked?" }
+  ],
+  "checks": ["refs-resolve"],
+  "render": [
+    { "heading": "Summary", "fields": ["summary"] },
+    { "heading": "Went well", "fields": ["went_well"] },
+    { "heading": "Went wrong", "fields": ["went_wrong"] },
+    { "heading": "Lessons", "fields": ["lessons"] },
+    { "heading": "Related documents", "fields": ["related"] }
+  ]
+}

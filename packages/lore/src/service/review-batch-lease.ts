@@ -5,13 +5,20 @@
  *   machines): one lease row per key, so reviews of different plans run concurrently while the same plan, the same
  *   (commit, file) test run and the same root cause's issue write each have one holder.
  * Public surface: {@link ReviewLeases}, {@link LeaseStorePort}, {@link LeaseHandle}, {@link LeaseOutcome}, the key builders
- *   {@link planLeaseKey} / {@link suiteFileLeaseKey} / {@link issueLeaseKey} / {@link issueWriteLeaseKey},
- *   {@link REVIEW_LEASE_EXPIRY_MS}, {@link REVIEW_LEASE_RENEW_MS}, {@link LEASE_WAIT_POLL_MS}.
+ *   {@link planLeaseKey} / {@link suiteFileLeaseKey} / {@link issueLeaseKey} / {@link issueWriteLeaseKey} /
+ *   {@link batchLeaseKey} / {@link testSlotLeaseKey}, {@link REVIEW_LEASE_EXPIRY_MS}, {@link REVIEW_LEASE_RENEW_MS},
+ *   {@link LEASE_WAIT_POLL_MS}, {@link UNKNOWN_MACHINE_ID}.
  * Invariants:
- *   - Keys: `plan:<id>`, `suite:<sha>:<file>`, `issue:<fingerprint>`, `issue-write:<n>`. The corpus-wide
- *     `review-batch` name is retired: nothing acquires it.
- *   - Lease order (no wait cycle): a holder of `plan:` may take `suite:<sha>:<file>`, `issue:` and `issue-write:` keys; a holder of one of
- *     those takes no other key.
+ *   - Keys: `batch:<machine>`, `plan:<id>`, `suite:<sha>:<file>`, `issue:<fingerprint>`, `issue-write:<n>`,
+ *     `test-slot:<machine>:<n>`. The corpus-wide `review-batch` name is retired: nothing acquires it.
+ *     `<machine>` is the BR-1514 machine id, or `unknown` when this process has no identity (a key every such process
+ *     shares, which only serializes more).
+ *   - Lease order (no wait cycle, BR-1511/BR-1532): `batch:` is taken only by a batch and before any `plan:` key; a holder of `plan:` may take
+ *     `suite:<sha>:<file>`, `issue:`, `issue-write:` and `test-slot:` keys; a holder of `suite:` may take `test-slot:` (the runner
+ *     slots every review test run inside the run's own suite lease); a holder of `test-slot:` takes no other key, so no wait cycle exists.
+ *   - A batch lease passes from the process that probed it (a landing) to the batch process it spawned by
+ *     {@link ReviewLeases.acquireHandedOff}: one compare-and-set on the starter's exact holder name; the starter calls
+ *     `handle.handOff()` (stops renewing, leaves the row).
  *   - Expiry is 10 minutes; the holder renews every minute while it works. A live lease of another holder is `busy`; an
  *     expired one is taken over.
  *   - Every `acquire` is its own holder (the configured holder plus a fresh suffix), so two acquisitions in one process
@@ -69,6 +76,18 @@ export function issueWriteLeaseKey(issueNumber: number): string {
   return `issue-write:${String(issueNumber)}`;
 }
 
+/** The machine part of `batch:` and `test-slot:` keys when this process has no machine identity (BR-1514). */
+export const UNKNOWN_MACHINE_ID = "unknown";
+
+/** The lease key of the one review batch of a machine (BR-1532). */
+export function batchLeaseKey(machineId: string): string {
+  return `batch:${machineId}`;
+}
+/** The lease key of test slot `slot` (0-based) of a machine (BR-1532). */
+export function testSlotLeaseKey(machineId: string, slot: number): string {
+  return `test-slot:${machineId}:${String(slot)}`;
+}
+
 /** Starts a repeating callback and returns its canceller (default: `setInterval`, unref'd). */
 export type Schedule = (callback: () => void, everyMs: number) => () => void;
 /** Resolves after `ms` (default: a timer). */
@@ -85,6 +104,10 @@ const timerSleep: Sleep = (ms) => new Promise((resolve) => setTimeout(resolve, m
 
 /** A held lease: read `lost`, and `release()` when the work ends. */
 export interface LeaseHandle {
+  /** The exact holder name stored on the row (what a handoff names as the expected holder). */
+  readonly holder: string;
+  /** Stops the renewal timer and leaves the row, for a lease another process takes over with {@link ReviewLeases.acquireHandedOff}. */
+  readonly handOff: () => void;
   /** True once a renewal found the lease taken by someone else (or the renewal itself failed). */
   readonly lost: () => boolean;
   /** The last renewal error, if any. */
@@ -127,6 +150,34 @@ export class ReviewLeases {
       if (seized.value.state === "busy") return ok(seized.value);
       tookOver = true;
     }
+    return ok({ state: "held", tookOver, handle: this.openHandle(key, holder) });
+  }
+
+  /** The machine id part of `batch:` / `test-slot:` keys: this process's BR-1514 machine id, or {@link UNKNOWN_MACHINE_ID} when it has no identity. */
+  async machineId(): Promise<string> {
+    const identity = await this.liveness.identity();
+    return identity === null ? UNKNOWN_MACHINE_ID : identity.machineId;
+  }
+
+  /**
+   * Takes over `key` from `fromHolder` by one compare-and-set on that exact holder name (the batch lease a landing took on
+   * behalf of the batch process it spawned). A row that is gone is acquired plainly; a row held by anyone else is `busy`.
+   *
+   * @param fromHolder - the starter's `LeaseHandle.holder`
+   */
+  async acquireHandedOff(key: string, fromHolder: string): Promise<Result<LeaseOutcome, LoreError>> {
+    const identity = await this.liveness.identity();
+    const holder = formatHolder(this.holder, identity, randomBytes(4).toString("hex"));
+    const expiresAtIso = new Date(this.clock() + REVIEW_LEASE_EXPIRY_MS).toISOString();
+    const swapped = await this.store.takeOverLease(key, fromHolder, holder, expiresAtIso);
+    if (!swapped.ok) return swapped;
+    if (swapped.value.acquired) return ok({ state: "held", tookOver: true, handle: this.openHandle(key, holder) });
+    if (swapped.value.current === null) return this.acquire(key);
+    return ok({ state: "busy", holder: swapped.value.current.holder, expires_at: swapped.value.current.expires_at });
+  }
+
+  /** The handle of a lease this process now holds as `holder`: renewal timer, fencing flag, release. */
+  private openHandle(key: string, holder: string): LeaseHandle {
     let lost = false;
     let lastError: LoreError | undefined;
     const renewNow = async (): Promise<Result<boolean, LoreError>> => {
@@ -141,7 +192,9 @@ export class ReviewLeases {
     const cancel = this.schedule(() => {
       void renewNow();
     }, REVIEW_LEASE_RENEW_MS);
-    const handle: LeaseHandle = {
+    return {
+      holder,
+      handOff: cancel,
       lost: () => lost,
       lastError: () => lastError,
       renewNow,
@@ -150,7 +203,6 @@ export class ReviewLeases {
         return this.store.releaseLease(key, holder);
       },
     };
-    return ok({ state: "held", tookOver, handle });
   }
 
   /**

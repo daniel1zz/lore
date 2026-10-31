@@ -1,0 +1,49 @@
+{
+  "doc_type": "baseline",
+  "kind": "leaf",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["statement", "behaviour"],
+    "properties": {
+      "statement": { "type": "string", "minLength": 1, "title": "Statement", "description": "One sentence naming a single verb. If it needs 'and' or 'or', split the leaf. The leaf's rules are NOT a field here: they stay in the structured extra.rules and are added with `lore rule add`." },
+      "behaviour": {
+        "type": "object",
+        "title": "Behaviour",
+        "required": ["command", "constraint", "domain_event"],
+        "properties": {
+          "command": { "type": "string", "minLength": 1, "description": "Who triggers this, with what." },
+          "constraint": { "type": "string", "minLength": 1, "description": "The business rule that governs it; each constraint becomes a rule." },
+          "domain_event": { "type": "string", "minLength": 1, "description": "What has happened, past tense." }
+        }
+      },
+      "rule_precedence": { "type": "string", "title": "Rule precedence", "description": "When two rules can both fire and the outcome differs: which wins and why." },
+      "depends_on": { "type": "array", "title": "Depends on", "x-ref-list": true, "items": { "type": "string", "minLength": 1 }, "description": "Rule ids of other leaves this leaf's rules rely on." },
+      "open_questions": {
+        "type": "array",
+        "title": "Open questions",
+        "description": "One per undecided or unconfirmed rule.",
+        "items": {
+          "type": "object",
+          "required": ["rule", "question"],
+          "properties": {
+            "rule": { "type": "string", "minLength": 1 },
+            "question": { "type": "string", "minLength": 1 },
+            "owner": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "dimensions": [
+    { "id": "single-verb", "question": "Does the leaf name exactly one verb, or is it two leaves joined?" },
+    { "id": "rule-conflicts", "question": "Which two rules of this leaf can fire together with different outcomes, and which wins?" }
+  ],
+  "checks": ["refs-resolve"],
+  "render": [
+    { "heading": "Statement", "fields": ["statement"] },
+    { "heading": "Behaviour", "fields": ["behaviour", "rule_precedence"] },
+    { "heading": "Depends on", "fields": ["depends_on"] },
+    { "heading": "Open questions", "fields": ["open_questions"] }
+  ]
+}

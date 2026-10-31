@@ -1,0 +1,61 @@
+{
+  "doc_type": "baseline",
+  "kind": "branch",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["summary", "boundary"],
+    "properties": {
+      "summary": { "type": "string", "minLength": 1, "title": "Summary", "description": "The business capability this branch covers, in business language. No rules here; rules live in leaves." },
+      "boundary": {
+        "type": "object",
+        "title": "Boundary",
+        "required": ["inside", "outside"],
+        "properties": {
+          "inside": { "type": "string", "minLength": 1, "description": "What this branch owns." },
+          "outside": { "type": "string", "minLength": 1, "description": "What it deliberately does not, and which branch or team does." }
+        }
+      },
+      "children": {
+        "type": "array",
+        "title": "Children",
+        "items": {
+          "type": "object",
+          "required": ["label", "does", "kind"],
+          "properties": {
+            "label": { "type": "string", "minLength": 1 },
+            "does": { "type": "string", "minLength": 1, "description": "One verb." },
+            "kind": { "type": "string", "enum": ["leaf", "branch"] }
+          }
+        }
+      },
+      "glossary": {
+        "type": "array",
+        "title": "Ubiquitous language",
+        "description": "Terms that mean exactly one thing in this branch; leaves inherit them and never redefine one.",
+        "items": {
+          "type": "object",
+          "required": ["term", "meaning"],
+          "properties": {
+            "term": { "type": "string", "minLength": 1 },
+            "meaning": { "type": "string", "minLength": 1 },
+            "note": { "type": "string", "description": "What it is not to be confused with." }
+          }
+        }
+      },
+      "how_they_fit": { "type": "string", "title": "How they fit together", "description": "Only when the ordering is not obvious from the child names." }
+    }
+  },
+  "dimensions": [
+    { "id": "boundary", "question": "Which neighbouring branch could be mistaken for part of this one, and where is the line?" },
+    { "id": "language", "question": "Which term is used here in a sense that differs from its everyday or neighbouring-branch meaning?" }
+  ],
+  "checks": [],
+  "render": [
+    { "heading": "Summary", "fields": ["summary"] },
+    { "heading": "Boundary", "fields": ["boundary"] },
+    { "heading": "Children", "fields": ["children"] },
+    { "heading": "Ubiquitous language", "fields": ["glossary"] },
+    { "heading": "How they fit together", "fields": ["how_they_fit"] }
+  ]
+}

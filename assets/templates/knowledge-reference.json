@@ -1,0 +1,38 @@
+{
+  "doc_type": "knowledge",
+  "kind": "reference",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["subject", "entries"],
+    "properties": {
+      "subject": { "type": "string", "minLength": 1, "title": "Subject", "description": "What this reference document is a lookup for." },
+      "audience": { "type": "string", "title": "Audience", "description": "Who looks this up, and when." },
+      "entries": {
+        "type": "array",
+        "title": "Entries",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["term", "statement"],
+          "properties": {
+            "term": { "type": "string", "minLength": 1 },
+            "statement": { "type": "string", "minLength": 1 },
+            "source": { "type": "string", "description": "Where the statement comes from (a document, a file, a URL)." }
+          }
+        }
+      },
+      "related": { "type": "array", "title": "Related documents", "x-ref-list": true, "items": { "type": "string", "minLength": 1 } }
+    }
+  },
+  "dimensions": [
+    { "id": "scope", "question": "What does this reference deliberately not cover, and where does the reader go for that?" },
+    { "id": "staleness", "question": "Which entries depend on code or documents that can change, and how will a reader know one is stale?" }
+  ],
+  "checks": ["refs-resolve"],
+  "render": [
+    { "heading": "Subject", "fields": ["subject", "audience"] },
+    { "heading": "Entries", "fields": ["entries"] },
+    { "heading": "Related documents", "fields": ["related"] }
+  ]
+}

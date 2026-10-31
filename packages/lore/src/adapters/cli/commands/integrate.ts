@@ -63,7 +63,7 @@ import { sqliteIntegrationLease } from "../../../store/integration-lease.js";
 import { IntegrateLossLedger } from "../../../service/integrate-loss-ledger.js";
 import { IntegrateAttemptLedger } from "../../../service/integrate-attempt-ledger.js";
 import { OwnDiffJudgment } from "../../../service/own-diff-judgment.js";
-import { buildReviewTriggerService, spawnDetachedReviewBatch } from "../review-batch-wiring.js";
+import { buildReviewLeases, buildReviewTriggerService, spawnDetachedReviewBatch } from "../review-batch-wiring.js";
 import { loadCoChangeRules } from "../../../service/co-change-review.js";
 import {
   IntegrateService,
@@ -266,8 +266,11 @@ export default defineLoreCommand({
         inv.io.stderr.write("Error: this composition has no drift-check service, so anchored paths cannot be judged (BR-1355); nothing was landed\n");
         return 1;
       }
-      const reviewBatch = buildReviewTriggerService(app, () =>
+      // reason: BR-1532 — the landing takes `batch:<machine>` itself and hands it to the batch it spawns (REVIEW_BATCH_HANDOFF_ENV).
+      const batchLeases = buildReviewLeases(app, `${resolveActor(inv)}:integrate:${String(process.pid)}`);
+      const reviewBatch = buildReviewTriggerService(app, (handoff) =>
         spawnDetachedReviewBatch({
+          handoff,
           cwd: projectRoot,
           corpusDir,
           execPath: inv.execPath,
@@ -277,6 +280,7 @@ export default defineLoreCommand({
           runService: app.runService,
           caller: { claimedRun: inv.identity.harnessRun, verified: verifiedIdentity ?? { ok: true, value: undefined } },
         }),
+        batchLeases,
       );
       const service = new IntegrateService({
         git: runGit,
