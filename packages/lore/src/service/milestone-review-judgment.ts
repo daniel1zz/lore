@@ -294,25 +294,35 @@ export function factsDimensions(
     ...(facts?.attestation ?? []).map((r) => ({ subject: r.subject, verdict: r.verdict, detail: r.detail })),
     ...aiCriteria.map((c) => ({ subject: `${c.spec}:${c.ac}`, verdict: c.verdict, detail: c.reason })),
   ];
+  // reason: a regression selection row carries the selector's multi-line accounting after its first line (stored on the review's
+  // facts); the dimension's reason names only that first line, which states "N selected test files of M" (spec "Accounting").
+  const firstLine = (detail: string): string => detail.split("\n", 1)[0] ?? detail;
   const fold = (items: readonly { subject: string; verdict: string; detail: string }[], absent: string, label: string): DimensionJudgment => {
     if (items.length === 0) return notMeasured(absent, [`${label}:not-supplied`]);
     // reason: `na` rows say nothing of this kind is in scope (e.g. "no criterion in scope"); a fold of only `na` is `na`, never pass.
     if (items.every((r) => r.verdict === "na")) {
-      return { verdict: "na", reason: items.map((r) => r.detail).join("; "), reference: "" };
+      return { verdict: "na", reason: items.map((r) => firstLine(r.detail)).join("; "), reference: "" };
     }
     const failed = items.filter((r) => r.verdict === "fail");
     if (failed.length > 0) {
-      return { verdict: "fail", reason: `${label} failing: ${failed.map((r) => `${r.subject} (${r.detail})`).join("; ")}`, reference: "attested evidence", cites: failed.map((r) => r.subject) };
+      return { verdict: "fail", reason: `${label} failing: ${failed.map((r) => `${r.subject} (${firstLine(r.detail)})`).join("; ")}`, reference: "attested evidence", cites: failed.map((r) => r.subject) };
     }
     const unmeasured = items.filter((r) => r.verdict === "not-measured");
     if (unmeasured.length > 0) {
-      return notMeasured(`${label} not measured: ${unmeasured.map((r) => `${r.subject} (${r.detail})`).join("; ")}`, unmeasured.map((r) => r.subject));
+      return notMeasured(`${label} not measured: ${unmeasured.map((r) => `${r.subject} (${firstLine(r.detail)})`).join("; ")}`, unmeasured.map((r) => r.subject));
     }
     return { verdict: "pass", reason: `${label}: all ${String(items.length)} pass`, reference: "attested evidence" };
   };
+  const regressionRows = facts?.regression ?? [];
+  const regressionFold = fold(regressionRows, "regression per landing was not supplied to this review", "landings");
+  const selectionRow = regressionRows.find((r) => r.subject.startsWith("selection@"));
+  const regression: DimensionJudgment =
+    selectionRow !== undefined && regressionFold.verdict !== "na" && regressionFold.verdict !== "not-measured"
+      ? { ...regressionFold, reason: `${regressionFold.reason}; ${firstLine(selectionRow.detail)}` }
+      : regressionFold;
   return {
     correctness_vs_acs: fold(rows, "criteria attestation was not supplied to this review", "criteria"),
-    regression: fold(facts?.regression ?? [], "regression per landing was not supplied to this review", "landings"),
+    regression,
     snapshot_accuracy: { verdict: "pass", reason: "computed from cited-rule state alone", reference: "" },
   };
 }
