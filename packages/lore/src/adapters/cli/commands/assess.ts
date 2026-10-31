@@ -60,7 +60,7 @@ import { err, ok, type DocId, type Result } from "@lore/core";
 import { DECISION_FLAG_ARGS, parseDecisionFlags } from "../decision-flags.js";
 import { DecisionGate } from "../../../service/decision-gate.js";
 import { SpawnDecisionGitPort } from "../../../service/decision-git-port.js";
-import { GateAcceptanceService } from "../../../service/gate-acceptance-service.js";
+import { GateAcceptanceService, createGateAcceptanceLog, unwiredGateAcceptanceLog, type GateAcceptanceLog } from "../../../service/gate-acceptance-service.js";
 import type { App } from "../../../app.js";
 import { createGitCommitSuiteRunner } from "../assess-suite-runner.js";
 import { createGitTestSelection } from "../assess-selection.js";
@@ -169,7 +169,7 @@ export default defineLoreCommand({
     "accept-gate": {
       type: "string",
       description:
-        "Accept one failed or not-measured gate (regression | security) of the plan's current review as a known defect so the plan can close; needs --reason, --premise and --alt. correctness_vs_acs cannot be accepted: use `lore ac supersede`",
+        "Accept one failed or not-measured gate (regression | security) of the plan's current review as a known defect so the plan can close; needs --reason, --premise and --alt. An agent run's call only creates a pending human decision (answer it with `lore pending --ask`, then re-run the same command); a human party accepts at once. correctness_vs_acs cannot be accepted: use `lore ac supersede`",
     },
     ...DECISION_FLAG_ARGS,
     json: { type: "boolean", description: "Output the rows as JSON" },
@@ -688,19 +688,32 @@ async function runAcceptGate(context: Parameters<typeof invocationOf>[0], positi
       filing,
       writer: app.corpusService,
       by: actor,
+      writerSource: inv.identity.claimedSource,
+      decisions: app.decisionReadService,
+      log: gateAcceptanceLogOf(app),
     });
     const accepted = await service.acceptGate(positionals[0] ?? "", String(args["accept-gate"]), draft.value);
     if (!accepted.ok) {
       inv.io.stderr.write(formatErrorFor(inv, accepted.error) + "\n");
       return exitCode(accepted.error);
     }
-    const line = `Accepted gate ${accepted.value.dimension} of plan ${accepted.value.plan} as a known defect (issue #${String(accepted.value.issue)}, review ${accepted.value.review}); the next \`lore assess --where needs-review --close\` may archive it.`;
+    const line = `Accepted gate ${accepted.value.dimension} of plan ${accepted.value.plan} (human decision record ${String(accepted.value.decision_record)}, issue #${String(accepted.value.issue)}, review ${accepted.value.review}); the next \`lore assess --where needs-review --close\` may archive it.`;
     if (args.json === true) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: accepted.value }, null, 2));
     else printLine(inv.io.stdout, line);
     return 0;
   } finally {
     app.close();
   }
+}
+
+/**
+ * The decision-log reader of gate acceptances over the app's decision service.
+ * reason: with no decision service wired every read fails loud (`unwiredGateAcceptanceLog`), so a close never silently reads "not accepted".
+ */
+function gateAcceptanceLogOf(app: App): GateAcceptanceLog {
+  const decisions = app.decisionReadService;
+  if (decisions === undefined) return unwiredGateAcceptanceLog();
+  return createGateAcceptanceLog({ listDecisionLog: async () => decisions.chainRows() });
 }
 
 /** The inputs of the `--close` batch, built by `run`. */
@@ -739,6 +752,7 @@ async function runBatchClose(input: BatchCloseInput): Promise<number> {
     getPlanBundle: (ref) => app.corpusService.getPlanBundle(ref),
     listReviewDocs: (planId) => app.corpusService.listMilestoneReviewDocs(planId),
     issueCoverage: (planId, failed) => app.corpusService.coverageOfFailedDimensions(planId, failed),
+    acceptanceLog: gateAcceptanceLogOf(app),
   });
   const run = await service.runBatch(input.planRefs, {
     acquirePlanLease: (planId) => leases.acquire(planLeaseKey(planId)),
