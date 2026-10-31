@@ -18,7 +18,7 @@
  *     worktree, committed on and landed on main, for the cases that reach the floors.
  * Both are throwaway (mkdtemp + `lore init`, HOME outside the repository); this repository's own `.lore/` is never touched.
  *
- * Retired with the model (spec AC-DCS1-6, named in the commit): the `--declare-no-new-tests` companion flag these cases used to
+ * Retired with the model (spec AC-DCS1-6, named in the commit): the no-new-test declaration flag these cases used to
  * carry, and every case that archived a task through a citation alone (the snapshot of the cited row in the archived record).
  * After an override the contract oracles are judged by counted passes, so no task with a compiled contract is archived by an
  * override; the audit-stamping of an archive through an override is covered at the service layer by a contract with no oracle

@@ -147,16 +147,16 @@ describe("face 4: acScopeRequiredAtCreate's JSDoc names the mechanism that DOES 
   });
 });
 
-// ─── Face 1 — RETIRED with the no-new-tests floor ────────────────────────────
+// ─── Face 1 — RETIRED with the no-new-test floor ─────────────────────────────
 //
-// Face 1 recorded the keying decision of `requiresNoNewTestsDeclaration` (the no-new-tests floor armed by the PRESENCE of a
-// declared ac_scope) and pinned its short-circuit. The floor, the predicate and `lore done --declare-no-new-tests` are removed
+// Face 1 recorded the keying decision of `requiresNoNewTestsDeclaration` (the no-new-test floor armed by the PRESENCE of a
+// declared ac_scope) and pinned its short-circuit. The floor, the predicate and the done-time no-new-test declaration flag are removed
 // (spec-done-contract-compiled-at-approve-task-kinds-write-sets, AC-DCS1-6): "this task adds no new test" is now declared once, at
 // approve, as the contract's red waiver (`lore approve --red-waiver "<reason>"`, AC-DCS1-5), and `lore done` judges only the
 // stored contract (AC-DCS1-7). The removal of the surface is observed through the compiled command in
 // tests/e2e/done-contract-done-floors-compiled.bun.test.ts (AC-DCS1-6). Only this one assertion of the face stays here:
 // the service that owned the floor is still the one exporting done().
-describe("face 1 (retired): the service that owned the no-new-tests floor still exports done() and the retired predicate is gone", () => {
+describe("face 1 (retired): the service that owned the no-new-test floor still exports done() and the retired predicate is gone", () => {
   it("STATE: done() is exported and requiresNoNewTestsDeclaration no longer exists in the service source", () => {
     expect(typeof TaskWorkflowService.prototype.done).toBe("function");
     expect(readSource(TASK_WORKFLOW_SERVICE)).not.toContain("requiresNoNewTestsDeclaration");

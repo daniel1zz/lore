@@ -38,8 +38,8 @@
  *                self-reported, never as runner-captured
  *   ERROR:       a genuinely self-reported population is STILL described
  *                accurately (AC-2) — the word was not merely deleted
- *   STATE:       the three OTHER independent `done()` floors (red-first,
- *                declared-ac_scope/no-new-tests, unfiltered-test-file-anchor)
+ *   STATE:       the OTHER independent `done()` floors (red-first,
+ *                contract-oracles, unfiltered-test-file)
  *                still fire independently, and none masks another (AC-5); the
  *                audited `--override-attestation` still archives and still
  *                records its reason verbatim (AC-6)
