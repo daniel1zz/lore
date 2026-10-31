@@ -135,7 +135,7 @@ async function createPlanAndTask(
     title: "UWG Task",
     parent_id: plan.value.id,
     content: "body",
-    extra: { plan_id: plan.value.id, ...extraOpts },
+    extra: { plan_id: plan.value.id, kind: "code", ...extraOpts },
   } as CreateDocInput);
   if (!task.ok) throw new Error(`task create failed: ${JSON.stringify(task.error)}`);
   return task.value.id;
@@ -320,12 +320,14 @@ describe("ERROR — not-measured controls record DISTINCT values, never fabricat
     expect(result.ok).toBe(true);
   });
 
-  it("a claim with NO recorded worktree, called from a NON-repo cwd, is unaffected — no fabricated refusal", async () => {
+  it("a claim naming only a BRANCH (no working-copy path), called from a NON-repo cwd, is unaffected — no fabricated refusal", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const taskId = await createPlanAndTask(corpusService);
     const nonRepoCwd = makeNonRepoDir();
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") }); // no --worktree at all
+    // reason: a code task is claimed only on a branch (BR-1468 as modified by AC-DCS1-14), so the old "no --worktree at all" claim
+    // cannot be made; the branch name is a relative value, which has no path to measure.
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-branch-only" });
     const result = await taskWorkflowService.addEvidence(
       taskId,
       evidence({ callerCwd: nonRepoCwd }),
@@ -363,15 +365,15 @@ describe("ERROR — not-measured controls record DISTINCT values, never fabricat
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
 
-describe("STATE — Q3 opt-in-hole close: a no-worktree claim's fate depends on the CALLER's cwd", () => {
-  // reason: BR-159 / #304 — a claim with no working copy is corpus-only work (BR-1468 refuses an anchored task without a branch),
-  // proven at main's head; the shared checkout's own files are not this task's, so the Q3 refusal is gone, in or out of a repository.
-  it("no recorded worktree + callerCwd IS a real git repo => accepted (evidence)", async () => {
+describe("STATE — Q3 opt-in-hole close: a branch-only claim's fate never depends on the CALLER's cwd", () => {
+  // reason: BR-159 / #304 — the shared checkout's own files are not this task's, so the Q3 refusal is gone, in or out of a repository.
+  // A code task is claimed only on a branch (AC-DCS1-14): the claim here names a branch, not a working-copy path.
+  it("branch-only claim + callerCwd IS a real git repo => accepted (evidence)", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const taskId = await createPlanAndTask(corpusService);
     const realRepoCwd = makeCleanRepo();
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") }); // no --worktree
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-branch-only" });
     const result = await taskWorkflowService.addEvidence(
       taskId,
       evidence({ callerCwd: realRepoCwd }),
@@ -379,31 +381,31 @@ describe("STATE — Q3 opt-in-hole close: a no-worktree claim's fate depends on 
     expect(result.ok).toBe(true);
   });
 
-  it("no recorded worktree + callerCwd IS a real git repo => accepted (release)", async () => {
+  it("branch-only claim + callerCwd IS a real git repo => accepted (release)", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const taskId = await createPlanAndTask(corpusService);
     const realRepoCwd = makeCleanRepo();
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") }); // no --worktree
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-branch-only" });
     const result = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice"), callerCwd: realRepoCwd });
     expect(result.ok).toBe(true);
   });
 
-  it("no recorded worktree + callerCwd is NOT a repo => unaffected (control pair to the above)", async () => {
+  it("branch-only claim + callerCwd is NOT a repo => unaffected (control pair to the above)", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const taskId = await createPlanAndTask(corpusService);
     const nonRepoCwd = makeNonRepoDir();
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-branch-only" });
     const result = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice"), callerCwd: nonRepoCwd });
     expect(result.ok).toBe(true);
   });
 
-  it("no recorded worktree + callerCwd omitted entirely => unaffected (every pre-existing direct-service caller)", async () => {
+  it("branch-only claim + callerCwd omitted entirely => unaffected (every pre-existing direct-service caller)", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const taskId = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-branch-only" });
     const result = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(result.ok).toBe(true);
   });
@@ -427,11 +429,11 @@ describe("REGRESSION — release's check is unconditional; pre-existing zero-evi
     expect(result.error.message).toContain("src.ts");
   });
 
-  it("a task released with zero evidence and no worktree ever recorded still succeeds byte-identically", async () => {
+  it("a task released with zero evidence and only a branch name recorded still succeeds byte-identically", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const taskId = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-branch-only" });
     const result = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(result.ok).toBe(true);
     if (!result.ok) return;

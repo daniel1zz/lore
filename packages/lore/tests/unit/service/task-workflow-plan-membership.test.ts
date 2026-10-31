@@ -47,6 +47,7 @@ import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
+import { LANDING_COMMIT, landedTaskExtra } from "./done-contract-unit-fixture.js";
 function makeServices(ttl = 120) {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -77,7 +78,8 @@ async function createTask(
     title,
     parent_id: parentId,
     content: "body",
-    extra: { plan_id: planId },
+    // reason: `done` judges the stored contract and landing (AC-DCS1-7); the fixture stores the shapes approve and integrate write.
+    extra: { plan_id: planId, ...landedTaskExtra() },
   } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create task: ${JSON.stringify(result.error)}`);
   return result.value;
@@ -105,7 +107,7 @@ function attestedPass(overrides: Partial<VerifiedEvidenceInput> = {}): VerifiedE
     command: "bun run typecheck",
     result: "pass",
     recorded_by: "runner",
-    attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+    attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, recorded_at_landing: LANDING_COMMIT },
     // reason: task-capture-source-is-optional-at-the-evidence-write-boundary —
     // now compile-time-required on VerifiedEvidenceInput; "runner" is the value
     // the real-world caller (VerifyRunnerService) actually proves.
@@ -260,7 +262,7 @@ describe("plan membership: extra.plan_id vs parent_id (task-plan-membership-is-e
       type: "task",
       title: "Adhoc N2 Task",
       content: "body",
-      extra: { adhoc: true },
+      extra: { adhoc: true, ...landedTaskExtra() },
     } as CreateDocInput);
     if (!adhocTask.ok) throw new Error(`Failed to create adhoc task: ${JSON.stringify(adhocTask.error)}`);
 

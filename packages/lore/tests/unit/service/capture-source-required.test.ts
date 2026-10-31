@@ -68,6 +68,7 @@ import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
+import { LANDING_COMMIT, landedTaskExtra } from "./done-contract-unit-fixture.js";
 // ─── Shared fixtures (TaskWorkflowService) ─────────────────────────────────────
 
 function makeServices() {
@@ -89,7 +90,8 @@ async function createTask(cs: CorpusService, planId: string, title = "Capture So
     title,
     parent_id: planId,
     content: "body",
-    extra: { plan_id: planId },
+    // reason: `done` judges the stored contract and the landing (AC-DCS1-7); the unit fixture stores the shapes approve and integrate write.
+    extra: { plan_id: planId, ...landedTaskExtra() },
   } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create task: ${JSON.stringify(result.error)}`);
   return result.value.id;
@@ -473,7 +475,7 @@ describe("STATE — AC-5: done()'s runner-attested floor is unchanged by this re
         result: "pass",
         recorded_by: "runner",
         capture_source: "runner",
-        attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+        attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, recorded_at_landing: LANDING_COMMIT },
       },
       "2026-08-03T10:00:00.000Z",
     );

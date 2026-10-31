@@ -178,7 +178,7 @@ async function createPlanAndTasks(
       title: `Session Split Task ${index + 1}`,
       parent_id: plan.id,
       content: "# Task",
-      extra: { plan_id: plan.id, file_anchors: anchors },
+      extra: { plan_id: plan.id, kind: "code", file_anchors: anchors },
     } as CreateDocInput);
     taskIds.push(task.id);
   }

@@ -74,7 +74,7 @@ async function createPlanAndTask(cs: CorpusService): Promise<{ planId: string; t
     title: "Task",
     parent_id: plan.id,
     content: "# Task",
-    extra: { plan_id: plan.id },
+    extra: { plan_id: plan.id, kind: "code" },
   } as CreateDocInput);
   return { planId: plan.id, taskId: task.id };
 }
@@ -168,7 +168,7 @@ describe("TaskWorkflowService.release — zero-evidence advisory wiring (AC-RELE
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     expect(claimResult.ok).toBe(true);
 
     const releaseResult = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
@@ -185,7 +185,7 @@ describe("TaskWorkflowService.release — zero-evidence advisory wiring (AC-RELE
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     const evidenceResult = await taskWorkflowService.addEvidence(taskId, evidence());
     expect(evidenceResult.ok).toBe(true);
 
@@ -201,7 +201,7 @@ describe("TaskWorkflowService.release — zero-evidence advisory wiring (AC-RELE
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     await taskWorkflowService.addEvidence(
       taskId,
       evidence({ result: "fail", output_tail: "AssertionError: expected 1 to equal 2" }),
@@ -219,7 +219,7 @@ describe("TaskWorkflowService.release — zero-evidence advisory wiring (AC-RELE
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     const evidenceResult = await taskWorkflowService.addEvidence(taskId, evidence());
     expect(evidenceResult.ok).toBe(true);
     if (!evidenceResult.ok) return;
@@ -237,7 +237,7 @@ describe("TaskWorkflowService.release — zero-evidence advisory wiring (AC-RELE
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     const releaseResult = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(releaseResult.ok).toBe(true);
   });
@@ -247,7 +247,7 @@ describe("TaskWorkflowService.release — zero-evidence advisory wiring (AC-RELE
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     const releaseResult = await taskWorkflowService.release(taskId, { by: "bob", harnessRun: runOfName("bob"), force: true });
     expect(releaseResult.ok).toBe(true);
     if (!releaseResult.ok) return;

@@ -124,7 +124,7 @@ async function createTask(
     title,
     parent_id: planId,
     content: `# ${title}`,
-    extra: { plan_id: planId, ...(anchors !== undefined ? { file_anchors: anchors } : {}) },
+    extra: { plan_id: planId, kind: "code", ...(anchors !== undefined ? { file_anchors: anchors } : {}) },
   } as CreateDocInput);
   return task.id;
 }
