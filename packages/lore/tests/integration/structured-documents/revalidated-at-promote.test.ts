@@ -1,14 +1,15 @@
 // @reads assets/project/lore-config-template.yaml
 // @reads packages/lore/src/**
 // @spawns-external git builds a throwaway git repository the test runs against
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * spec-every-document-is-stored-as-structured-fields-validated-by#AC-ST-4: ONE validating write path.
  *
  * This file holds the WRITE half of AC-ST-4 (task T6): writing an invalid templated document through each write surface
  * (CLI create, CLI set, HTTP POST, HTTP PATCH, CorpusService.create/set) is refused with exit 4 (or the surface's
  * equivalent error) and writes nothing, and a static scan finds no adapter module writing document rows through the
- * store interface. The PROMOTE half (cross-field checks refused at approve for every type) is added by task T7 in the
- * describe titled "promote-time cross-field checks for every type", which this file leaves empty on purpose.
+ * store interface. The PROMOTE half (cross-field checks refused at approve for every type, independent of
+ * `judgment_required_types`) is the describe titled "promote-time cross-field checks for every type" at the end.
  *
  * The MCP surface named in the AC statement is retired (adr-retire-the-lore-mcp-server-the-cli-and-http-are-th); the
  * surfaces that exist are CLI, HTTP and CorpusService.
@@ -31,6 +32,8 @@ import { startHttpServer } from "../../../src/adapters/http/index.js";
 import { createMachineAuthStores, type MachineAuthStores } from "../../../src/adapters/http/machine-auth.js";
 import type { App } from "../../../src/app.js";
 import { createLiveApp } from "../../helpers/live-app.js";
+import { asyncLoreRunnerFor, ensureLiveRuleViaAsyncCli } from "../../helpers/cli-live-rule.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { liveIo } from "../../live-invocation.js";
 import {
   createStructuredRig,
@@ -229,8 +232,133 @@ describe(`${SPEC}#AC-ST-4 no adapter writes document rows through the store inte
 });
 
 describe(`${SPEC}#AC-ST-4 promote-time cross-field checks for every type`, () => {
-  // Task T7 adds its cases here (prd, spec, adr, plan, task, a knowledge sub-type and a baseline node).
-  it("is reserved for T7 (see the file header)", () => {
-    expect(true).toBe(true);
+  /**
+   * One templated slot per document type. Every template lists `goal-has-measure` over a `goal` field: a draft whose goal
+   * has no measure is created (write time never runs the cross-field checks) and refused at approval naming the check.
+   */
+  interface Slot {
+    readonly label: string;
+    readonly docType: string;
+    readonly kind?: string;
+    /** The type's own required `extra` keys (the kind selector among them). */
+    readonly extra: Record<string, unknown>;
+    readonly parent?: "prd" | "plan";
+  }
+  const SLOTS: readonly Slot[] = [
+    { label: "prd", docType: "prd", extra: {} },
+    { label: "spec", docType: "spec", kind: "feature", extra: { spec_kind: "feature" } },
+    { label: "adr", docType: "adr", extra: { decision_status: "proposed" }, parent: "prd" },
+    { label: "plan", docType: "plan", extra: {}, parent: "prd" },
+    { label: "task", docType: "task", extra: {}, parent: "plan" },
+    { label: "knowledge/research", docType: "knowledge", kind: "research", extra: { sub_type: "research" }, parent: "prd" },
+    { label: "baseline root", docType: "baseline", kind: "root", extra: { node: "root", label: "Root" }, parent: "prd" },
+  ];
+
+  const GOAL_DIMENSIONS = [{ id: "edge-cases", status: "na", answer: "no edge case: nothing varies", refs: [] }];
+  const created = new Map<string, { id: string; slug: string }>();
+  let prdId = "";
+  let planId = "";
+  let ruleId = "";
+
+  function goalTemplate(slot: Slot): Record<string, unknown> {
+    return {
+      doc_type: slot.docType,
+      ...(slot.kind === undefined ? {} : { kind: slot.kind }),
+      version: 1,
+      fields: {
+        type: "object",
+        properties: { goal: { type: "object", "x-goal": true, properties: { statement: { type: "string" }, measure: { type: "string" } } } },
+      },
+      dimensions: [{ id: "edge-cases", question: "Which edge cases does it handle?" }],
+      checks: ["goal-has-measure"],
+      render: [{ heading: "Goal", fields: ["goal"] }],
+    };
+  }
+
+  async function lore(args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    return await rig.lore(args);
+  }
+
+  async function statusOf(slug: string): Promise<string> {
+    const got = await lore(["get", slug, "--json"]);
+    return (JSON.parse(got.stdout) as { data: { doc: { status: string } } }).data.doc.status;
+  }
+
+  beforeAll(async () => {
+    const prd = await rig.lore(["create", "prd", "--title", "Promote checks product", "--content", "# P\n\nA product.\n", "--json"]);
+    expect(prd.exitCode, prd.stderr).toBe(0);
+    prdId = (JSON.parse(prd.stdout) as { data: { id: string } }).data.id;
+    for (const slot of SLOTS) await installTemplate(rig, `Promote ${slot.label} template`, goalTemplate(slot));
+    ruleId = await ensureLiveRuleViaAsyncCli(asyncLoreRunnerFor((args) => rig.lore(args), rig.dir), rig.dir);
+    await rig.withApp(async (app) => {
+      for (const slot of SLOTS) {
+        const parentId = slot.parent === "prd" ? prdId : slot.parent === "plan" ? planId : undefined;
+        const doc = await must(
+          app.corpusService.create({
+            type: slot.docType,
+            title: `Promote check ${slot.label}`,
+            ...(parentId === undefined ? {} : { parent_id: parentId }),
+            extra: {
+              ...slot.extra,
+              ...(slot.docType === "task" ? { plan_id: planId } : {}),
+              fields: { goal: { statement: "be faster", measure: "" } },
+              dimensions: GOAL_DIMENSIONS,
+            },
+          } as never),
+          `create ${slot.label}`,
+        );
+        if (slot.docType === "plan") planId = doc.id;
+        created.set(slot.label, { id: doc.id, slug: doc.slug });
+      }
+    });
+  }, 420_000);
+
+  it("every slot has a draft that violates its template's goal-has-measure check (write time did not refuse it)", () => {
+    expect([...created.keys()]).toEqual(SLOTS.map((slot) => slot.label));
   });
+
+  it("with judgment REQUIRED for spec and adr (the default), approval of every type is refused naming goal-has-measure and the entry, and nothing changes", async () => {
+    for (const slot of SLOTS) {
+      const doc = created.get(slot.label);
+      expect(doc, slot.label).toBeDefined();
+      const slug = doc?.slug ?? "";
+      const before = await lore(["get", slug, "--json"]);
+      const refused = await lore(["approve", slug]);
+      expect(refused.exitCode, `${slot.label}: ${refused.stderr}`).toBe(4);
+      expect(refused.stderr, slot.label).toContain("goal-has-measure");
+      expect(refused.stderr, slot.label).toContain("goal");
+      expect(await statusOf(slug), slot.label).toBe("draft");
+      expect((await lore(["get", slug, "--json"])).stdout, slot.label).toBe(before.stdout);
+    }
+  }, 300_000);
+
+  it("with judgment required for NO type, the corrected document of every type promotes and its status is approved", async () => {
+    patchLoreConfig(rig.dir, { workflow: { review: { judgment_required_types: [] } } });
+    const fix = writeFieldsFile(rig, "goal-fix.yaml", { fields: { goal: { statement: "be faster", measure: "p95 under 200 ms" } } });
+    for (const slot of SLOTS) {
+      const slug = created.get(slot.label)?.slug ?? "";
+      const stillBad = await lore(["approve", slug]);
+      expect(stillBad.exitCode, `${slot.label} (judgment off, still violating): ${stillBad.stderr}`).toBe(4);
+      expect(stillBad.stderr, slot.label).toContain("goal-has-measure");
+      if (slot.docType !== "baseline") {
+        const set = await lore(["set", slug, "--fields-file", fix]);
+        expect(set.exitCode, `${slot.label}: ${set.stderr}`).toBe(0);
+      } else {
+        await rig.withApp(async (app) => {
+          const current = await must(app.corpusService.get(slug), "get baseline");
+          await must(app.corpusService.set(slug, { extra: { ...current.doc.extra, fields: { goal: { statement: "be faster", measure: "p95 under 200 ms" } } }, version: current.doc.version } as never), "fix baseline");
+        });
+      }
+      if (slot.docType === "spec") {
+        const added = await lore(["ac", "add", slug, "AC-1", "--statement", "the parser round-trips every fixture file", "--mode", "script", "--oracle", "test", "--command", "true"]);
+        expect(added.exitCode, added.stderr).toBe(0);
+        const cite = await lore(["ac", "cite", slug, "AC-1", ruleId]);
+        expect(cite.exitCode, cite.stderr).toBe(0);
+      }
+      expect((await lore(["template", "check", slug])).exitCode, slot.label).toBe(0);
+      const approved = await lore(["approve", slug]);
+      expect(approved.exitCode, `${slot.label}: ${approved.stderr}`).toBe(0);
+      expect(await statusOf(slug), slot.label).toBe("approved");
+    }
+  }, 600_000);
 });
