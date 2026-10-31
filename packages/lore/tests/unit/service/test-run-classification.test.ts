@@ -1,3 +1,4 @@
+// @spawns-external bunx imports scripts/test-file.ts only for its pure planGroups; nothing is spawned here
 /**
  * @spec_ref spec-review-test-runs-are-capped-per-machine-and-a-run-that (BR-1533)
  *
