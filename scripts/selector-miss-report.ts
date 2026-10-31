@@ -26,7 +26,7 @@ import { readFileSync } from "node:fs";
 import { relative, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
-import { loadCoreAliasMap, loadFileMap, selectAffectedTests, type SelectionResult } from "./changed-tests.js";
+import { loadCoreAliasMap, loadFileMap, loadVitestConfigSources, selectAffectedTests, type SelectionResult } from "./changed-tests.js";
 
 /** Typed error for every way the cross-check can fail to run (reported as exit 2). */
 export class SelectorMissReportError extends Error {
@@ -118,7 +118,7 @@ export function runMissReport(argv: readonly string[], cwd: string): number {
       }
       return parseFailedTests(text, repoRoot, path);
     });
-    const selection = selectAffectedTests({ changedFiles, fileMap: loadFileMap(repoRoot), aliasMap: loadCoreAliasMap(repoRoot) });
+    const selection = selectAffectedTests({ changedFiles, fileMap: loadFileMap(repoRoot), aliasMap: loadCoreAliasMap(repoRoot), vitestConfigSources: loadVitestConfigSources(repoRoot) });
     const misses = findSelectorMisses(failed, selection);
     console.log(
       `selector-miss-report: range ${range}: ${changedFiles.length} changed file(s), selector would select ${selection.selected.length} test file(s); ${failed.length} failed test(s) in the full run.`,
