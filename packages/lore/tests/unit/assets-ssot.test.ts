@@ -70,6 +70,8 @@ const ASSETS_ROOT = join(REPO_ROOT, "assets");
 // ─── The declared manifest — THE conformance spec, not derived from the fs ────
 
 const DECLARED_FILES = [
+  // root (a file directly in assets/, AC-DCS2-6)
+  "dispatch-standing-rules.md",
   // skills
   "skills/lore/SKILL.md",
   "skills/lore-kickoff/SKILL.md",
@@ -1116,6 +1118,7 @@ describe("assets/context manifest", () => {
       mkdirSync(join(root, d), { recursive: true });
       writeFileSync(join(root, d, "seed.md"), `seed ${d}\n`);
     }
+    writeFileSync(join(root, "dispatch-standing-rules.md"), "seed root\n");
     if (withContext) {
       mkdirSync(join(root, "context"), { recursive: true });
       writeFileSync(join(root, "context", "zz-probe.md"), "probe fragment\n");
@@ -1177,8 +1180,8 @@ describe("assets/context manifest", () => {
     const withCtx = makeTempAssets(true);
     const without = makeTempAssets(false);
     try {
-      expect(listBinaryReadAssetPaths(withCtx)).toEqual(["context/zz-probe.md", "project/seed.md"]);
-      expect(listBinaryReadAssetPaths(without)).toEqual(["project/seed.md"]);
+      expect(listBinaryReadAssetPaths(withCtx)).toEqual(["context/zz-probe.md", "dispatch-standing-rules.md", "project/seed.md"]);
+      expect(listBinaryReadAssetPaths(without)).toEqual(["dispatch-standing-rules.md", "project/seed.md"]);
     } finally {
       rmSync(withCtx, { recursive: true, force: true });
       rmSync(without, { recursive: true, force: true });
