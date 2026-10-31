@@ -423,7 +423,7 @@ export async function recheckPlanDecisions(deps: DecisionRecheckDeps, bundle: Pl
 
 /** Re-runs one acceptance criterion of a spec; an `err` means it could not run (not that it failed). */
 export interface CriterionRerunPort {
-  readonly rerun: (spec: { readonly slug: string }, acId: string) => Promise<Result<{ readonly passed: boolean; readonly detail: string }, LoreError>>;
+  readonly rerun: (spec: { readonly slug: string }, acId: string) => Promise<Result<{ readonly passed: boolean; readonly detail: string; readonly unbound_cause?: string }, LoreError>>;
 }
 
 function describeSource(source: DecisionRecord["premises"][number]["source"]): string {

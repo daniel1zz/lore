@@ -22,8 +22,25 @@ export const ORACLE_LOCK_FILE_NAME = "lore-oracle-test.lock";
 /** Outcome of reading the lock: free, held by a live pid, or unmeasurable (never guessed as free). */
 export type OccupancyProbe =
   | { readonly kind: "free" }
-  | { readonly kind: "held"; readonly holder_pid: number; readonly lock_path: string }
+  | {
+      readonly kind: "held";
+      readonly holder_pid: number;
+      readonly lock_path: string;
+      /**
+       * Realpath of the worktree the holder runs in (second line of the lock file). ABSENT for a lock written by an
+       * older writer (pid only): its location is unknown, which callers must read as "held everywhere" (BR-1512, D3).
+       */
+      readonly holder_worktree?: string;
+    }
   | { readonly kind: "unmeasured"; readonly reason: string };
+
+/**
+ * The lock file's content: the holder's pid on the first line, its worktree root on the second (omitted = old format).
+ * ONE definition shared with the writer so the two cannot disagree about the format.
+ */
+export function formatOracleLock(pid: number, holderWorktree?: string): string {
+  return holderWorktree === undefined ? String(pid) : `${String(pid)}\n${holderWorktree}`;
+}
 
 /**
  * Resolves the CHECKOUT-level lock directory: `git rev-parse --git-common-dir` from `repoRoot`,
@@ -79,7 +96,15 @@ export function probeOccupancy(lockDir: string): OccupancyProbe {
     if (code === "ENOENT") return { kind: "free" };
     return { kind: "unmeasured", reason: `cannot read ${lockPath}: ${code ?? String(e)}` };
   }
-  const pid = Number.parseInt(raw, 10);
+  const [pidLine = "", worktreeLine = ""] = raw.split("\n");
+  const pid = Number.parseInt(pidLine, 10);
   if (!Number.isInteger(pid) || pid <= 0) return { kind: "free" };
-  return isPidAlive(pid) ? { kind: "held", holder_pid: pid, lock_path: lockPath } : { kind: "free" };
+  if (!isPidAlive(pid)) return { kind: "free" };
+  const holderWorktree = worktreeLine.trim();
+  return {
+    kind: "held",
+    holder_pid: pid,
+    lock_path: lockPath,
+    ...(holderWorktree !== "" ? { holder_worktree: holderWorktree } : {}),
+  };
 }

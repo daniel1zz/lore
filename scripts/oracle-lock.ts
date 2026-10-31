@@ -82,12 +82,13 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 // SPEC-143 AC-CT-8 (d): the lock name, directory resolution and liveness probe have ONE definition,
 // in the read-only reader the shipped binary uses; this file is the WRITER of the same protocol.
 import {
+  formatOracleLock,
   isPidAlive,
   ORACLE_LOCK_FILE_NAME,
   resolveOracleLockDir,
@@ -119,6 +120,20 @@ export function resolveDefaultLockDir(repoRoot: string = REPO_ROOT): string {
 }
 
 /**
+ * The worktree root (realpath of `git rev-parse --show-toplevel`) the lock holder runs in.
+ *
+ * @throws {Error} when git cannot answer: a lock that cannot name its worktree would read as "held everywhere"
+ *   (BR-1512 D3), so the CLI fails loud (exit 4) instead of writing one silently.
+ */
+export function resolveHolderWorktree(cwd: string): string {
+  const result = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" });
+  if (result.status !== 0 || !result.stdout.trim()) {
+    throw new Error(`git rev-parse --show-toplevel failed (status ${result.status}): ${result.stderr ?? "<no stderr>"}`);
+  }
+  return realpathSync(result.stdout.trim());
+}
+
+/**
  * Reads the pid recorded in `lockFilePath`, or `null` if the file is
  * missing, empty, or does not contain a positive integer. A `null` result is
  * treated by `main` as "no verifiable live holder" — i.e. reclaimable —
@@ -144,9 +159,9 @@ function readLockPid(lockFilePath: string): number | null {
  * failure (e.g. `lockDir` missing -> `ENOENT`) propagates as a thrown error,
  * per this module's "environment problem, not a lock decision" contract.
  */
-function tryCreateLockFile(lockFilePath: string, pid: number): boolean {
+function tryCreateLockFile(lockFilePath: string, pid: number, holderWorktree?: string): boolean {
   try {
-    writeFileSync(lockFilePath, String(pid), { flag: "wx" });
+    writeFileSync(lockFilePath, formatOracleLock(pid, holderWorktree), { flag: "wx" });
     return true;
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
@@ -169,11 +184,11 @@ function tryCreateLockFile(lockFilePath: string, pid: number): boolean {
  * @throws {Error} if `lockDir` cannot be written to at all (e.g. it does not
  *   exist) — an environment failure distinct from a lock DECISION.
  */
-export function main(lockDir: string = resolveDefaultLockDir()): number {
+export function main(lockDir: string = resolveDefaultLockDir(), holderWorktree?: string): number {
   const lockFilePath = join(lockDir, LOCK_FILE_NAME);
   const pid = process.pid;
 
-  if (tryCreateLockFile(lockFilePath, pid)) {
+  if (tryCreateLockFile(lockFilePath, pid, holderWorktree)) {
     console.log(`oracle-lock: acquired (pid ${pid}) at ${lockFilePath}`);
     return 0;
   }
@@ -192,7 +207,7 @@ export function main(lockDir: string = resolveDefaultLockDir()): number {
   // as the fresh-create path above; that is an accepted, narrow race inherent
   // to an advisory (non-flock) lock, matching the "advisory lock" language in
   // the governing spec.
-  writeFileSync(lockFilePath, String(pid));
+  writeFileSync(lockFilePath, formatOracleLock(pid, holderWorktree));
   console.log(
     `oracle-lock: reclaimed stale lock at ${lockFilePath} (previous holder pid ${holderPid ?? "<unparseable>"} is no longer alive; now held by pid ${pid})`,
   );
@@ -247,7 +262,8 @@ if (isDirectRun) {
 
   let acquireResult: number;
   try {
-    acquireResult = main(lockDir);
+    // BR-1512: the lock records WHICH worktree runs the oracle, so a review in another worktree is not blocked by it.
+    acquireResult = main(lockDir, resolveHolderWorktree(process.cwd()));
   } catch (e) {
     console.error(`oracle-lock: acquire failed -- ${e instanceof Error ? e.message : String(e)}`);
     process.exit(4);

@@ -168,7 +168,13 @@ export interface HeadCriterionRef {
 
 /** What the runner did for one criterion: it ran (its attestation is in the corpus) or it could not complete. */
 export type HeadCriterionOutcome =
-  | { readonly doc_slug: string; readonly ac_id: string; readonly ran: true }
+  | {
+      readonly doc_slug: string;
+      readonly ac_id: string;
+      readonly ran: true;
+      /** Why the run left no stamp (`VerifyAcResult.unbound_cause`, BR-1512); absent when it was stamped. */
+      readonly unbound_cause?: string;
+    }
   | { readonly doc_slug: string; readonly ac_id: string; readonly ran: false; readonly cause: string };
 
 /**
@@ -252,7 +258,9 @@ export async function measureCriteriaAtHead(input: MeasureCriteriaAtHeadInput): 
       .filter((a) => a.doc_slug === scope.doc_slug && a.ac_id === scope.ac_id && a.head_sha === input.headCommit)
       .reduce<AttestationRow | undefined>((latest, a) => (latest === undefined || a.recorded_at >= latest.recorded_at ? a : latest), undefined);
     if (decided === undefined) {
-      rows.push({ subject, verdict: "not-measured", detail: `its run at ${short(input.headCommit)} left no attestation stamped at that commit` });
+      // BR-1512: name the cause the verify run reported; the generic sentence alone hides it.
+      const why = outcome.unbound_cause !== undefined ? `: ${outcome.unbound_cause}` : "";
+      rows.push({ subject, verdict: "not-measured", detail: `its run at ${short(input.headCommit)} left no attestation stamped at that commit${why}` });
       continue;
     }
     rows.push({ subject, verdict: decided.result, detail: `attested ${decided.result} at ${short(decided.head_sha)} (${decided.id})` });
