@@ -1,6 +1,7 @@
 /**
- * @spec_ref spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach (AC-SC-3, AC-SC-4, BR-1496)
- * (attribution rules from spec-a-plan-s-tests-and-criteria-are-measured-once-at-its, AC-AO-1)
+ * @spec_ref spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach (BR-1496)
+ * (attribution rules from spec-a-plan-s-tests-and-criteria-are-measured-once-at-its, AC-AO-1; the close-selection ACs are owned by
+ * tests/integration/regression-selected-at-close.test.ts)
  *
  * Regression on the selector's tests at the commit holding the plan's last landing, attributed by bisection, with a fake
  * runner and selection over a fake first-parent history and the real SuiteResultService over the in-memory store.
@@ -157,7 +158,7 @@ describe("regression on the selection at the commit of the last landing", () => 
     expect(f.batchCalls[0]).toEqual({ commit: sha(6), files: [FILE], buildFirst: false });
   });
 
-  it("AC-SC-3 the selection runs at L, never at head: a file added after L is not run and never charged even when red", async () => {
+  it("at close:the selection runs at L, never at head: a file added after L is not run and never charged even when red", async () => {
     // the selection names only FILE; OTHER exists and is red at head (it was added after L) but is not selected
     const f = build({ commits: 12, files: { [FILE]: { redFrom: 5 }, [OTHER]: { existsFrom: 9, redFrom: 9 } }, selected: [FILE], totalTestFiles: 2 });
     const r = await measure(f, [landingAt(3), landingAt(5)]);
@@ -167,14 +168,14 @@ describe("regression on the selection at the commit of the last landing", () => 
     expect(f.selectCalls.every((c) => c.commit === sha(5))).toBe(true);
   });
 
-  it("AC-SC-3 an unselected red file is neither run nor charged", async () => {
+  it("at close:an unselected red file is neither run nor charged", async () => {
     const f = build({ commits: 10, files: { [FILE]: { redFrom: 6 }, [OTHER]: { redFrom: 0 } }, selected: [FILE], totalTestFiles: 2 });
     const r = await measure(f, [landingAt(6)]);
     expect(f.fileRuns.some((run) => run.file === OTHER)).toBe(false);
     expect(r.charged).toEqual([{ file: FILE, landing: sha(6) }]);
   });
 
-  it("AC-SC-3 the output states the selected count, the total and that the selector accounting is stored", async () => {
+  it("at close:the output states the selected count, the total and that the selector accounting is stored", async () => {
     const f = build({ commits: 10, files: { [FILE]: { redFrom: 99 }, [OTHER]: {} }, selected: [FILE], totalTestFiles: 40 });
     const r = await measure(f, [landingAt(6)]);
     const row = r.rows.find((x) => x.subject === `selection@${sha(6)}`);
@@ -185,7 +186,7 @@ describe("regression on the selection at the commit of the last landing", () => 
     expect(dimensionOf(r.rows).reason).toContain("regression measured on 1 selected test files of 40 (selector accounting stored)");
   });
 
-  it("AC-SC-3 a selection holding a declared-spawn test builds first, one that holds none does not", async () => {
+  it("at close:a selection holding a declared-spawn test builds first, one that holds none does not", async () => {
     const withSpawn = build({ commits: 6, files: { [FILE]: {}, [OTHER]: {} }, needsBuild: [OTHER] });
     await measure(withSpawn, [landingAt(4)]);
     expect(withSpawn.batchCalls).toEqual([{ commit: sha(4), files: [FILE, OTHER], buildFirst: true }]);
@@ -323,7 +324,7 @@ describe("regression on the selection at the commit of the last landing", () => 
     }
   });
 
-  it("AC-SC-3 a second assess of the same plan reuses the stored results at L and invokes no runner for them", async () => {
+  it("at close:a second assess of the same plan reuses the stored results at L and invokes no runner for them", async () => {
     const f = build({ commits: 10, files: { [FILE]: { redFrom: 99 }, [OTHER]: {} } });
     await measure(f, [landingAt(4), landingAt(6)]);
     expect(f.batchCalls).toHaveLength(1);
@@ -331,7 +332,7 @@ describe("regression on the selection at the commit of the last landing", () => 
     expect(f.batchCalls).toHaveLength(1);
   });
 
-  it("AC-SC-4 a plan with no landing on main selects nothing: na, never pass; unlanded tasks stay not-measured", async () => {
+  it("at close (accounting):a plan with no landing on main selects nothing: na, never pass; unlanded tasks stay not-measured", async () => {
     const f = build({ commits: 6, files: { [FILE]: { redFrom: 2 } } });
     const r = await measure(f, [], ["task-a"]);
     expect(r.causes).toEqual(["unlanded"]);
@@ -385,7 +386,7 @@ describe("regression on the selection at the commit of the last landing", () => 
 });
 
 describe("selection accounting", () => {
-  it("AC-SC-4 an unparseable test file at L is named and makes regression not measured, never pass; nothing runs", async () => {
+  it("at close (accounting):an unparseable test file at L is named and makes regression not measured, never pass; nothing runs", async () => {
     const f = build({ commits: 8, files: { [FILE]: {} }, unparseable: [{ path: "packages/x/tests/broken.test.ts", message: "malformed @spawns block" }] });
     const r = await measure(f, [landingAt(5)]);
     expect(r.rows[0]).toMatchObject({ verdict: "not-measured" });
@@ -395,7 +396,7 @@ describe("selection accounting", () => {
     expect(f.batchCalls).toEqual([]);
   });
 
-  it("AC-SC-4 a selection that cannot be read is not measured and names why", async () => {
+  it("at close (accounting):a selection that cannot be read is not measured and names why", async () => {
     const f = build({ commits: 8, files: { [FILE]: {} }, selectionError: true });
     const r = await measure(f, [landingAt(5)]);
     expect(r.rows[0]).toMatchObject({ verdict: "not-measured" });
@@ -403,7 +404,7 @@ describe("selection accounting", () => {
     expect(f.batchCalls).toEqual([]);
   });
 
-  it("AC-SC-4 an empty selection is na with the reason no test reaches this plan's changes, never pass", async () => {
+  it("at close (accounting):an empty selection is na with the reason no test reaches this plan's changes, never pass", async () => {
     const f = build({ commits: 8, files: { [FILE]: { redFrom: 0 } }, selected: [], totalTestFiles: 55 });
     const r = await measure(f, [landingAt(5)]);
     expect(r.rows[0]).toMatchObject({ verdict: "na" });
@@ -414,7 +415,7 @@ describe("selection accounting", () => {
     expect(f.batchCalls).toEqual([]);
   });
 
-  it("AC-SC-4 a test the plan removed is named in the stored accounting, is not run and does not make regression not measured", async () => {
+  it("at close (accounting):a test the plan removed is named in the stored accounting, is not run and does not make regression not measured", async () => {
     const f = build({ commits: 8, files: { [FILE]: { redFrom: 99 } }, removedTests: [{ path: "packages/x/tests/gone.test.ts" }] });
     const r = await measure(f, [landingAt(5)]);
     // the adapter's accounting text names it; here the fake's accounting is passed through unchanged and the verdict is measured

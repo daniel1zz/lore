@@ -3,7 +3,7 @@
 // @spawns-external node the fixture scripts are node programs that ignore SIGTERM
 /**
  * @spec_ref spec-the-milestone-review-measures-its-facts-per-landing-and (AC-AF-2, BR-1497, BR-1412)
- * @spec_ref spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach (AC-SC-3, BR-1497)
+ * @spec_ref spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach (BR-1497)
  *
  * The suite-result store keeps per-(commit, file) runs once, and the suite results older measurements left behind (read by the
  * main red/green ledger). A fake runner counts runs; the store is the in-memory double (the SQLite round-trip is pinned in

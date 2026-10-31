@@ -3,7 +3,7 @@
 // @spawns-external bun the build-first cases run `bun run build` / `test:file` scripts of a throwaway package
 /**
  * @spec_ref spec-a-plan-s-regression-reuses-a-stored-suite-that-contains (AC-AC-2, BR-1496, BR-1497)
- * @spec_ref spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach (AC-SC-3, BR-1496)
+ * @spec_ref spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach (BR-1496)
  *
  * A plan's red files at the selection commit are rechecked at head in one batched run and bisected together: one batched
  * invocation per probed commit, one prepared worktree per commit per review. The real SuiteResultService over the in-memory
@@ -355,7 +355,7 @@ describe("build first for a selection holding a declared-spawn test", () => {
     return root;
   };
 
-  it("AC-SC-3 buildFirst runs `bun run build` before the tests: a build that writes a marker is seen by the test script", { timeout: 120_000 }, async () => {
+  it("build first:buildFirst runs `bun run build` before the tests: a build that writes a marker is seen by the test script", { timeout: 120_000 }, async () => {
     // reason: the runner appends the file names to `test:file`, so the script is a program that ignores its arguments.
     const root = packageWith({ build: "echo built > built.marker", testFile: "node check.js" });
     writeFileSync(join(root, "check.js"), 'process.exit(require("node:fs").existsSync("built.marker") ? 0 : 4);\n');
@@ -371,7 +371,7 @@ describe("build first for a selection holding a declared-spawn test", () => {
     }
   });
 
-  it("AC-SC-3 a build that fails makes every file incomplete, naming the build: never red, never green, and the tests do not run", { timeout: 120_000 }, async () => {
+  it("build first:a build that fails makes every file incomplete, naming the build: never red, never green, and the tests do not run", { timeout: 120_000 }, async () => {
     const root = packageWith({ build: "echo build broke >&2; exit 3", testFile: "touch tests-ran.marker" });
     try {
       const outcomes = await runTestFilesTogether(root, "fixture", [A, B], cleanEnv(), undefined, { buildFirst: true });
