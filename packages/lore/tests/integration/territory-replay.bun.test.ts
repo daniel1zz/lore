@@ -231,7 +231,7 @@ async function createPlanAndTask(cs: CorpusService, title: string): Promise<{ pl
     title,
     parent_id: plan.id,
     content: `# ${title}`,
-    extra: { plan_id: plan.id },
+    extra: { kind: "code", plan_id: plan.id },
   } as CreateDocInput);
   return { planId: plan.id, taskId: task.id };
 }

@@ -76,7 +76,7 @@ describe("AC-LG-6: judge only spec and adr", () => {
     const planRun = await lore(["approve", plan]);
     expect(planRun.stderr + planRun.stdout).not.toContain("review-judgment");
     const task = slugOf(
-      await must(["create", "task", "--title", "Judge scope task", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"]),
+      await must(["create", "task", "--kind", "code", "--title", "Judge scope task", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"]),
     );
     const taskRun = await lore(["approve", task]);
     expect(taskRun.stderr + taskRun.stdout).not.toContain("review-judgment");

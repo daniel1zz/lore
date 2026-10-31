@@ -103,7 +103,7 @@ async function createPlanWithTasks(anchorsPerTask: string[][]): Promise<{ planId
         title: `Run Owned Task ${index + 1}`,
         parent_id: plan.value.id,
         content: "# Task",
-        extra: { plan_id: plan.value.id, file_anchors: anchors },
+        extra: { kind: "code", plan_id: plan.value.id, file_anchors: anchors },
       } as CreateDocInput);
       if (!task.ok) throw new Error(`task create failed: ${JSON.stringify(task.error)}`);
       taskIds.push(task.value.id);

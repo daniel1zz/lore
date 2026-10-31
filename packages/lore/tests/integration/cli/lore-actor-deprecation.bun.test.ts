@@ -72,7 +72,7 @@ const scratch: string[] = [];
 let dir = "";
 
 function newTask(title: string): string {
-  return JSON.parse(mustLore(["create", "task", "--adhoc", "--title", title, "--ac-scope", "", "--json"], dir, SETUP).stdout).data.slug as string;
+  return JSON.parse(mustLore(["create", "task", "--kind", "code", "--adhoc", "--title", title, "--ac-scope", "", "--json"], dir, SETUP).stdout).data.slug as string;
 }
 
 async function auditSince(since: string): Promise<AuditEntry[]> {

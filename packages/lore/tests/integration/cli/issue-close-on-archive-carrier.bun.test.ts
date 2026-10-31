@@ -244,7 +244,7 @@ async function makeCorpus(issues: readonly StubIssue[]): Promise<Corpus & { prdS
 async function createCarrierTask(corpus: Corpus, title: string, numbers: readonly number[]): Promise<string> {
   const issueArgs = numbers.flatMap((number) => ["--issue", String(number)]);
   return slugOfCreate(
-    (await mustRun(corpus, "setup", ["create", "task", "--adhoc", "--ac-scope", "", "--title", title, "--no-ai", "--content", "Carrier.", ...issueArgs, "--json"])).stdout,
+    (await mustRun(corpus, "setup", ["create", "task", "--kind", "code", "--adhoc", "--ac-scope", "", "--title", title, "--no-ai", "--content", "Carrier.", ...issueArgs, "--json"])).stdout,
   );
 }
 
@@ -352,7 +352,7 @@ describe(`${SPEC}#AC-GS-8: archiving a carrier closes each named issue`, () => {
     async () => {
       const corpus = await makeCorpus(THREE_ISSUES);
       const slug = slugOfCreate(
-        (await mustRun(corpus, "setup", ["create", "task", "--adhoc", "--ac-scope", "", "--title", "No carrier", "--no-ai", "--content", "Plain.", "--json"])).stdout,
+        (await mustRun(corpus, "setup", ["create", "task", "--kind", "code", "--adhoc", "--ac-scope", "", "--title", "No carrier", "--no-ai", "--content", "Plain.", "--json"])).stdout,
       );
       const callsBefore = ghLog(corpus).length;
 

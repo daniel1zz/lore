@@ -62,7 +62,7 @@ function makeBranch(name: string, files: Record<string, string>): string {
       env: { ...process.env, HOME: join(mini.dir, ".home"), EDITOR: "true", CLAUDECODE: "1", ...sessionEnvFor("claim") },
     });
     return { status: r.status ?? 1, out: `${r.stdout}${r.stderr}` };
-  }, mini.dir, name);
+  }, mini.dir, name, "code");
   return name;
 }
 

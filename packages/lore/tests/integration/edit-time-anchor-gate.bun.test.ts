@@ -118,7 +118,7 @@ function buildFixture(): Fixture {
   const newTask = (title: string, anchors: string[]): string =>
     slugOf(
       mustLore(
-        ["create", "task", "--title", title, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", ...anchors.flatMap((a) => ["--anchor", a])],
+        ["create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", ...anchors.flatMap((a) => ["--anchor", a])],
         repo,
       ),
     );

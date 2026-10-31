@@ -106,7 +106,7 @@ function recordPass(task: string): void {
 function createClaimedTask(title: string, branch: string, evidence = true): string {
   taskCounter += 1;
   const task = parseSlug(
-    mustRun(["create", "task", "--title", `${title} ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"]),
+    mustRun(["create", "task", "--kind", "code", "--title", `${title} ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"]),
   );
   mustRun(["claim", task, "--worktree", branch]);
   if (evidence) recordPass(task);

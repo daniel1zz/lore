@@ -479,7 +479,7 @@ describe("GateEnforcer — task-claim (via TaskWorkflowService.claim, default co
       title: "Task-Claim Task",
       parent_id: plan.value.id,
       content: "Task body.",
-      extra: { plan_id: plan.value.id },
+      extra: { kind: "code", plan_id: plan.value.id },
     } as CreateDocInput);
     if (!task.ok) throw new Error(`task create failed: ${JSON.stringify(task.error)}`);
     return { specId: spec.value.id, planId: plan.value.id, taskId: task.value.id };

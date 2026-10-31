@@ -33,7 +33,7 @@ describe("AC-DJ-2 — co-change is judged on the branch's own change", () => {
   it("(1) a trigger without its required file is refused; (2) adding the required file lands, and it is recorded outside the anchors", () => {
     const f = new OwnDiffFixture(RULE);
     fx = f;
-    const task = f.createTask("Assets", ["assets/"]);
+    const task = f.createTask("Assets", ["assets/"], "code");
     f.makeBranch("branch-assets", { "assets/x.txt": "x\n" });
     f.claim(task, "branch-assets");
     const before = f.observableState();
@@ -55,7 +55,7 @@ describe("AC-DJ-2 — co-change is judged on the branch's own change", () => {
   it("(3) a change that does not match the trigger needs no co-change", () => {
     const f = new OwnDiffFixture(RULE);
     fx = f;
-    const task = f.createTask("Docs", ["docs/"]);
+    const task = f.createTask("Docs", ["docs/"], "code");
     f.makeBranch("branch-docs", { "docs/y.txt": "y\n" });
     f.claim(task, "branch-docs");
 

@@ -101,7 +101,7 @@ function makeClaimedTask(dir: string, claimWorktree: string | null = dir): strin
   const spec = slugOf(mustLore(["create", "spec", "--title", "CT3b Spec", "--no-ai", "--content", "## Overview\nbody", "--json"], dir));
   const plan = slugOf(mustLore(["create", "plan", "--title", "CT3b Plan", "--parent", spec, "--no-ai", "--content", "body", "--json"], dir));
   const task = slugOf(
-    mustLore(["create", "task", "--title", "CT3b Task", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body", "--json"], dir),
+    mustLore(["create", "task", "--kind", "code", "--title", "CT3b Task", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body", "--json"], dir),
   );
   mustLore(claimWorktree === null ? ["claim", task] : ["claim", task, "--worktree", claimWorktree], dir);
   return task;

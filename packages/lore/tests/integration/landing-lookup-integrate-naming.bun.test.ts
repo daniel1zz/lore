@@ -126,7 +126,7 @@ async function fixture(recordsBranch: boolean): Promise<Fixture> {
   const plan = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Landing name plan", content: "body" } as CreateDocInput);
   if (!plan.ok) throw new Error("plan");
   const task = await cs.create({
-    type: "task", title: "Landing name task", parent_id: plan.value.id, content: "body", extra: { plan_id: plan.value.id },
+    type: "task", title: "Landing name task", parent_id: plan.value.id, content: "body", extra: { kind: "code", plan_id: plan.value.id },
   } as CreateDocInput);
   if (!task.ok) throw new Error("task");
   const claim = await svc.claim(task.value.id, { by: "alice", harnessRun: runOfName("alice"), worktree: realWorktree });

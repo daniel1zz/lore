@@ -232,6 +232,8 @@ function createTask(planSlug: string, title: string, acScope: readonly string[] 
   const args = [
     "create",
     "task",
+    "--kind",
+    "code",
     "--title",
     title,
     "--parent",
@@ -644,7 +646,7 @@ describe("lore evidence — forged --attestation is rejected outright (SPEC-051 
 
 /** Create a SPEC-069 `--adhoc` task (no --parent/--plan-id), declaring `acScope` via `--ac-scope`. */
 function createAdhocTask(title: string, acScope: readonly string[] = [], governingSpec?: string): string {
-  const args = ["create", "task", "--title", title, "--adhoc", "--no-ai", "--content", "body"];
+  const args = ["create", "task", "--kind", "code", "--title", title, "--adhoc", "--no-ai", "--content", "body"];
   for (const acId of acScope) args.push("--ac-scope", acId);
   // BR-118: a non-empty scope records its governing spec.
   if (governingSpec !== undefined) args.push("--spec", governingSpec);

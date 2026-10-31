@@ -169,7 +169,7 @@ export async function createCorpus(opts: { claimGates?: "enabled" | "disabled" }
       if (kind === "task") {
         return slugOf(
           mustRun(
-            ["create", "task", "--title", `RID Task ${counter}`, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", ...anchors.flatMap((a) => ["--anchor", a])],
+            ["create", "task", "--kind", "code", "--title", `RID Task ${counter}`, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", ...anchors.flatMap((a) => ["--anchor", a])],
             dir,
           ).stdout,
         );

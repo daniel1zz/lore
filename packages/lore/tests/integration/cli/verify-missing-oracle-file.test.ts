@@ -118,7 +118,7 @@ describe("lore verify / ac list / done over an AC whose oracle file is missing",
     );
     plan = extractSlug(mustRun(["create", "plan", "--title", "Missing Oracle Plan", "--parent", spec, "--no-ai", "--content", "body"], dir));
     task = extractSlug(
-      mustRun(["create", "task", "--title", "Missing Oracle Task", "--parent", plan, "--plan-id", plan, "--ac-scope", AC_ID, "--no-ai", "--content", "body"], dir),
+      mustRun(["create", "task", "--kind", "code", "--title", "Missing Oracle Task", "--parent", plan, "--plan-id", plan, "--ac-scope", AC_ID, "--no-ai", "--content", "body"], dir),
     );
     commitAll(dir, "fixture");
   }, 180_000);
@@ -197,7 +197,7 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
   };
   const newTask = (title: string, scope: string[]): string => {
     const slug = extractSlug(
-      mustRun(["create", "task", "--title", title, "--parent", plan, "--plan-id", plan, "--ac-scope", scope[0] as string, "--no-ai", "--content", "body"], dir),
+      mustRun(["create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--ac-scope", scope[0] as string, "--no-ai", "--content", "body"], dir),
     );
     for (const extra of scope.slice(1)) mustRun(["scope", "add", slug, extra], dir);
     return slug;

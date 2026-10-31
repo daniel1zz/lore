@@ -185,7 +185,7 @@ function parseCreatedSlug(stdout: string): string {
 
 function createDoc(cwd: string, type: string, title: string, extraArgs: readonly string[]): string {
   const result = runLoreOk(
-    ["create", type, "--title", title, "--content", `${title} body.`, "--no-ai", ...extraArgs],
+    ["create", type, "--title", title, "--content", `${title} body.`, "--no-ai", ...(type === "task" ? ["--kind", "code"] : []), ...extraArgs],
     cwd,
   );
   return parseCreatedSlug(result.stdout);

@@ -83,7 +83,7 @@ let counter = 0;
 function createTask(title: string): string {
   counter += 1;
   return parseSlug(
-    mustRun(["create", "task", "--title", `${title} ${counter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"], dir),
+    mustRun(["create", "task", "--kind", "code", "--title", `${title} ${counter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"], dir),
   );
 }
 

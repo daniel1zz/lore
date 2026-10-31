@@ -110,7 +110,7 @@ async function seedFixture(): Promise<Seeded> {
     ids[key] = data.id;
     slugs[key] = data.slug;
   };
-  const adhoc = (title: string): string[] => ["task", "--adhoc", "--ac-scope", "", "--title", title, "--content", `${title} body.`];
+  const adhoc = (title: string): string[] => ["task", "--kind", "code", "--adhoc", "--ac-scope", "", "--title", title, "--content", `${title} body.`];
 
   await create("spec", ["spec", "--title", "Migration spec", "--content", "## Overview\n\nBody."]);
   await create("planLive", ["plan", "--title", "Live plan", "--parent", slugs["spec"] ?? "", "--content", "Plan."]);

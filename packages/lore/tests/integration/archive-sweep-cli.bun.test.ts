@@ -150,6 +150,8 @@ describe("lore archive — HAPPY/STATE (sweep -> apply -> re-sweep)", () => {
       [
         "create",
         "task",
+        "--kind",
+        "code",
         "--title",
         "Straggler Task",
         "--parent",
@@ -224,7 +226,7 @@ describe("lore archive — NEGATIVE/STATE (a floor-refused straggler stays open;
     // Straggler with NO evidence: `lore done` would refuse it with floor `attested-pass`.
     const taskSlug = parseSlug(
       runLore(
-        ["create", "task", "--title", "Bare Straggler", "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"],
+        ["create", "task", "--kind", "code", "--title", "Bare Straggler", "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"],
         tmpDir,
       ).stdout,
     );

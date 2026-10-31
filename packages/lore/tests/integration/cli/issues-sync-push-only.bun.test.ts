@@ -249,7 +249,7 @@ async function makeFixture(): Promise<{ fixture: Fixture; slugs: { forty: string
   await mustRun(fixture, "setup", ["create", "prd", "--title", "Sync Fixture PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"]);
   const createCarrier = async (title: string, issue: number): Promise<string> =>
     slugOfCreate(
-      (await mustRun(fixture, "setup", ["create", "task", "--adhoc", "--ac-scope", "", "--title", title, "--no-ai", "--content", "Carrier.", "--issue", String(issue), "--json"])).stdout,
+      (await mustRun(fixture, "setup", ["create", "task", "--kind", "code", "--adhoc", "--ac-scope", "", "--title", title, "--no-ai", "--content", "Carrier.", "--issue", String(issue), "--json"])).stdout,
     );
   const forty = await createCarrier("Carrier of forty", 40);
   const fortyTwo = await createCarrier("Carrier of forty-two", 42);

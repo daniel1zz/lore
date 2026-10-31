@@ -482,7 +482,7 @@ function buildFixtureA(): FixtureACaptures {
   );
   mustSucceed(
     // eslint-disable-next-line prettier/prettier -- one argv, kept on one logical line
-    ["create", "task", "--title", "Row Contract Task", "--content", "Task body.", "--parent", A_PLAN, "--plan-id", A_PLAN, "--phase", A_PHASE],
+    ["create", "task", "--kind", "code", "--title", "Row Contract Task", "--content", "Task body.", "--parent", A_PLAN, "--plan-id", A_PLAN, "--phase", A_PHASE],
     dir,
   );
 
@@ -569,7 +569,7 @@ function buildFixtureB(): FixtureBCaptures {
   );
   mustSucceed(["link", B_SKILL, B_PLAN, "--type", "governs"], dir);
   mustSucceed(
-    ["create", "task", "--title", "Row Contract Task B", "--content", "Task body.", "--parent", B_PLAN, "--plan-id", B_PLAN],
+    ["create", "task", "--kind", "code", "--title", "Row Contract Task B", "--content", "Task body.", "--parent", B_PLAN, "--plan-id", B_PLAN],
     dir,
   );
 

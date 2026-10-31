@@ -76,7 +76,7 @@ describe(`${SPEC}#AC-GS-6 resolve writes only GitHub, idempotent, exit kind on p
       ],
       { dirsToClean, pageSize: 5 },
     );
-    const created = await fixture.run(["create", "task", "--adhoc", "--ac-scope", "", "--title", "Carrier of nine", "--no-ai", "--content", "Carrier.", "--issue", "9", "--json"], "setup");
+    const created = await fixture.run(["create", "task", "--kind", "code", "--adhoc", "--ac-scope", "", "--title", "Carrier of nine", "--no-ai", "--content", "Carrier.", "--issue", "9", "--json"], "setup");
     expect(created.exitCode, created.stderr).toBe(0);
     carrierSlug = (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
     Object.assign(countsBefore, fixture.counts());
@@ -234,7 +234,7 @@ describe("AC-IL-10 an issue whose naming work is archived is not given a verdict
   beforeAll(async () => {
     fixture = await makeIssueFixture([{ number: PENDING }, { number: FIXED }], { dirsToClean });
     for (const n of [PENDING, FIXED]) {
-      const created = await fixture.run(["create", "task", "--adhoc", "--ac-scope", "", "--title", `Carrier of ${n}`, "--no-ai", "--content", "Carrier.", "--issue", String(n), "--json"], "setup");
+      const created = await fixture.run(["create", "task", "--kind", "code", "--adhoc", "--ac-scope", "", "--title", `Carrier of ${n}`, "--no-ai", "--content", "Carrier.", "--issue", String(n), "--json"], "setup");
       expect(created.exitCode, created.stderr + created.stdout).toBe(0);
       const slug = (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
       slugs[n] = slug;

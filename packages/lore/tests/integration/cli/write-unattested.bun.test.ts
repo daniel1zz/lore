@@ -159,7 +159,7 @@ const warningLinesNaming = (stderr: string, id: string): string[] => stderr.spli
 const runWarningLines = (stderr: string): string[] => stderr.split("\n").filter((l) => /harness[- _]?run|unattested|not registered|unknown run/i.test(l));
 
 function newTask(dir: string, title: string): string {
-  return JSON.parse(mustLore(["create", "task", "--adhoc", "--title", title, "--ac-scope", "", "--json"], dir, { CLAUDE_CODE_SESSION_ID: "5e7a0000-aaaa-bbbb-cccc-111111111111" }).stdout).data.slug as string;
+  return JSON.parse(mustLore(["create", "task", "--kind", "code", "--adhoc", "--title", title, "--ac-scope", "", "--json"], dir, { CLAUDE_CODE_SESSION_ID: "5e7a0000-aaaa-bbbb-cccc-111111111111" }).stdout).data.slug as string;
 }
 
 // ─── Unknown run id: the write is refused and writes nothing (superseded "stored unattested", BR-1351) ───

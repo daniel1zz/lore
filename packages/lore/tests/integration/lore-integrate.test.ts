@@ -202,7 +202,7 @@ class Fixture {
     claimBranchTask((args) => {
       const r = spawnSync("bun", ["run", INDEX_TS, ...args], { cwd: this.repo, env: this.env("claim"), encoding: "utf8" });
       return { status: r.status ?? 1, out: `${r.stdout}${r.stderr}` };
-    }, this.repo, branch);
+    }, this.repo, branch, "code");
   }
 
   main(): string {

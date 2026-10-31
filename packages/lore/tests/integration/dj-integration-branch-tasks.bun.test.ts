@@ -27,10 +27,10 @@ describe("AC-DJ-3 — an integration branch is judged against its plan's tasks",
     const f = new OwnDiffFixture();
     fx = f;
     f.commitOnMain({ "src/a.ts": "export const a = 1;\n", "src/b.ts": "export const b = 1;\n", "src/z.ts": "export const z = 1;\n" }, "base sources");
-    const t1 = f.createTask("T1", ["src/a.ts"]);
-    const t2 = f.createTask("T2", ["src/b.ts"]);
+    const t1 = f.createTask("T1", ["src/a.ts"], "code");
+    const t2 = f.createTask("T2", ["src/b.ts"], "code");
     const otherPlan = f.createPlan("Other plan");
-    const u = f.createTask("U", ["src/z.ts"], otherPlan);
+    const u = f.createTask("U", ["src/z.ts"], "code", otherPlan);
     f.makeBranch("t1-branch", { "src/a.ts": "export const a = 2;\n" });
     f.makeBranch("t2-branch", { "src/b.ts": "export const b = 2;\n" });
     f.makeBranch("branch-y", { "y.txt": "y\n" });

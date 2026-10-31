@@ -156,6 +156,8 @@ describe("lore verify — ac_scope ABSENT + explicit --ac (AC-ACS-6, back-catalo
       [
         "create",
         "task",
+        "--kind",
+        "code",
         "--title",
         "Pre-Rule Task",
         "--parent",
@@ -233,6 +235,8 @@ describe("lore verify — a task created under this rule is attested end-to-end 
       [
         "create",
         "task",
+        "--kind",
+        "code",
         "--title",
         "Rule-Compliant Task",
         "--parent",

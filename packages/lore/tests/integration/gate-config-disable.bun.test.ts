@@ -122,6 +122,8 @@ function createSpecParentedPlanAndTask(tmpDir: string): {
       [
         "create",
         "task",
+        "--kind",
+        "code",
         "--title",
         "Gate Config Disable Task",
         "--parent",
@@ -261,6 +263,8 @@ function createTopLevelPlanWithOverlappingAnchorTasks(tmpDir: string): {
       [
         "create",
         "task",
+        "--kind",
+        "code",
         "--title",
         "Anchor Overlap Config Task A",
         "--parent",
@@ -281,6 +285,8 @@ function createTopLevelPlanWithOverlappingAnchorTasks(tmpDir: string): {
       [
         "create",
         "task",
+        "--kind",
+        "code",
         "--title",
         "Anchor Overlap Config Task B",
         "--parent",

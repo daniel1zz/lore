@@ -108,7 +108,7 @@ const slugOfCreate = (stdout: string): string => (JSON.parse(stdout) as { data: 
 
 async function createTaskCarrier(corpus: Corpus, title: string, issue: number): Promise<string> {
   return slugOfCreate(
-    (await mustRun(corpus, ["create", "task", "--adhoc", "--ac-scope", "", "--title", title, "--no-ai", "--content", "Carrier.", "--issue", String(issue), "--json"])).stdout,
+    (await mustRun(corpus, ["create", "task", "--kind", "code", "--adhoc", "--ac-scope", "", "--title", title, "--no-ai", "--content", "Carrier.", "--issue", String(issue), "--json"])).stdout,
   );
 }
 

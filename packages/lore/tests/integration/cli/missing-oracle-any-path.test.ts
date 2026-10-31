@@ -129,7 +129,7 @@ beforeAll(async () => {
   await addScriptAc("AC-EI2-U", "python3 check.py && echo done");
   await mustRun(["create", "plan", "--title", "EI2 Plan", "--parent", SPEC, "--no-ai", "--content", "body"]);
   await mustRun([
-    "create", "task", "--title", "EI2 Task", "--parent", PLAN, "--plan-id", PLAN, "--no-ai", "--content", "body",
+    "create", "task", "--kind", "code", "--title", "EI2 Task", "--parent", PLAN, "--plan-id", PLAN, "--no-ai", "--content", "body",
     "--ac-scope", "AC-EI2-A", "--ac-scope", "AC-EI2-B", "--ac-scope", "AC-EI2-C",
   ]);
 }, 240_000);

@@ -47,7 +47,7 @@ describe("AC-LB-3 — anchors follow moved files at landing", () => {
 
     // (1) branch X renames src/x.ts to src/y.ts
     f.makeBranch("branch-x", { "src/x.ts": null, "src/y.ts": X_SOURCE });
-    const taskX = f.createTask("TX", ["src/y.ts", "src/x.ts"]);
+    const taskX = f.createTask("TX", ["src/y.ts", "src/x.ts"], "code");
     f.claim(taskX, "branch-x");
     const versionBefore = versionOf(f, spec);
 
@@ -60,7 +60,7 @@ describe("AC-LB-3 — anchors follow moved files at landing", () => {
 
     // (2) branch W deletes src/z.ts, which the spec anchors
     f.makeBranch("branch-w", { "src/z.ts": null });
-    const taskW = f.createTask("TW", ["src/z.ts"]);
+    const taskW = f.createTask("TW", ["src/z.ts"], "code");
     f.claim(taskW, "branch-w");
     const before = f.observableState();
 
@@ -95,7 +95,7 @@ describe("AC-LB-3 — anchors follow moved files at landing", () => {
     );
     const bystanderVersion = versionOf(f, bystander);
     f.makeBranch("branch-r", { "src/w.ts": null, "src/w2.ts": "export const w = 1;\n" });
-    const task = f.createTask("TR", ["src/w2.ts"]);
+    const task = f.createTask("TR", ["src/w2.ts"], "code");
     f.claim(task, "branch-r");
 
     const landed = f.integrate("branch-r");

@@ -196,6 +196,8 @@ function buildFixture(): Fixture {
           [
             "create",
             "task",
+            "--kind",
+            "code",
             "--title",
             `CSL Task ${n}`,
             "--parent",
@@ -293,7 +295,7 @@ describe("claim-scoped corpus authoring from a worktree (AC-BLS2-8)", () => {
     const actor = "agent:csl-unscoped";
     const taskSlug = slugOf(
       mustRun(
-        ["create", "task", "--title", "CSL Task unscoped", "--parent", fx.plan, "--plan-id", fx.plan, "--content", "x", "--no-ai"],
+        ["create", "task", "--kind", "code", "--title", "CSL Task unscoped", "--parent", fx.plan, "--plan-id", fx.plan, "--content", "x", "--no-ai"],
         fx.repo,
       ).stdout,
     );
@@ -308,7 +310,7 @@ describe("claim-scoped corpus authoring from a worktree (AC-BLS2-8)", () => {
     const mk = (n: string) =>
       slugOf(
         mustRun(
-          ["create", "task", "--title", `CSL Task par ${n}`, "--parent", fx.plan, "--plan-id", fx.plan, "--content", "x", "--no-ai"],
+          ["create", "task", "--kind", "code", "--title", `CSL Task par ${n}`, "--parent", fx.plan, "--plan-id", fx.plan, "--content", "x", "--no-ai"],
           fx.repo,
         ).stdout,
       );

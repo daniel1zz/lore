@@ -78,7 +78,7 @@ function createTask(label: string): string {
   counter += 1;
   return slugOf(
     mustRun(
-      ["create", "task", "--title", `VWT Task ${label} ${counter}`, "--parent", plan, "--plan-id", plan, "--content", "x", "--ac-scope", AC_ID, "--no-ai"],
+      ["create", "task", "--kind", "code", "--title", `VWT Task ${label} ${counter}`, "--parent", plan, "--plan-id", plan, "--content", "x", "--ac-scope", AC_ID, "--no-ai"],
       repo,
     ).stdout,
   );

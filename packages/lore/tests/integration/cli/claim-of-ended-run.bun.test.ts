@@ -118,7 +118,7 @@ describe("AC-RV-10: a claim ends with its run", () => {
       title: "Ended Claim Task",
       parent_id: plan.value.id,
       content: "# Task",
-      extra: { plan_id: plan.value.id },
+      extra: { kind: "code", plan_id: plan.value.id },
     } as CreateDocInput);
     if (!task.ok) throw new Error(`task: ${JSON.stringify(task.error)}`);
     taskSlug = task.value.slug;

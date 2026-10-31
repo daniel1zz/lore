@@ -142,7 +142,7 @@ function armBlueprint(): void {
 
 function createDoc(type: string, extraArgs: string[]): string {
   const r = runLore(
-    ["create", type, "--title", `${type} fixture`, "--no-ai", "--content", "body", ...extraArgs],
+    ["create", type, "--title", `${type} fixture`, "--no-ai", "--content", "body", ...(type === "task" ? ["--kind", "code"] : []), ...extraArgs],
     tmpDir,
   );
   if (r.exitCode !== 0) throw new Error(`create ${type} failed: ${r.stderr}`);

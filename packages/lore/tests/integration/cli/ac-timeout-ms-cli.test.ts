@@ -158,7 +158,7 @@ describe("lore ac add|set --timeout-ms", () => {
     );
     const planSlug = extractSlug(mustRun(["create", "plan", "--title", "Timeout Plan", "--parent", spec, "--no-ai", "--content", "body"], tmpDir));
     const taskSlug = extractSlug(
-      mustRun(["create", "task", "--title", "Timeout Task", "--parent", planSlug, "--plan-id", planSlug, "--ac-scope", acId, "--no-ai", "--content", "body"], tmpDir),
+      mustRun(["create", "task", "--kind", "code", "--title", "Timeout Task", "--parent", planSlug, "--plan-id", planSlug, "--ac-scope", acId, "--no-ai", "--content", "body"], tmpDir),
     );
     execFileSync("git", ["add", "-A"], { cwd: tmpDir });
     execFileSync("git", [...GIT_AUTHOR_ARGS, "commit", "-q", "-m", "corpus state"], { cwd: tmpDir });

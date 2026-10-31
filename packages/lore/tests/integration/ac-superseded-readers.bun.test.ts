@@ -78,7 +78,7 @@ async function addScriptAc(spec: string, acId: string): Promise<void> {
 async function createTask(title: string, scope: readonly string[]): Promise<string> {
   const slug = slugOf(
     await must([
-      "create", "task", "--title", title, "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body",
+      "create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body",
       ...scope.flatMap((id) => ["--ac-scope", id]),
     ]),
   );

@@ -97,7 +97,7 @@ function createTask(title: string, extra: string[] = []): string {
   taskCounter += 1;
   return parseSlug(
     mustRun(
-      ["create", "task", "--title", `${title} ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai", ...extra],
+      ["create", "task", "--kind", "code", "--title", `${title} ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai", ...extra],
       dir,
     ),
   );
@@ -242,7 +242,7 @@ describe("AC-DCL-1 (e) — per criterion the latest attested result decides", ()
     mustRun(["ac", "add", spec, "AC-LATEST-1", "--statement", "A criterion.", "--mode", "script", "--oracle", "other", "--command", "true"], dir);
     const plan = parseSlug(mustRun(["create", "plan", "--title", "Latest Plan", "--parent", spec, "--content", "x", "--no-ai"], dir));
     const task = parseSlug(
-      mustRun(["create", "task", "--title", "Latest Task", "--parent", plan, "--plan-id", plan, "--ac-scope", "AC-LATEST-1", "--content", "x", "--no-ai"], dir),
+      mustRun(["create", "task", "--kind", "code", "--title", "Latest Task", "--parent", plan, "--plan-id", plan, "--ac-scope", "AC-LATEST-1", "--content", "x", "--no-ai"], dir),
     );
     mustRun(["evidence", task, "--oracle", "test", "--command", "echo '1 fail' && echo 'Ran 3 tests across 1 files' && false", "--result", "expected-fail", "--ac", "AC-LATEST-1", "--capture"], dir);
     mustRun(["evidence", task, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--ac", "AC-LATEST-1", "--capture"], dir);
@@ -267,7 +267,7 @@ describe("AC-DCL-1 (e) — per criterion the latest attested result decides", ()
 
 function createTaskUnder(plan: string, title: string, acScope: string): string {
   return parseSlug(
-    mustRun(["create", "task", "--title", title, "--parent", plan, "--plan-id", plan, "--ac-scope", acScope, "--content", "x", "--no-ai"], dir),
+    mustRun(["create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--ac-scope", acScope, "--content", "x", "--no-ai"], dir),
   );
 }
 

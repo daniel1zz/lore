@@ -247,7 +247,7 @@ async function planAndTask(s: Svc): Promise<{ planId: string; taskSlug: string; 
   const plan = await mkDoc(s, { type: "plan", title: "Matrix plan", content: "body" }, SETUP_BY);
   const task = await mkDoc(
     s,
-    { type: "task", title: "Matrix task", parent_id: plan.id, content: "body", extra: { plan_id: plan.id } },
+    { type: "task", title: "Matrix task", parent_id: plan.id, content: "body", extra: { kind: "code", plan_id: plan.id } },
     SETUP_BY,
   );
   return { planId: plan.id, taskSlug: task.slug, taskId: task.id };
@@ -587,7 +587,7 @@ describe("CLI chokepoint: `LORE_HARNESS_RUN=R lore <write>` (name N from the ses
   beforeAll(() => {
     dir = corpusDir("attr-matrix-cli-");
     task = JSON.parse(
-      mustLore(["create", "task", "--adhoc", "--title", "Matrix CLI task", "--ac-scope", "", "--json"], dir, sessionEnvFor("agent:matrix-setup")).stdout,
+      mustLore(["create", "task", "--kind", "code", "--adhoc", "--title", "Matrix CLI task", "--ac-scope", "", "--json"], dir, sessionEnvFor("agent:matrix-setup")).stdout,
     ).data.slug as string;
   });
 

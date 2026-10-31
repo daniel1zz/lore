@@ -136,7 +136,7 @@ function buildFixture(dir: string): Fixture {
   const createTask = (title: string): string =>
     parseSlug(
       mustRun(
-        ["create", "task", "--title", title, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"],
+        ["create", "task", "--kind", "code", "--title", title, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"],
         dir,
       ),
     );

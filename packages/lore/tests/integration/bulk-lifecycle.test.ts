@@ -86,7 +86,7 @@ let counter = 0;
 function createTask(title: string): string {
   counter += 1;
   const r = runLore(
-    ["create", "task", "--title", `${title} ${counter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"],
+    ["create", "task", "--kind", "code", "--title", `${title} ${counter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"],
     tmpDir,
   );
   expect(r.exitCode, `${r.stdout}\n${r.stderr}`).toBe(0);
@@ -202,7 +202,7 @@ describe("bulk lifecycle: preview then apply", () => {
     const other = runLore(["create", "plan", "--title", "Other Plan", "--parent", prdSlug, "--content", "x", "--no-ai"], tmpDir);
     const otherSlug = slugOf(other.stdout);
     const foreign = runLore(
-      ["create", "task", "--title", "Foreign", "--parent", otherSlug, "--plan-id", otherSlug, "--content", "x", "--no-ai"],
+      ["create", "task", "--kind", "code", "--title", "Foreign", "--parent", otherSlug, "--plan-id", otherSlug, "--content", "x", "--no-ai"],
       tmpDir,
     );
     const foreignSlug = slugOf(foreign.stdout);

@@ -144,7 +144,7 @@ async function makeTask(app: App, plan: DocRecord, title: string): Promise<DocRe
     title,
     parent_id: plan.id,
     content: "## Task\n\nbody",
-    extra: { plan_id: plan.id },
+    extra: { kind: "check", plan_id: plan.id },
   } as CreateDocInput);
 }
 

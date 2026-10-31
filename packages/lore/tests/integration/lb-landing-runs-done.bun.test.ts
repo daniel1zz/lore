@@ -39,7 +39,7 @@ describe("AC-LB-4 — landing archives tasks whose floors are met", () => {
     fx = f;
     f.commitOnMain(BASE, "base sources");
     f.makeBranch("branch-x", { "src/a.ts": "export const a = 2;\n" });
-    const task = f.createTask("T", ["src/a.ts", "tests/a.test.ts"]);
+    const task = f.createTask("T", ["src/a.ts", "tests/a.test.ts"], "code");
     f.claim(task, "branch-x");
     f.mustLore(["evidence", task, "--oracle", "test", "--command", "bun test tests/a.test.ts", "--result", "pass", "--capture"], f.holderEnvOf(task));
     f.release(task);
@@ -56,7 +56,7 @@ describe("AC-LB-4 — landing archives tasks whose floors are met", () => {
     fx = f;
     f.commitOnMain(BASE, "base sources");
     f.makeBranch("branch-x2", { "src/a.ts": "export const a = 3;\n" });
-    const task = f.createTask("T2", ["src/a.ts", "tests/b.test.ts"]);
+    const task = f.createTask("T2", ["src/a.ts", "tests/b.test.ts"], "code");
     f.claim(task, "branch-x2");
     f.mustLore(["evidence", task, "--oracle", "test", "--command", 'bun test tests/b.test.ts -t "b case"', "--result", "pass", "--capture"], f.holderEnvOf(task));
     f.release(task);
