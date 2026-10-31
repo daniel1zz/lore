@@ -473,11 +473,13 @@ const DECLARED_FILES = [
   "context/decision-records.md",
   // seed document templates (spec-every-document-is-stored-as-structured-fields-validated-by): binary-read, never installed
   "templates/adr.json",
+  "templates/plan.json",
   "templates/prd.json",
   "templates/spec-design.json",
   "templates/spec-domain-overview.json",
   "templates/spec-feature.json",
   "templates/spec-tech.json",
+  "templates/task.json",
   // governance
   "governance/seat-briefing.md",
   "governance/claude-md-contract.md",

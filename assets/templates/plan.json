@@ -17,6 +17,7 @@
       "spec_ref": {
         "type": "string",
         "minLength": 1,
+        "x-ref": true,
         "description": "Slug of the spec this plan implements."
       },
       "issues": {

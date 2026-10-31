@@ -43,6 +43,7 @@ describe("seed template plan", () => {
       expect(p[f], f).toBeDefined();
     }
     expect(p.goal!["x-goal"]).toBe(true);
+    expect(p.spec_ref!["x-ref"]).toBe(true);
     expect(p.task_criteria_map!["x-ref-list"]).toBe(true);
   });
   it("HAPPY: dimensions are ordering, criteria-coverage, close-condition, concurrency, cost; coverage needs refs", () => {
@@ -87,6 +88,7 @@ describe("seed template task", () => {
     expect(required(task)).not.toContain("write_set");
     expect(p.kind!.enum).toEqual(["code", "check", "corpus"]);
     expect(p.ac_scope!["x-ref-list"]).toBe(true);
+    expect(p.spec_ref!["x-ref"]).toBe(true);
   });
   it("HAPPY: dimensions are done-condition, red-first, scope-boundary, concurrency, rollback", () => {
     expect(task.dimensions.map((d) => d.id)).toEqual(["done-condition", "red-first", "scope-boundary", "concurrency", "rollback"]);
