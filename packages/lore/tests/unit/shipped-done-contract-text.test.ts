@@ -1,6 +1,10 @@
 // @reads assets/**
 // @reads CLAUDE.md
 // @reads packages/lore/src/generated/assets-manifest.ts
+// @reads packages/lore/package.json
+// @reads scripts/agent-hygiene-allowlist.json
+// @reads packages/lore/src/adapters/cli/CLAUDE.md
+// @reads packages/lore/src/service/CLAUDE.md
 // @spawns dist/lore -- the command-existence cases run the compiled binary's --help for every command the shipped text names
 /**
  * Shipped done-contract text (spec-done-contract-compiled-at-approve-task-kinds-write-sets, AC-DCS1-24).
