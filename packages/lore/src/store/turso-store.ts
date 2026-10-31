@@ -4391,16 +4391,6 @@ export class TursoStore implements StoreInterface {
     }
   }
 
-  async listLeases(prefix: string): Promise<Result<LeaseRecord[], LoreError>> {
-    try {
-      await this.ensureReady();
-      const rs = await this.client.execute({ sql: "SELECT name, holder, expires_at FROM review_leases WHERE substr(name, 1, length(?)) = ? ORDER BY name", args: [prefix, prefix] });
-      return ok(rs.rows.map((row) => ({ name: rowStr(row, "name"), holder: rowStr(row, "holder"), expires_at: rowStr(row, "expires_at") })));
-    } catch (e) {
-      return wrapStoreError(e);
-    }
-  }
-
   async listReadCounts(sinceDay: string): Promise<Result<ReadDayCount[], LoreError>> {
     try {
       await this.ensureReady();
