@@ -351,8 +351,9 @@ describe("lore verify — NEGATIVE", () => {
     const taskA = createTask(planSlug, "Task A");
     const taskB = createTask(planSlug, "Task B");
 
-    runLore(["claim", taskA], tmpDir, { CLAUDE_CODE_SESSION_ID: sessionIdFor("alice") });
-    runLore(["claim", taskB], tmpDir, { CLAUDE_CODE_SESSION_ID: sessionIdFor("bob") });
+    // a code task is claimed on a branch of its own (AC-DCS1-14)
+    runLore(["claim", taskA, "--worktree", `wt-${taskA}`], tmpDir, { CLAUDE_CODE_SESSION_ID: sessionIdFor("alice") });
+    runLore(["claim", taskB, "--worktree", `wt-${taskB}`], tmpDir, { CLAUDE_CODE_SESSION_ID: sessionIdFor("bob") });
 
     const result = runLore(["verify", planSlug], tmpDir);
 

@@ -34,6 +34,9 @@ import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { installShippedGuard } from "../support/main-guard-repo.js";
+import { createApp } from "../../../src/app.js";
+import { liveAmbient, liveWriteContext } from "../../live-invocation.js";
+import { FIXTURE_DONE_CONTRACT_CONFIG, landTask, recordContractPasses, type TaskWorld } from "../support/land-task.js";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..");
 const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
@@ -82,13 +85,37 @@ describe("done removes the recorded worktree (#106)", () => {
   }
 
   /** New task, linked worktree on a fresh branch, claim recording that worktree, evidence floor. */
-  function makeClaimed(name: string): Case {
+  const world: TaskWorld = {
+    get dir() {
+      return repo;
+    },
+    git: (args) => mustOk(git(repo, ...args), `git ${args.join(" ")}`).stdout.trim(),
+    lore: (args) => {
+      const r = lore([...args]);
+      return { exitCode: r.status ?? -1, stdout: r.stdout, stderr: r.stderr };
+    },
+  };
+  const SESSION = "wtc";
+  let spec = "";
+
+  /**
+   * New approved code task (red run waived: not this file's subject), claimed on a linked worktree recording its PATH, and, per `stage`:
+   * `claimed` stops after the claim (the test commits, lands and attests as it needs), `landed` commits once, lands the branch with the
+   * landing record and records a runner pass for every contract oracle.
+   */
+  async function makeClaimed(name: string, stage: "claimed" | "landed" = "landed"): Promise<Case> {
     const path = join(parent, `wt-${name}`);
     const branch = `wt-${name}`;
-    const created = mustOk(lore(["create", "task", "--kind", "code", "--adhoc", "--title", `Cleanup case ${name}`, "--ac-scope", "", "--json"]), `create ${name}`);
+    const created = mustOk(
+      lore(["create", "task", "--kind", "code", "--adhoc", "--spec", spec, "--title", `Cleanup case ${name}`, "--content", "Throwaway task.", "--no-ai", "--ac-scope", "", "--json"]),
+      `create ${name}`,
+    );
     const slug = JSON.parse(created.stdout).data.slug as string;
-    mustOk(git(repo, "worktree", "add", "-q", "-b", branch, path), `worktree add ${name}`);
-    mustOk(lore(["claim", slug, "--worktree", path]), `claim ${name}`);
+    if (stage === "landed") {
+      await landTask(world, { slug, branch, worktree: path, claimValue: "path", session: SESSION });
+    } else {
+      await landTask(world, { slug, branch, worktree: path, claimValue: "path", session: SESSION, land: false });
+    }
     return { slug, path, branch };
   }
 
@@ -115,16 +142,12 @@ describe("done removes the recorded worktree (#106)", () => {
     mustOk(lore(["integrate", c.branch, "--session", "wtc-fixture-session"]), `integrate ${c.branch}`);
   }
 
-  /** Evidence floor `lore done` needs: an attested (runner-captured) pass. */
-  function recordEvidence(c: Case): void {
-    mustOk(
-      lore(["evidence", c.slug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"]),
-      `evidence ${c.slug}`,
-    );
+  /** Evidence floor `lore done` needs: a runner-captured pass for every oracle of the task's stored contract. */
+  async function recordEvidence(c: Case): Promise<void> {
+    await recordContractPasses(world, c.slug, SESSION);
   }
 
-  const done = (c: Case, env: Record<string, string> = {}): Run =>
-    lore(["done", c.slug, "--declare-no-new-tests", "worktree cleanup fixture: no tests for this throwaway task"], env);
+  const done = (c: Case, env: Record<string, string> = {}): Run => lore(["done", c.slug], env);
 
   const worktreeLine = (r: Run): string => {
     const m = /^worktree:.*$/m.exec(r.stdout) ?? /^worktree:.*$/m.exec(r.out);
@@ -144,7 +167,7 @@ describe("done removes the recorded worktree (#106)", () => {
   let unclaimedPath = "";
   let unclaimedBranch = "";
 
-  beforeAll(() => {
+  beforeAll(async () => {
     parent = realpathSync(mkdtempSync(join(tmpdir(), "lore-wtc-done-")));
     repo = join(parent, "repo");
     mkdirSync(repo);
@@ -157,61 +180,71 @@ describe("done removes the recorded worktree (#106)", () => {
     mustOk(lore(["init"]), "lore init");
     // `lore integrate` keeps its own worktree under `.claude/` and needs the floor key; neither may dirty the tree
     appendFileSync(join(repo, ".git", "info", "exclude"), ".claude/\n.lore/integrate-attempts/\n.lore/integrate-losses/\n");
-    patchLoreConfig(repo, 'workflow:\n  integrate:\n    floor_command: "true"\n');
+    // approve compiles each fixture task's contract from these commands (a code task needs all three); the claim gate wants an approved
+    // spec and a spec approval wants a review judgment, neither is this file's subject
+    patchLoreConfig(repo, {
+      workflow: {
+        integrate: { floor_command: "true" },
+        done_contract: { ...FIXTURE_DONE_CONTRACT_CONFIG },
+        gates: { "task-claim": { enabled: false } },
+        review: { judgment_required_types: [] },
+      },
+    });
     // reason: `lore init` arms state binding (AC-CT-3); a captured pass on a dirty tree is unbound and
     // refused by `lore done`, so the corpus scaffold is committed before any evidence is captured.
     mustOk(git(repo, "add", "-A"), "git add corpus");
     mustOk(git(repo, "commit", "-q", "-m", "lore corpus"), "git commit corpus");
-    mustOk(lore(["create", "prd", "--title", "Root", "--json"]), "create root prd");
+    mustOk(lore(["create", "prd", "--title", "Root", "--content", "Root PRD.", "--no-ai", "--json"]), "create root prd");
+    const createdSpec = mustOk(
+      lore(["create", "spec", "--title", "Cleanup spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai", "--json"]),
+      "create spec",
+    );
+    spec = (JSON.parse(createdSpec.stdout) as { data: { slug: string } }).data.slug;
 
-    // removable: clean + own commit merged into main + 
-    removable = makeClaimed("removable");
-    ownCommit(removable);
-    mergeToMain(removable);
-    recordEvidence(removable);
+    // removable: clean + own commit merged into main (the landing record and every contract pass are in place)
+    removable = await makeClaimed("removable");
 
     // sibling: ALSO fully removable, claimed, but its task is never archived in this suite.
-    sibling = makeClaimed("sibling");
-    ownCommit(sibling);
-    mergeToMain(sibling);
-    recordEvidence(sibling);
+    sibling = await makeClaimed("sibling");
 
     // zero own commits: branch == base, nothing to land.
-    zeroCommit = makeClaimed("zero");
-    mergeToMain(zeroCommit); // nothing past main: integrate finds it already integrated and records the landing
-    recordEvidence(zeroCommit);
+    zeroCommit = await makeClaimed("zero", "claimed");
+    // nothing past main: the landing record names main's own tip (integrate would archive the task itself, leaving `done` a no-op)
+    const mainTip = git(repo, "rev-parse", "main").stdout.trim();
+    const app = createApp(join(repo, ".lore", "lore.db"), undefined, { ...liveAmbient(), cwd: repo }, liveWriteContext());
+    try {
+      const recorded = await app.taskWorkflowService.recordLanding({
+        branch: zeroCommit.branch,
+        branch_head: mainTip,
+        main_before: mainTip,
+        main_after: mainTip,
+        landing_commit: mainTip,
+      });
+      if (!recorded.ok) throw new Error(`recordLanding failed: ${JSON.stringify(recorded.error)}`);
+    } finally {
+      app.close();
+    }
+    await recordEvidence(zeroCommit);
 
-    // uncommitted: merged own commit, then an UNTRACKED file.
-    dirtyUntracked = makeClaimed("untracked");
-    ownCommit(dirtyUntracked);
-    mergeToMain(dirtyUntracked);
-    recordEvidence(dirtyUntracked); // evidence refuses a dirty worktree, so dirty it AFTER
+    // uncommitted: merged own commit, then an UNTRACKED file (evidence refuses a dirty worktree, so dirty it AFTER).
+    dirtyUntracked = await makeClaimed("untracked");
     writeFileSync(join(dirtyUntracked.path, "scratch.txt"), "uncommitted\n");
 
     // uncommitted: merged own commit, then a TRACKED file modified.
-    dirtyTracked = makeClaimed("tracked");
-    ownCommit(dirtyTracked);
-    mergeToMain(dirtyTracked);
-    recordEvidence(dirtyTracked);
+    dirtyTracked = await makeClaimed("tracked");
     writeFileSync(join(dirtyTracked.path, "README.md"), "base\nlocal edit\n");
 
     // unmerged: own commit exists but main does not contain it.
-    unmerged = makeClaimed("unmerged");
+    unmerged = await makeClaimed("unmerged", "claimed");
     ownCommit(unmerged);
-    recordEvidence(unmerged);
+    await recordEvidence(unmerged);
 
     // seconds-old commit: fully removable — elapsed time is never consulted.
-    recent = makeClaimed("recent");
-    ownCommit(recent);
-    mergeToMain(recent);
-    recordEvidence(recent);
+    recent = await makeClaimed("recent");
 
     // locked: fully removable apart from `git worktree lock`.
-    locked = makeClaimed("locked");
-    ownCommit(locked);
-    mergeToMain(locked);
+    locked = await makeClaimed("locked");
     mustOk(git(repo, "worktree", "lock", "--reason", "fixture lock", locked.path), "worktree lock");
-    recordEvidence(locked);
 
     // never claimed: would pass every predicate clause, but no lore claim recorded it.
     unclaimedPath = join(parent, "wt-unclaimed");
@@ -248,7 +281,7 @@ describe("done removes the recorded worktree (#106)", () => {
   it("a removed worktree is gone from `git worktree list` and its merged commit stays reachable from main", () => {
     expect(git(repo, "worktree", "list", "--porcelain").stdout).not.toContain(removable.path);
     const log = git(repo, "log", "--format=%s", "main").stdout;
-    expect(log).toContain(`own commit on ${removable.branch}`);
+    expect(log).toContain(`own commit ${removable.branch}`);
   });
 
   it("removing one task's worktree leaves another claimed, removable worktree (task not archived) untouched", () => {
@@ -261,7 +294,7 @@ describe("done removes the recorded worktree (#106)", () => {
   it("keeps a zero-commit branch (never started, not landed): exit 0, reason no-own-commits", () => {
     const r = done(zeroCommit);
     expect(r.status).toBe(0);
-    expect(worktreeLine(r)).toMatch(/^worktree: kept /);
+    expect(worktreeLine(r), r.out).toMatch(/^worktree: kept /);
     expect(worktreeLine(r)).toContain("no-own-commits");
     expect(existsSync(zeroCommit.path)).toBe(true);
     expect(branchExists(zeroCommit.branch)).toBe(true);
