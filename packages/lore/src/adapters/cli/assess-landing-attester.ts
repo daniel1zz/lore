@@ -41,7 +41,11 @@ export function createGitHeadCriteriaRunner(
     const outcomes: HeadCriterionOutcome[] = [];
     for (const criterion of criteria) {
       const result = await rerunner.rerun({ slug: criterion.doc_slug }, criterion.ac_id);
-      outcomes.push(result.ok ? { ...criterion, ran: true } : { ...criterion, ran: false, cause: loreErrorText(result.error) });
+      outcomes.push(
+        result.ok
+          ? { ...criterion, ran: true, ...(result.value.unbound_cause !== undefined ? { unbound_cause: result.value.unbound_cause } : {}) }
+          :{ ...criterion, ran: false, cause: loreErrorText(result.error) },
+      );
     }
     return ok(outcomes);
   };

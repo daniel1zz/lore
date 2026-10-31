@@ -24,6 +24,8 @@ export interface StateBindingSkipFacts {
   readonly ac_id: string;
   readonly holder_pid: number;
   readonly lock_path: string;
+  /** The holder's worktree root; absent for an old-format lock. */
+  readonly holder_worktree?: string;
   readonly nowIso: string;
   readonly actor: string;
 }
@@ -41,6 +43,7 @@ export function buildStateBindingSkipAuditEntry(facts: StateBindingSkipFacts): A
       reason: "oracle_lock_held",
       holder_pid: facts.holder_pid,
       lock_path: facts.lock_path,
+      ...(facts.holder_worktree !== undefined ? { holder_worktree: facts.holder_worktree } : {}),
     },
   };
 }

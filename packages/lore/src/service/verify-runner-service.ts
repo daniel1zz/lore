@@ -235,7 +235,7 @@ import { requireOverrideAuto, type OverrideDecisionPort } from "./override-decis
 import { writeScratchOwner, type ScratchRemovalPort } from "./worktree-cleanup.js";
 import { FALSIFIER_EXIT_CODE_MAX, FALSIFIER_EXIT_CODE_MIN, isValidFalsifierExitCode } from "./ac-write-chokepoint.js";
 // Probe + stamp decision live in ./git-state-stamp.js, shared with `lore evidence --capture`.
-import { probeGitState, decideStampOutcome, type StampOutcome } from "./git-state-stamp.js";
+import { probeGitState, decideStampOutcome, worktreeRootOf, type StampOutcome } from "./git-state-stamp.js";
 export { probeGitState, decideStampOutcome };
 export type { GitStateProbe, StampOutcome } from "./git-state-stamp.js";
 
@@ -250,7 +250,7 @@ const MISSING_ORACLE_FILE_EXIT_CODE = -1;
  */
 export type StateBindingOccupancy =
   | { readonly kind: "free" }
-  | { readonly kind: "held"; readonly holder_pid: number; readonly lock_path: string }
+  | { readonly kind: "held"; readonly holder_pid: number; readonly lock_path: string; readonly holder_worktree?: string }
   | { readonly kind: "unmeasured"; readonly reason: string };
 
 /**
@@ -336,6 +336,11 @@ export interface VerifyPlanOpts {
 /** One executed script-mode AC's outcome. */
 export interface VerifyAcResult {
   readonly ac_id: string;
+  /**
+   * Why this run's row carries no `state_stamp` (BR-1512): `state_binding_skipped (...)` naming the lock holder's pid and
+   * worktree, `state_moved` or `dirty_tree`. Omitted when the row was stamped or git could not answer. In-memory only.
+   */
+  readonly unbound_cause?: string;
   /**
    * `"inconclusive"` (SPEC-061 §Scope D3) is the attestation-completeness
    * guard's own verdict — set instead of `"pass"` when the command exited 0
@@ -1214,7 +1219,19 @@ export class VerifyRunnerService {
       // can run; the POST read is `gitState` below, immediately after it ran.
       // SPEC-143 AC-CT-8 — occupancy is read BEFORE the oracle runs: a peer holding the checkout-level
       // lock means no verdict about the state can be certified, and the step must not wait for it.
-      const occupancy = this.stateBindingOccupancy?.probe(resolvedExecutionRoot.root);
+      const probedOccupancy = this.stateBindingOccupancy?.probe(resolvedExecutionRoot.root);
+      // BR-1512: the lock withholds the stamp only when its holder runs in THIS run's worktree (a run elsewhere writes its
+      // own dist). A holder with no recorded worktree (old writer) or a worktree we cannot resolve counts as held (D3).
+      const executionWorktree = probedOccupancy?.kind === "held" && probedOccupancy.holder_worktree !== undefined
+        ? worktreeRootOf(resolvedExecutionRoot.root)
+        : undefined;
+      const occupancy: StateBindingOccupancy | undefined =
+        probedOccupancy?.kind === "held" &&
+        probedOccupancy.holder_worktree !== undefined &&
+        executionWorktree !== undefined &&
+        executionWorktree !== probedOccupancy.holder_worktree
+          ? { kind: "free" }
+          : probedOccupancy;
       if (occupancy?.kind === "unmeasured") {
         warnings.push(
           `AC "${criterion.id}": oracle-lock occupancy could not be read (${occupancy.reason}) — the state-binding check ran as if the lock were free`,
@@ -1430,16 +1447,29 @@ export class VerifyRunnerService {
             ac_id: criterion.id,
             holder_pid: occupancy.holder_pid,
             lock_path: occupancy.lock_path,
+            ...(occupancy.holder_worktree !== undefined ? { holder_worktree: occupancy.holder_worktree } : {}),
             nowIso: opts.nowIso,
             actor: opts.by,
           }),
         );
         if (!skipResult.ok) return skipResult;
         warnings.push(
-          `AC "${criterion.id}": state-binding check SKIPPED — oracle lock held by pid ${occupancy.holder_pid}; ` +
-            "the evidence row is unbound until `lore verify` is re-run with the lock free",
+          `AC "${criterion.id}": state-binding check SKIPPED — oracle lock held by pid ${occupancy.holder_pid}` +
+            (occupancy.holder_worktree !== undefined ? ` in worktree ${occupancy.holder_worktree}` : "") +
+            "; the evidence row is unbound until `lore verify` is re-run with the lock free",
         );
       }
+
+      // BR-1512: the cause an unstamped row carries, in the in-memory result (a review reads it from there: the skip
+      // leaves no reason on the persisted row, so the result is the one channel that holds all three causes).
+      const unboundCause: string | undefined =
+        occupancy?.kind === "held"
+          ? `state_binding_skipped (oracle lock held by pid ${occupancy.holder_pid}${
+              occupancy.holder_worktree !== undefined ? ` in worktree ${occupancy.holder_worktree}` : ", worktree unknown"
+            })`
+          : "stamp_unbound_reason" in stampOutcome
+            ? stampOutcome.stamp_unbound_reason
+            : undefined;
 
       completedAcIds.push(criterion.id);
       results.push({
@@ -1453,6 +1483,7 @@ export class VerifyRunnerService {
         ...(executedFiles !== undefined ? { executed_files: executedFiles } : {}),
         ...(declaredPaths !== undefined ? { declared_paths: declaredPaths } : {}),
         ...(binaryFreshness !== undefined ? { binary_freshness: binaryFreshness } : {}),
+        ...(unboundCause !== undefined ? { unbound_cause: unboundCause } : {}),
       });
     }
 
