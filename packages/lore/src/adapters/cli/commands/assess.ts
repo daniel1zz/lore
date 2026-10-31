@@ -67,6 +67,7 @@ import { createGitTestSelection } from "../assess-selection.js";
 import { regressionAtHead } from "../../../service/regression-at-head.js";
 import { measurePlanCriteriaAtHead, resolveAssessedCommit, type ListDocsPort } from "../assess-attestation-wiring.js";
 import { createGitHeadCriteriaRunner } from "../assess-landing-attester.js";
+import { createGitCarryPort } from "../assess-carry-selection.js";
 import { createGitChangedFilesSince, createGitFileExistsAt, createGitFirstParentCommitContaining, createGitFirstParentHistory } from "../assess-regression-git.js";
 import { createAppCriterionRerunner, createAppStaleRefresher } from "../assess-stale-refresh.js";
 import type { SuiteRun } from "../../../service/milestone-review-inputs.js";
@@ -286,6 +287,7 @@ export default defineLoreCommand({
           bundle,
           { commit, ...(worktreeRoot !== undefined ? { worktreeRoot } : {}) },
           createGitHeadCriteriaRunner(inv.cwd, inv.env, (executionRoot) => createAppCriterionRerunner(app, verifyRunner, { executionRoot, by: actor, nowIso: () => new Date().toISOString() })),
+          createGitCarryPort(inv.cwd, inv.env),
         );
       };
 
