@@ -500,7 +500,7 @@ export function rowToSuiteResult(row: SuiteResultRow): SuiteResultRecord {
 /**
  * Whether a `suite_file_runs.suite_result_id` is a single-file key (`file-<kind>@<commit>`, `singleFileRunKey`), whose
  * (key, file) pair is stored once and first-wins (migration-045, #528). Any other id is a real suite result id, under which
- * `rerunFiles` appends every re-run. Must match migration-045's `LIKE 'file-%@%'` predicate.
+ * (the legacy re-runs of the removed `rerunFiles`) every re-run is appended. Must match migration-045's `LIKE 'file-%@%'` predicate.
  */
 export function isSingleFileRunKey(suiteResultId: string): boolean {
   return suiteResultId.startsWith("file-") && suiteResultId.includes("@", "file-".length);

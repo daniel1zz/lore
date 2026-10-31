@@ -108,7 +108,6 @@ import { RunReapService } from "./service/run-reap-service.js";
 import { ensureVerifiedIdentity, resolveWriteActorFor, withVerifiedWriteContext } from "./store/write-context-store.js";
 import { PlanIntegrationBranchService } from "./service/plan-integration-branch-service.js";
 import { MilestoneReviewService } from "./service/milestone-review-service.js";
-import { MAIN_CHECKED_ACTION, MAIN_RED_ACTION, MAIN_RED_GREEN_ACTION, type MainRedLedgerPort } from "./service/milestone-review.js";
 import { SuiteResultService } from "./service/suite-result-service.js";
 import { randomUUID } from "node:crypto";
 import { RetiredAcService } from "./service/retired-ac-service.js";
@@ -1143,7 +1142,6 @@ function buildAppFromSqlite(
       judgeMeasured: aiProviderService.judgeMilestoneMeasured.bind(aiProviderService),
       createReviewDoc: corpusService.createMilestoneReviewDoc.bind(corpusService),
       link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
-      mainRedLedger: buildMainRedLedger(store, corpusService),
       recheckDecisions: buildDecisionRechecker(store, ambient),
       judgedDecisionInputs: (bundle) => buildJudgedDecisionInputs({ store }, bundle),
     }),
@@ -1587,7 +1585,6 @@ function buildAppFromTurso(
       judgeMeasured: aiProviderService.judgeMilestoneMeasured.bind(aiProviderService),
       createReviewDoc: corpusService.createMilestoneReviewDoc.bind(corpusService),
       link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
-      mainRedLedger: buildMainRedLedger(store, corpusService),
       recheckDecisions: buildDecisionRechecker(store, ambient),
       judgedDecisionInputs: (bundle) => buildJudgedDecisionInputs({ store }, bundle),
     }),
@@ -1757,29 +1754,6 @@ function buildSuiteResultService(store: StoreInterface): SuiteResultService {
     newId: () => `suite-${randomUUID()}`,
     clockMs: () => performance.now(),
   });
-}
-
-function buildMainRedLedger(store: StoreInterface, corpusService: CorpusService): MainRedLedgerPort {
-  const suiteResults = buildSuiteResultService(store);
-  return {
-    now: () => new Date().toISOString(),
-    listRows: async () => {
-      const rows = [];
-      // reason: BR-1497 — `main-checked` is derived from the stored suite results below; the audit rows of that action
-      // are legacy history (nothing writes them any more) and still fold, so an older corpus keeps its range starts.
-      for (const action of [MAIN_CHECKED_ACTION, MAIN_RED_ACTION, MAIN_RED_GREEN_ACTION]) {
-        const listed = await store.listAuditRowsByAction(action);
-        if (!listed.ok) return listed;
-        rows.push(...listed.value);
-      }
-      const audited = rows.sort((a, b) => a.id - b.id).map((r) => ({ action: r.action, timestamp: r.timestamp, details: r.details ?? {} }));
-      const derived = await suiteResults.listMainCheckedRows();
-      if (!derived.ok) return derived;
-      // reason: a stable sort by time interleaves the derived checks with the audit rows; ties keep audit-first order.
-      return { ok: true as const, value: [...audited, ...derived.value].sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0)) };
-    },
-    appendRow: (row) => corpusService.appendAudit({ action: row.action, sessionId: "main-red", timestamp: row.timestamp, details: { ...row.details } }),
-  };
 }
 
 /**
