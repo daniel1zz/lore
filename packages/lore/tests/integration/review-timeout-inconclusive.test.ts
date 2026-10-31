@@ -29,7 +29,6 @@ import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ok } from "@lore/core";
 import { runTestFilesTogether } from "../../src/adapters/cli/assess-suite-runner.js";
-import { parseFailingTestFiles } from "../../src/service/milestone-review-inputs.js";
 import { regressionAtHead, type RegressionAtHead, type RegressionAtHeadPorts, type RegressionLandingInput } from "../../src/service/regression-at-head.js";
 import { SuiteResultService, singleFileRunKey, type CommitSuiteRunnerPort, type FileRunOutcome } from "../../src/service/suite-result-service.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
@@ -98,13 +97,52 @@ describe("real vitest runs over fixture files", () => {
     expect(outcomeOf("slow-hook.test.ts")).toMatchObject({ classification: "inconclusive", inconclusive_cause: "timeout" });
   });
 
-  it("AC-MC-3 false green guarded: the console text of the hook timeout reads as a failing file, so a console-text classifier would call it red", () => {
+  it("AC-MC-3 false green guarded: the console text of the hook timeout shows a FAIL line for the file, which a console-text classifier would call red", () => {
     const tail = outcomeOf("slow-hook.test.ts").output_tail.replace(ANSI, "");
-    // the old reader: the file shows up as FAIL in the runner's console output ...
-    expect(parseFailingTestFiles(tail)).toContain("slow-hook.test.ts");
+    // the console shows the file as failing ...
+    expect(tail).toMatch(/FAIL\s+slow-hook\.test\.ts/);
     // ... while the outcome report classifies it by the failures' own error, so it is not red
     expect(outcomeOf("slow-hook.test.ts").classification).not.toBe("red");
   });
+});
+
+describe("a run that writes no readable outcome report", () => {
+  let root: string;
+  const FILES = ["a.test.ts", "b.test.ts"];
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "lore-no-report-"));
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  /** A project whose `test:file` prints a FAIL line and exits `exit`, writing the outcome report `report` says (or none). */
+  const projectWith = (exit: number, report: "none" | "garbage"): void => {
+    const writes = report === "garbage" ? `require("fs").writeFileSync(require("path").join(process.env.TEST_FILE_OUTCOME_DIR, "outcome-1.json"), "{not json");` : "";
+    writeFileSync(join(root, "run.cjs"), `${writes}\nconsole.log(" FAIL  a.test.ts > case");\nprocess.exit(${String(exit)});\n`);
+    writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { "test:file": "node run.cjs" } }));
+  };
+
+  it.each([
+    ["no report file at all, exit 1", 1, "none"],
+    ["an unreadable report, exit 1", 1, "garbage"],
+    ["no report file at all, exit 0", 0, "none"],
+  ] as const)("AC-MC-3 %s: every file is inconclusive no-report, never red or green from the console", async (_name, exit, report) => {
+    projectWith(exit, report);
+    const outcomes = await runTestFilesTogether(root, "c".repeat(40), FILES, process.env, { timeoutMs: 60_000, graceMs: 1000 });
+    expect(outcomes.map((o) => [o.file, o.classification, o.inconclusive_cause, o.incomplete])).toEqual([
+      ["a.test.ts", "inconclusive", "no-report", undefined],
+      ["b.test.ts", "inconclusive", "no-report", undefined],
+    ]);
+    // the console DID show a FAIL line for a.test.ts: it was not used
+    expect(outcomes[0]?.output_tail).toContain("FAIL");
+  });
+
+  it("AC-MC-3 a run whose own limit ended keeps the timeout cause for its unfinished files", async () => {
+    writeFileSync(join(root, "run.cjs"), `setTimeout(() => {}, 60000);\n`);
+    writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { "test:file": "node run.cjs" } }));
+    const outcomes = await runTestFilesTogether(root, "c".repeat(40), FILES, process.env, { timeoutMs: 700, graceMs: 300 });
+    expect(outcomes.map((o) => [o.classification, o.inconclusive_cause])).toEqual([["inconclusive", "timeout"], ["inconclusive", "timeout"]]);
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -117,7 +155,7 @@ const landingAt = (index: number): RegressionLandingInput => ({ landing_commit: 
 const F = "packages/x/tests/f.test.ts";
 const G = "packages/x/tests/g.test.ts";
 
-type Behavior = "red" | "green" | "timeout";
+type Behavior = "red" | "green" | "timeout" | "no-report";
 
 interface Invocation {
   readonly commit: string;
@@ -149,6 +187,9 @@ class World {
       const behavior = this.behave(file, indexOf(commit));
       if (behavior === "timeout") {
         return { file, exit_code: 1, output_tail: "Test timed out in 50ms.", duration_ms: 50, classification: "inconclusive", inconclusive_cause: "timeout", incomplete: "timed out" };
+      }
+      if (behavior === "no-report") {
+        return { file, exit_code: 1, output_tail: "FAIL  a.test.ts > x", duration_ms: 1, classification: "inconclusive", inconclusive_cause: "no-report" };
       }
       return { file, exit_code: behavior === "red" ? 1 : 0, output_tail: "", duration_ms: 1, classification: behavior };
     });
@@ -288,6 +329,16 @@ describe("attribution never charges a timeout", () => {
     expect(r.causes).toEqual(["timeout"]);
     // not the whole dimension: the selection row stands and counts the measured file
     expect(r.rows.find((x) => x.subject.startsWith("selection@"))).toMatchObject({ verdict: "pass" });
+  });
+
+  it("AC-MC-3 a file whose run left no outcome report is not measured with cause no-report, named, never charged", async () => {
+    world = new World(6, [F, G]);
+    world.behave = (file) => (file === F ? "no-report" : "green");
+    const r = await world.review([landingAt(5)]);
+    expect(r.charged).toEqual([]);
+    expect(r.files).toEqual([expect.objectContaining({ file: F, outcome: "not-measured", cause: "no-report" })]);
+    expect(r.rows.find((x) => x.subject === F)).toMatchObject({ verdict: "not-measured", cause: "no-report" });
+    expect(r.causes).toEqual(["no-report"]);
   });
 
   it("AC-MC-3 a file red by assertion at the landing and inconclusive at its parent is not measured (no confirmation), never charged; the next review retries and concludes", async () => {
