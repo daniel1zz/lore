@@ -82,6 +82,7 @@ import {
   resolveAcScopeForCreate,
   type ResolvedAcScope,
 } from "../create-task-validation.js";
+import { readFieldsFile, type FieldsFileContent } from "../fields-file.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import type { ExitReport } from "../cli-exit.js";
@@ -167,6 +168,11 @@ export default defineLoreCommand({
       type: "string",
       description:
         "Path to file whose full contents become the document body. Mutually exclusive with --content.",
+    },
+    "fields-file": {
+      type: "string",
+      description:
+        "YAML or JSON file with `fields:` and `dimensions:`: the structured content of a templated document. It is validated against the latest approved template of the type and kind, which the document then pins; the body is rendered from the fields (no AI, no editor, no --content). `lore template show <type> --blank` prints the skeleton.",
     },
     priority: {
       type: "string",
@@ -460,7 +466,17 @@ export default defineLoreCommand({
           return 4;
         }
       }
-      if (resolvedContent === undefined) {
+      // BR-1528 — `--fields-file`: the body is rendered from the fields service-side, so neither AI nor the editor runs.
+      let fieldsFile: FieldsFileContent | undefined;
+      if (args["fields-file"] !== undefined) {
+        const readFields = readFieldsFile(args["fields-file"]);
+        if (!readFields.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, readFields.error) + "\n");
+          return exitCode(readFields.error);
+        }
+        fieldsFile = readFields.value;
+      }
+      if (resolvedContent === undefined && fieldsFile === undefined) {
         // SPEC-024: resolve AI default from surface + explicit flag + config
         const { ai: useAi, source: aiSource } = app.resolveAiDefault(explicitAi);
 
@@ -567,14 +583,18 @@ export default defineLoreCommand({
       // SPEC-103 §Mechanisms M1 — fold the AI-generation seam's provenance tuple
       // into `extra.ai_provenance` ONLY when `generate()` actually produced one
       // (the AI path ran); never invented for an editor/--content-authored doc.
-      const extraWithProvenance =
+      const provenanceExtra =
         aiProvenance !== undefined ? { ...(extra ?? {}), ai_provenance: aiProvenance } : extra;
+      const extraWithProvenance =
+        fieldsFile === undefined
+          ? provenanceExtra
+          : { ...(provenanceExtra ?? {}), fields: fieldsFile.fields ?? {}, dimensions: fieldsFile.dimensions ?? [] };
 
       const createInput = {
         type: docType,
         title: args.title,
         ...(inferredParentId !== undefined ? { parent_id: inferredParentId } : {}),
-        content: resolvedContent,
+        ...(resolvedContent !== undefined ? { content: resolvedContent } : {}),
         priority: (args.priority as Priority) ?? "medium",
         ...(tags.length > 0 ? { tags } : {}),
         ...(extraWithProvenance !== undefined ? { extra: extraWithProvenance } : {}),
