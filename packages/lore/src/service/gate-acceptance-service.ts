@@ -12,17 +12,15 @@
  *     agent's decision-carrying write): an incomplete one is a `decision` refusal (exit 4) naming each missing part, and
  *     nothing is written.
  *   - The gate must be failed or not-measured in the plan's CURRENT review; anything else has nothing to accept.
- *   - The acceptance is the plan's own `extra.known_defects` entry of that gate AND that failure's root-cause fingerprint, flagged `gate_accepted`, naming the open
- *     issue the finding was filed under (filed or reused by root cause, like every finding), written in ONE versioned write
- *     that carries the decision on its version row.
- *   - Who accepts (spec-an-agent-s-gate-acceptance-waits-for-a-human-decision, BR-1500): an AGENT run's call writes nothing. After the
- *     decision record passes it asks `DecisionService.decide` (class `governance-loosen`, human-always; subject
- *     `<plan id>:<dimension>` at the root-cause fingerprint), refuses (exit 4) naming the pending decision, and takes effect
- *     only on a re-run after a human accepted it. A human party's direct call (human / dashboard / api-key) writes at once.
+ *   - The acceptance is a human decision in the decision log (class `governance-loosen`, human-always; subject
+ *     `<plan id>:<dimension>` at that failure's root-cause fingerprint). The call also files (or reuses, by root cause) the
+ *     issue of the finding. It writes no `gate_accepted` and nothing else on the plan (#538: plan `extra` is not authority).
+ *   - Who accepts (spec-an-agent-s-gate-acceptance-waits-for-a-human-decision, BR-1500): an AGENT run's call asks
+ *     `DecisionService.decide`, refuses (exit 4) naming the pending decision, and takes effect only on a re-run after a
+ *     human answered Accept. A human party's direct call (human / dashboard / api-key) answers that decision itself, at once.
  *     No decision service wired -> refused, never accepted.
- *   - {@link acceptedGatesOf} is the ONE predicate readers use: an acceptance counts only when it carries a human writer party
- *     or a decision record id that the decision log confirms as an effective human accept for that plan, gate and fingerprint.
- * Side-effect class: IO through the injected ports (decision log, issue filing, one document write).
+ *   - {@link acceptedGatesOf} is the ONE predicate readers use, and it reads ONLY the decision log: a gate is accepted when the log holds an effective human accept (class governance-loosen, subject `<plan id>:<dimension>` at the fingerprint). Nothing stored on the plan counts.
+ * Side-effect class: IO through the injected ports (decision log appends, issue filing); nothing is written on the plan.
  *
  * Reference: Kayenta critical metrics (a critical metric fails the canary regardless of score) with an explicit, recorded override.
  * @spec_ref spec-the-milestone-review-measures-its-facts-per-landing-and (AC-AF-7, BR-1500)
@@ -31,11 +29,9 @@
 import {
   GATE_DIMENSIONS,
   blockingGates,
-  KNOWN_DEFECTS_FIELD,
   err,
   isGateDimension,
   ok,
-  readKnownDefects,
   type DocRecord,
   type GateDimension,
   type LoreError,
@@ -48,8 +44,8 @@ import type { DecisionService, DecisionSubject } from "./decision-service.js";
 import { effectiveDecisionVerdict, type DecisionDetail } from "../store/decision-log.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import { derivePendingDecisions } from "./pending-decisions.js";
+import { issueHumanPartyProof } from "./human-channel.js";
 import { OVERRIDE_MEASURED_FACTS } from "./override-decision.js";
-import type { DocWritePort } from "./corpus-service.js";
 import type { IssueFilingService } from "./issue-filing-service.js";
 import { planStateFingerprint, selectLatestMilestoneReview } from "./milestone-review.js";
 import { rootCauseOf, type FailedFinding } from "./root-cause-fingerprint.js";
@@ -62,13 +58,10 @@ export interface GateAcceptancePorts {
   readonly gate: Pick<DecisionGate, "judgeChecked">;
   /** Files (or finds) the issue of the finding and records the plain known defect on the plan. */
   readonly filing: IssueFilingService | undefined;
-  readonly writer: Pick<DocWritePort, "writeDoc">;
-  /** The writing actor. */
-  readonly by: string;
   /** The writer's name source (`run | human | api-key | dashboard`); anything but a human party is treated as an agent. */
   readonly writerSource: string | null | undefined;
-  /** Asks the human-always decision; absent = an agent's acceptance is refused (never accepted). */
-  readonly decisions: Pick<DecisionService, "decide"> | undefined;
+  /** Asks the human-always decision (and records a human party's own answer); absent = the call is refused, never accepted. */
+  readonly decisions: Pick<DecisionService, "decide" | "resolvePending"> | undefined;
   /** Reads the decision log (pending id of a subject). */
   readonly log: GateAcceptanceLog;
 }
@@ -126,6 +119,8 @@ export interface GateAcceptance {
   /** The issue the accepted finding is filed under. */
   readonly issue: number;
   readonly review: string;
+  /** The id of the human decision record in the decision log that accepts the gate. */
+  readonly decision_record: number;
 }
 
 function refuse(field: string, message: string): LoreError {
@@ -133,44 +128,45 @@ function refuse(field: string, message: string): LoreError {
 }
 
 /**
- * The blocking gates of a stored review that the plan accepted FOR THAT FAILURE with a HUMAN behind it: a `gate_accepted`
- * known defect of the gate whose root-cause fingerprint equals the fingerprint of the review's current failure of that gate
- * (BR-1500), carrying either a human writer party or a decision record id the decision log confirms as an effective human
- * accept for this plan, gate and fingerprint. This is the single predicate every close path uses.
+ * The blocking gates of a stored review that are accepted FOR THAT FAILURE: the decision log holds an effective human accept
+ * of class governance-loosen for subject `<plan id>:<gate>` at the root-cause fingerprint of the review's current failure of
+ * that gate (BR-1500). This is the single predicate every close path uses.
  *
- * reason: matching by dimension alone let an acceptance of one failure wave a later, different failure of the same gate
- * through (AC-AF-7); a gate whose cause cannot be fingerprinted (no cite) is never accepted, the plan needs a new review.
- * reason: `gate_accepted` alone is what agent runs wrote before an agent's acceptance needed a human (#538); it never counts.
+ * reason: the log is the ONLY authority. Plan `extra` is writable by any caller (`lore set --extra`), so no stored field
+ * (`gate_accepted`, a party, a record id) is read here: trusting one let an agent close its own plan (#538).
+ * reason: the fingerprint is part of the subject, so an accept of one failure never waves a later, different failure of the
+ * same gate through (AC-AF-7); a gate whose cause cannot be fingerprinted (no cite) is never accepted.
  *
- * @param plan - the plan (id, slug and `extra.known_defects`)
+ * @param plan - the plan (id and slug)
  * @param latest - the plan's latest stored review and its document
- * @param log - the decision log reader; absent = only a human writer party can back an acceptance
+ * @param log - the decision log reader (required: with none wired the read fails loud, see {@link unwiredGateAcceptanceLog})
  * @returns the accepted gates, in render order; a store error from the log, unchanged
  */
 export async function acceptedGatesOf(
-  plan: Pick<DocRecord, "id" | "slug" | "extra">,
+  plan: Pick<DocRecord, "id" | "slug">,
   latest: { readonly doc: Pick<DocRecord, "slug">; readonly review: MilestoneReview },
-  log: GateAcceptanceLog | undefined,
+  log: GateAcceptanceLog,
 ): Promise<Result<GateDimension[], LoreError>> {
-  const accepted = readKnownDefects(plan.extra).filter((entry) => entry.gate_accepted === true);
-  if (accepted.length === 0) return ok([]);
   const gates: GateDimension[] = [];
   for (const dimension of blockingGates(latest.review.dimensions)) {
     const judgment = latest.review.dimensions[dimension];
     const cause = rootCauseOf({ plan: plan.slug, dimension, reason: judgment.reason, reference: judgment.reference, cites: judgment.cites, reviewSlug: latest.doc.slug, causes: latest.review.causes });
     if (!cause.ok) continue;
-    const entry = accepted.find((e) => e.dimension === dimension && e.fingerprint === cause.value.fingerprint);
-    if (entry === undefined) continue;
-    if (entry.accepted_source !== undefined) {
-      gates.push(dimension);
-      continue;
-    }
-    if (entry.accepted_decision === undefined || log === undefined) continue;
     const record = await log.humanAcceptedRecord(gateAcceptanceSubject(plan.id, dimension, cause.value.fingerprint));
     if (!record.ok) return record;
-    if (record.value === entry.accepted_decision) gates.push(dimension);
+    if (record.value !== null) gates.push(dimension);
   }
   return ok(gates);
+}
+
+/**
+ * A {@link GateAcceptanceLog} for a composition with no decision log: every read fails loud naming that cause, so a close
+ * never silently reads "not accepted" (D3).
+ */
+export function unwiredGateAcceptanceLog(): GateAcceptanceLog {
+  const unwired = <T>(): Promise<Result<T, LoreError>> =>
+    Promise.resolve(err(refuse("decision-log", "no decision log is wired on this composition, so whether a gate was accepted cannot be read; the close is refused rather than treating the gate as not accepted")));
+  return { humanAcceptedRecord: () => unwired<number | null>(), pendingId: () => unwired<number | null>() };
 }
 
 /**
@@ -181,10 +177,9 @@ export async function acceptedGatesOf(
 export async function pendingAcceptancesOf(
   plan: Pick<DocRecord, "id" | "slug">,
   latest: { readonly doc: Pick<DocRecord, "slug">; readonly review: MilestoneReview },
-  log: GateAcceptanceLog | undefined,
+  log: GateAcceptanceLog,
 ): Promise<Result<Map<GateDimension, number>, LoreError>> {
   const pending = new Map<GateDimension, number>();
-  if (log === undefined) return ok(pending);
   for (const dimension of blockingGates(latest.review.dimensions)) {
     const judgment = latest.review.dimensions[dimension];
     const cause = rootCauseOf({ plan: plan.slug, dimension, reason: judgment.reason, reference: judgment.reference, cites: judgment.cites, reviewSlug: latest.doc.slug, causes: latest.review.causes });
@@ -256,58 +251,35 @@ export class GateAcceptanceService {
       reviewSlug: latest.doc.slug,
       causes: latest.review.causes,
     };
-    const party = humanPartyOf(this.ports.writerSource);
-    let humanRecord: number | undefined;
-    if (party === undefined) {
-      const waited = await this.awaitHumanAccept(plan, dimension, finding, latest.doc.slug, decision);
-      if (!waited.ok) return waited;
-      humanRecord = waited.value;
-    }
+    // reason: the acceptance IS the human accept in the decision log (class governance-loosen, subject `<plan id>:<dimension>` at
+    // this failure's fingerprint); nothing stored on the plan carries that authority (#538, BR-1500). An agent's call waits for
+    // a human to answer a pending decision; a human party's direct call appends its own human decision.
+    const settled = await this.settleHumanAccept(plan, dimension, finding, latest.doc.slug, decision, humanPartyOf(this.ports.writerSource) !== undefined);
+    if (!settled.ok) return settled;
     const filed = await filing.fileFindings([finding]);
     if (!filed.ok) return filed;
     const group = filed.value[0];
     if (group === undefined || group.error !== undefined || group.issue === undefined) {
       return err(group?.error ?? refuse("accept-gate", `the ${dimension} finding of ${plan.slug} could not be filed as an issue`));
     }
-
-    // reason: re-read AFTER the filing wrote the plain known-defect entry (its write bumped the plan's version), so the
-    // flagging write below carries the current version as its CAS guard.
-    const fresh = await this.ports.getPlanBundle(planRef);
-    if (!fresh.ok) return fresh;
-    const current = fresh.value.plan;
-    const entries = readKnownDefects(current.extra);
-    // reason: bound to THIS failure's root-cause fingerprint, never to the dimension: an older entry of the same gate
-    // with another fingerprint is a different failure and stays unflagged.
-    const fingerprint = group.cause.fingerprint;
-    if (!entries.some((e) => e.dimension === dimension && e.fingerprint === fingerprint)) {
-      return err(refuse("accept-gate", `the issue of the ${dimension} finding was filed but no known defect of ${dimension} with its root cause is recorded on ${plan.slug}; nothing was accepted`));
-    }
-    const flagged = entries.map((e) => (e.dimension === dimension && e.fingerprint === fingerprint ? { ...e, gate_accepted: true as const, ...(party !== undefined ? { accepted_source: party } : {}), ...(humanRecord !== undefined ? { accepted_decision: humanRecord } : {}) } : e));
-    const written = await this.ports.writer.writeDoc({
-      doc: current,
-      patch: { extra: { ...(current.extra as Record<string, unknown>), [KNOWN_DEFECTS_FIELD]: flagged } },
-      action: "update",
-      changeSummary: `Accepted gate ${dimension} with a decision (issue #${String(group.issue.number)})`,
-      decision,
-      auditAction: "update",
-      auditDetails: { operation: "accept-gate", dimension, fingerprint, ...(humanRecord !== undefined ? { decision_record: humanRecord } : {}), issue: group.issue.number, review: latest.doc.slug, rule: "BR-1500" },
-      lock: "none",
-      by: this.ports.by,
-    });
-    if (!written.ok) return written;
-    return ok({ plan: plan.slug, dimension, issue: group.issue.number, review: latest.doc.slug });
+    return ok({ plan: plan.slug, dimension, issue: group.issue.number, review: latest.doc.slug, decision_record: settled.value });
   }
 
   /**
-   * An agent's acceptance: asks the human-always decision and returns the record id of the human accept, or refuses (exit 4)
-   * naming the pending decision, the human's rejection, or the missing decision service. Writes nothing in the corpus.
+   * Makes sure the decision log holds an effective human accept of this gate and returns its record id.
+   *
+   * An agent's call asks the human-always decision and refuses (exit 4) naming the pending decision, the human's rejection,
+   * or the missing decision service; it appends nothing human. A human party's direct call (`byHumanParty`) answers that
+   * same pending decision itself through `DecisionService.resolvePending` (the one writer of the `human-tty` channel), so
+   * its accept is a record in the same log. Writes nothing in the corpus either way.
    */
-  private async awaitHumanAccept(
+  private async settleHumanAccept(
     plan: Pick<DocRecord, "id" | "slug">,
     dimension: GateDimension,
     finding: FailedFinding,
     reviewSlug: string,
     decision: { readonly reason: string },
+    byHumanParty: boolean,
   ): Promise<Result<number, LoreError>> {
     const decisions = this.ports.decisions;
     if (decisions === undefined) {
@@ -322,7 +294,7 @@ export class GateAcceptanceService {
       summary: `Accept the failed ${dimension} gate of plan ${plan.slug} as a known defect (review ${reviewSlug})`,
       requested_by: "the agent session that ran `lore assess --accept-gate`",
       change: { document: plan.slug, gate: dimension, review: reviewSlug, reason: decision.reason, fingerprint: cause.value.fingerprint },
-      on_accept: "Re-running the same `lore assess --accept-gate` command records the known defect, and the plan may then close past this gate.",
+      on_accept: "Re-running the same `lore assess --accept-gate` command then reports the gate accepted, and the plan may close past it.",
       on_reject: "The gate stays unaccepted; the plan stays open until it is fixed and reviewed again.",
     };
     const decided = await decisions.decide(GATE_ACCEPTANCE_CLASS, subject, OVERRIDE_MEASURED_FACTS, detail);
@@ -336,6 +308,11 @@ export class GateAcceptanceService {
     if (!pending.ok) return pending;
     if (pending.value === null) {
       return err(refuse("accept-gate", `accepting ${dimension} of ${plan.slug} needs a human decision but no pending decision could be found (record ${String(decided.value.record_id)}). Nothing was written.`));
+    }
+    if (byHumanParty) {
+      const answered = await decisions.resolvePending(pending.value, "accept", decision.reason, issueHumanPartyProof(new Date().toISOString()));
+      if (!answered.ok) return answered;
+      return ok(answered.value.id);
     }
     return err(
       refuse(

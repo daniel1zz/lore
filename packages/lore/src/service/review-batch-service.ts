@@ -101,8 +101,8 @@ export function classifyPlan(facts: PlanReviewFacts): PlanReviewNeed {
 
 /** The ports the batch itself reads through (the runner never decides what is in the trigger set). */
 export type ReviewRunDeps = Pick<ReviewTriggerDeps, "getPlanBundle" | "listReviewDocs" | "issueCoverage"> & {
-  /** The decision log reader the acceptance predicate verifies a human accept against; absent = only a human writer party backs an acceptance. */
-  readonly acceptanceLog?: GateAcceptanceLog;
+  /** The decision log reader the acceptance predicate reads (required: a composition with none wired passes `unwiredGateAcceptanceLog()`, which fails the close loud). */
+  readonly acceptanceLog: GateAcceptanceLog;
 };
 
 /** The ports the trigger side reads through and the landing's start writes through (a spawn). */

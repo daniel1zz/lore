@@ -1,5 +1,6 @@
+// @reads assets/project/lore-config-template.yaml
 /**
- * @spec_ref spec-an-agent-s-gate-acceptance-waits-for-a-human-decision (AC-HG-1, AC-HG-2, AC-HG-3, AC-HG-4, BR-1500)
+ * @spec_ref spec-an-agent-s-gate-acceptance-waits-for-a-human-decision (AC-HG-1, AC-HG-2, AC-HG-3, AC-HG-4, AC-HG-5, BR-1500)
  *
  * An agent run's `lore assess <plan> --accept-gate <dimension>` creates a pending human decision (class governance-loosen,
  * subject `<plan id>:<dimension>` at the root-cause fingerprint) and accepts nothing; the acceptance takes effect only after a
@@ -12,7 +13,15 @@
  * Dimensions: HAPPY (human accept applies), NEGATIVE (agent / rejected / forged), BOUNDARY (changed cause), STATE (pending reuse).
  */
 
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Database } from "bun:sqlite";
+import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../../helpers/clean-tree-repo.js";
+import { DECIDED_FLAGS } from "../../helpers/decision-flags.js";
+import { runLoreInProcess } from "../../helpers/run-lore-in-process.js";
 import { ulid } from "ulidx";
 import { DOC_TYPE_ROLE_MAP, KNOWN_DEFECTS_FIELD, MILESTONE_DIMENSIONS, err, ok, readKnownDefects, renderMilestoneReviewContent, type DocId, type DocRecord, type LoreError, type MilestoneReview, type Result } from "@lore/core";
 import { createGithubIssuePort } from "../../../src/adapters/cli/assess-file-issues.js";
@@ -22,7 +31,7 @@ import { parseDecisionFlags } from "../../../src/adapters/cli/decision-flags.js"
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { DecisionGate, type DecisionDraft } from "../../../src/service/decision-gate.js";
 import { DecisionService } from "../../../src/service/decision-service.js";
-import { GateAcceptanceService, createGateAcceptanceLog } from "../../../src/service/gate-acceptance-service.js";
+import { GateAcceptanceService, acceptedGatesOf, createGateAcceptanceLog, unwiredGateAcceptanceLog } from "../../../src/service/gate-acceptance-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { issueHarnessAskProof } from "../../../src/service/human-channel.js";
 import { IssueFilingService } from "../../../src/service/issue-filing-service.js";
@@ -81,7 +90,7 @@ const FULL_DECISION: DecisionDraft = (() => {
 })();
 
 interface World {
-  readonly store: InMemoryStore;
+  readonly store: InMemoryStore | SQLiteStore;
   readonly corpus: CorpusService;
   readonly plan: DocRecord;
   readonly decisions: DecisionService;
@@ -96,8 +105,9 @@ interface World {
   reReviewWithOtherCause(cite: string): Promise<void>;
 }
 
-async function worldWithFailedSecurity(): Promise<World> {
-  const store = actedStore(new InMemoryStore());
+/** A plan with one archived task and a stored review failing security; `onStore` (default in-memory) is where it lives. */
+async function worldWithFailedSecurity(onStore?: InMemoryStore | SQLiteStore): Promise<World> {
+  const store = actedStore(onStore ?? new InMemoryStore());
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(undefined));
   const plan = await seed(store, rawDoc("plan", "Gate plan", {}, "approved"));
   await seed(store, rawDoc("task", "Landed task", { plan_id: plan.id }, "archived", plan.id));
@@ -145,8 +155,6 @@ async function worldWithFailedSecurity(): Promise<World> {
         listReviewDocs: (planId) => corpus.listMilestoneReviewDocs(planId),
         gate,
         filing: new IssueFilingService(counting),
-        writer: corpus,
-        by: "t",
         writerSource,
         decisions: opts?.decisions === false ? undefined : decisions,
         log,
@@ -281,8 +289,11 @@ describe("AC-HG-2 a human's answer applies to its own root-cause fingerprint onl
     const humanRecord = await w.answer(pendingId, "accept");
 
     const accepted = await w.service("run").acceptGate(w.plan.slug, "security", FULL_DECISION);
-    expect(accepted).toMatchObject({ ok: true, value: { dimension: "security", issue: ISSUE } });
-    expect(readKnownDefects((await w.reload()).extra)).toEqual([expect.objectContaining({ dimension: "security", gate_accepted: true, accepted_decision: humanRecord })]);
+    // the CLI's exit code for this result: 0 for a success, `exitCode(error)` for a refusal
+    expect(accepted.ok ? 0 : exitCode(accepted.error)).toBe(0);
+    expect(accepted).toMatchObject({ ok: true, value: { dimension: "security", issue: ISSUE, decision_record: humanRecord } });
+    // the acceptance is the human record in the log; the plan carries no `gate_accepted`
+    expect(readKnownDefects((await w.reload()).extra).some((e) => e.gate_accepted === true)).toBe(false);
 
     const closed = await w.runBatch();
     expect(closed.outcome).toBe("accepted-with-known-defects");
@@ -356,9 +367,13 @@ describe("AC-HG-3 only a human-backed acceptance counts", () => {
     expect((await w.reload()).status).toBe("approved");
   });
 
-  it("AC-HG-3 NEGATIVE: a decision record id the decision log does not confirm as a human accept does not count", async () => {
+  it("AC-HG-3 NEGATIVE: a forged human party or decision record id stored on the plan does not count either", async () => {
     const w = await worldWithFailedSecurity();
-    await plantAgentAcceptance(w, { accepted_decision: 999 });
+    await plantAgentAcceptance(w, { accepted_source: "human", accepted_decision: 999 });
+    // the same write that plants the field and archives in one call is refused too (the close reads that write's extra)
+    const current = await w.reload();
+    const oneShot = refusalOf(await w.corpus.set(w.plan.id, { extra: current.extra as Record<string, unknown>, status: "archived" }, { by: "t" }));
+    expect(oneShot.exit).toBe(4);
     expect(refusalOf(await w.corpus.set(w.plan.id, { status: "archived" }, { by: "t" })).exit).toBe(4);
     const held = await w.runBatch();
     expect(["kept-open", "skipped"]).toContain(held.outcome);
@@ -368,9 +383,17 @@ describe("AC-HG-3 only a human-backed acceptance counts", () => {
   it("AC-HG-3 HAPPY: a human party's direct call with a decision record is accepted at once and the plan closes", async () => {
     const w = await worldWithFailedSecurity();
     const accepted = await w.service("human").acceptGate(w.plan.slug, "security", FULL_DECISION);
+    expect(accepted.ok ? 0 : exitCode(accepted.error)).toBe(0);
     expect(accepted).toMatchObject({ ok: true, value: { dimension: "security" } });
     expect(await w.pendingGateDecisions()).toEqual([]);
-    expect(readKnownDefects((await w.reload()).extra)).toEqual([expect.objectContaining({ gate_accepted: true, accepted_source: "human" })]);
+    // it appended its human decision to the log (class, subject, fingerprint), and wrote no flag on the plan
+    const rows = await w.store.listDecisionLog();
+    if (!rows.ok) throw new Error(JSON.stringify(rows.error));
+    const human = rows.value.filter((r) => r.channel === "human-tty");
+    expect(human).toHaveLength(1);
+    expect(human[0]).toMatchObject({ class: "governance-loosen", subject_id: `${w.plan.id}:security`, verdict: "auto" });
+    expect(accepted.ok && accepted.value.decision_record).toBe(human[0]?.id);
+    expect(readKnownDefects((await w.reload()).extra).some((e) => e.gate_accepted === true)).toBe(false);
     expect((await w.runBatch()).outcome).toBe("accepted-with-known-defects");
     expect((await w.reload()).status).toBe("archived");
   });
@@ -381,6 +404,80 @@ describe("AC-HG-3 only a human-backed acceptance counts", () => {
     expect(refused.exit).toBe(4);
     expect(readKnownDefects((await w.reload()).extra)).toEqual([]);
   });
+
+  it("AC-HG-3 ERROR: with no decision log wired a hand close fails loud naming the cause, never a silent not-accepted", async () => {
+    const w = await worldWithFailedSecurity();
+    // the plan-close read goes through the store's own log; an unwired log is the batch's port and the CLI composition's
+    const unwired = unwiredGateAcceptanceLog();
+    const read = await unwired.humanAcceptedRecord({ id: `${w.plan.id}:security`, version: "x" });
+    expect(read.ok).toBe(false);
+    if (!read.ok) {
+      expect(exitCode(read.error)).toBe(4);
+      expect(JSON.stringify(read.error)).toContain("no decision log is wired");
+    }
+    const docs = await w.corpus.listMilestoneReviewDocs(w.plan.id);
+    const latest = docs.ok ? selectLatestMilestoneReview(docs.value) : undefined;
+    if (latest === undefined) throw new Error("no review");
+    const accepted = await acceptedGatesOf(w.plan, latest, unwired);
+    expect(accepted.ok).toBe(false);
+  });
+});
+
+describe("AC-HG-5 a stored acceptance field cannot close a plan (real CLI)", () => {
+  const dirs: string[] = [];
+  afterAll(() => {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function lore(dir: string, args: string[]) {
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value === undefined || /^(CLAUDE|LORE|ANTHROPIC)/.test(key)) continue;
+      env[key] = value;
+    }
+    const proc = await runLoreInProcess(args, { cwd: dir, home: FIXTURE_HOME_OUTSIDE_REPO, env: { ...env, HOME: FIXTURE_HOME_OUTSIDE_REPO, CLAUDE_CODE_SESSION_ID: "hg5", EDITOR: "true" } });
+    return { stdout: proc.stdout, stderr: proc.stderr, exitCode: proc.exitCode };
+  }
+
+  it("AC-HG-5 NEGATIVE: gate_accepted + accepted_source human planted with `lore set --extra` and no log entry: hand close exits 4 naming the gate, `--close` keeps the plan open", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "lore-hg5-")));
+    dirs.push(dir);
+    makeCleanTreeRepo(dir);
+    const init = await lore(dir, ["init"]);
+    expect(init.exitCode, init.stderr).toBe(0);
+    // the stored review of a plan failing security lives in the throwaway corpus's own database
+    const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
+    const w = await worldWithFailedSecurity(store);
+    const docs = await w.corpus.listMilestoneReviewDocs(w.plan.id);
+    const latest = docs.ok ? selectLatestMilestoneReview(docs.value) : undefined;
+    if (latest === undefined) throw new Error("no review");
+    const j = latest.review.dimensions.security;
+    const cause = rootCauseOf({ plan: w.plan.slug, dimension: "security", reason: j.reason, reference: j.reference, cites: j.cites, reviewSlug: latest.doc.slug });
+    if (!cause.ok) throw new Error(JSON.stringify(cause.error));
+    store.close();
+
+    // reason: `lore set` has no `--extra` flag (the spec's example); plan `extra` is writable through the MCP `lore_set` tool, the
+    // HTTP patch and a hand edit alike, so the forgery is planted in the throwaway database exactly as plan-known-defects-display does.
+    const forged = [{ repo_id: REPO_ID, number: ISSUE, dimension: "security", fingerprint: cause.value.fingerprint, gate_accepted: true, accepted_source: "human" }];
+    const db = new Database(join(dir, ".lore", "lore.db"));
+    try {
+      const row = db.query("SELECT extra FROM docs WHERE id = ?").get(w.plan.id) as { extra: string };
+      const extra = JSON.parse(row.extra) as Record<string, unknown>;
+      extra["known_defects"] = forged;
+      db.prepare("UPDATE docs SET extra = ? WHERE id = ?").run(JSON.stringify(extra), w.plan.id);
+    } finally {
+      db.close();
+    }
+
+    const hand = await lore(dir, ["set", w.plan.slug, "--status", "archived", ...DECIDED_FLAGS]);
+    expect(hand.exitCode, hand.stderr).toBe(4);
+    expect(hand.stderr).toContain("security");
+
+    const batch = await lore(dir, ["assess", "--where", "type=plan", "--close"]);
+    expect(batch.stdout + batch.stderr).not.toContain("accepted-with-known-defects");
+    const shown = JSON.parse((await lore(dir, ["get", w.plan.slug, "--json"])).stdout) as { data?: { doc?: { status: string } }; status?: string };
+    expect(shown.data?.doc?.status ?? shown.status).not.toBe("archived");
+  }, 240_000);
 });
 
 describe("AC-HG-4 a pending acceptance is not re-asked or re-filed by --close", () => {

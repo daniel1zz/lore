@@ -2,12 +2,12 @@
 /**
  * @spec_ref spec-the-milestone-review-measures-its-facts-per-landing-and (AC-AF-7, BR-1500)
  *
- * `lore assess <plan> --accept-gate <dimension>` records a decision and a known defect of that gate on the plan, the only
+ * `lore assess <plan> --accept-gate <dimension>` records a human decision in the decision log for that gate, the only
  * way the review batch closes a plan past a failed or not-measured gate. Two layers:
  *   - the real CLI in a throwaway corpus (`lore init`, never the repo's `.lore`): the exit codes and messages of the refusals;
  *   - the real `GateAcceptanceService`, `CorpusService`, decision gate, known-defect port and `ReviewBatchRunner` over an
  *     in-memory store, with a fake GitHub reader: nothing is written on a refusal; a full decision records the decision on
- *     the plan's version row and a `gate_accepted` known defect, and the next `--close` archives the plan.
+ *     the decision log and no field on the plan, and the next `--close` archives the plan.
  *
  * Dimensions: HAPPY (accepted gate closes), NEGATIVE (missing decision parts, correctness, a non-gate, nothing to accept),
  * BOUNDARY (a plain issue never closes the gate), ERROR (no tracker configured, stale review), STATE (before/after).
@@ -25,11 +25,10 @@ import type { GithubFilingContext, GithubUpstreamCfg } from "../../../src/adapte
 import { parseDecisionFlags } from "../../../src/adapters/cli/decision-flags.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { DecisionGate, type DecisionDraft } from "../../../src/service/decision-gate.js";
+import { DecisionService } from "../../../src/service/decision-service.js";
 import { GateAcceptanceService, createGateAcceptanceLog } from "../../../src/service/gate-acceptance-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { IssueFilingService } from "../../../src/service/issue-filing-service.js";
-import { DecisionOutcomeService } from "../../../src/service/decision-outcome-service.js";
-import { selectPlanDecisions } from "../../../src/service/decision-recheck.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, selectLatestMilestoneReview } from "../../../src/service/milestone-review.js";
 import { ReviewLeases, planLeaseKey } from "../../../src/service/review-batch-lease.js";
 import { ReviewBatchRunner } from "../../../src/service/review-batch-service.js";
@@ -255,11 +254,9 @@ async function worldWith(
         listReviewDocs: (planId) => corpus.listMilestoneReviewDocs(planId),
         gate,
         filing: opts?.tracker === false ? undefined : new IssueFilingService(counting),
-        writer: corpus,
-        by: "t",
-        // reason: #538 — an agent's acceptance waits for a human; these AC-AF-7 tests are about the acceptance's content, so the writer is a human party (its direct call writes at once).
+        // reason: #538 — an agent's acceptance waits for a human; these AC-AF-7 tests are about the acceptance's content, so the writer is a human party (its direct call appends its human decision to the log at once).
         writerSource: "human",
-        decisions: undefined,
+        decisions: new DecisionService({ store, executorRun: null }),
         log: createGateAcceptanceLog(store),
       });
     },
@@ -269,6 +266,7 @@ async function worldWith(
         getPlanBundle: (ref) => corpus.getPlanBundle(ref),
         listReviewDocs: (planId) => corpus.listMilestoneReviewDocs(planId),
         issueCoverage: (planId, failed) => corpus.coverageOfFailedDimensions(planId, failed),
+        acceptanceLog: createGateAcceptanceLog(store),
       });
       const port = createGithubIssuePort({ repo: "owner/repo" } as GithubUpstreamCfg, { actor: "t" } as GithubFilingContext, corpus, corpus.getPlanCloseIssuePort());
       const run = await runner.runBatch([plan.slug], {
@@ -323,11 +321,9 @@ describe("AC-AF-7 accepting a gate records the decision and a known defect, and 
     const accepted = await w.service().acceptGate(w.plan.slug, "security", FULL_DECISION);
     expect(accepted).toMatchObject({ ok: true, value: { dimension: "security", issue: ISSUE } });
     const stored = await w.reload();
-    expect(readKnownDefects(stored.extra)).toEqual([expect.objectContaining({ repo_id: REPO_ID, number: ISSUE, dimension: "security", gate_accepted: true })]);
-    expect(await decisionVersionsOf(w)).toBe(1);
-    const versions = await w.store.listAllVersions();
-    const decided = versions.ok ? versions.value.find((v) => v.doc_id === w.plan.id && v.decision !== undefined) : undefined;
-    expect(decided?.decision?.reason).toBe("the finding is a false positive");
+    // the issue is linked as a plain known defect; the acceptance itself lives in the decision log (#538)
+    expect(readKnownDefects(stored.extra)).toEqual([expect.objectContaining({ repo_id: REPO_ID, number: ISSUE, dimension: "security" })]);
+    expect(readKnownDefects(stored.extra).some((e) => e.gate_accepted === true)).toBe(false);
 
     const closed = await w.runBatch();
     expect(closed.outcome).toBe("accepted-with-known-defects");
@@ -458,7 +454,7 @@ describe("AC-AF-7 the acceptance is bound to the failure it accepted", () => {
     const w = await worldWith({ security: "fail" });
     expect((await w.service().acceptGate(w.plan.slug, "security", FULL_DECISION)).ok).toBe(true);
     const accepted = readKnownDefects((await w.reload()).extra)[0];
-    expect(accepted).toMatchObject({ dimension: "security", gate_accepted: true });
+    expect(accepted).toMatchObject({ dimension: "security" });
 
     await reReviewWithOtherCause(w, "security", "src/another-flaw.ts");
     const hand = await w.corpus.set(w.plan.id, { status: "archived" }, { by: "t" });
@@ -480,23 +476,22 @@ describe("AC-AF-7 the acceptance is bound to the failure it accepted", () => {
     expect((await w.reload()).status).toBe("archived");
   });
 
-  it("AC-AF-7 REGRESSION: the accept-gate decision is on the plan's version row where `lore decision rates` and the re-check read it", async () => {
+  it("AC-AF-7 REGRESSION: the acceptance is a human decision in the decision log (class, subject and fingerprint), and writes no stored authority on the plan", async () => {
     const w = await worldWith({ security: "fail" });
-    expect((await w.service().acceptGate(w.plan.slug, "security", FULL_DECISION)).ok).toBe(true);
-    const bundle = await w.corpus.getPlanBundle(w.plan.id);
-    if (!bundle.ok) throw new Error(JSON.stringify(bundle.error));
-    const selected = await selectPlanDecisions({ store: w.store }, bundle.value);
-    expect(selected).toMatchObject({ ok: true });
-    if (!selected.ok) return;
-    expect(selected.value.map((d) => d.address)).toEqual([`${w.plan.slug}@${String((await w.reload()).version)}`]);
-
-    const outcome = new DecisionOutcomeService({
-      store: w.store,
-      writer: w.corpus,
-      listMilestoneReviewDocs: (planId) => w.corpus.listMilestoneReviewDocs(planId),
-      getPlanBundle: (planId) => w.corpus.getPlanBundle(planId),
-    });
-    const rates = await outcome.rates({ kind: "document revision" });
-    expect(rates).toMatchObject({ ok: true, value: { decisions: 1, decisionsInNoPlan: 0 } });
+    const versionBefore = (await w.reload()).version;
+    const accepted = await w.service().acceptGate(w.plan.slug, "security", FULL_DECISION);
+    expect(accepted.ok).toBe(true);
+    const rows = await w.store.listDecisionLog();
+    if (!rows.ok) throw new Error(JSON.stringify(rows.error));
+    const human = rows.value.filter((r) => r.channel === "human-tty");
+    expect(human).toHaveLength(1);
+    expect(human[0]).toMatchObject({ class: "governance-loosen", subject_id: `${w.plan.id}:security`, verdict: "auto" });
+    expect(accepted.ok && accepted.value.decision_record).toBe(human[0]?.id);
+    const asked = rows.value.find((r) => r.channel === "machine" && r.subject_id === `${w.plan.id}:security`);
+    expect(asked?.detail ?? "").toContain("the finding is a false positive");
+    // no plan write carries the acceptance: the plan's known defects hold no `gate_accepted` and the version is unchanged
+    const stored = await w.reload();
+    expect(stored.version).toBe(versionBefore);
+    expect(readKnownDefects(stored.extra).some((e) => e.gate_accepted === true)).toBe(false);
   });
 });

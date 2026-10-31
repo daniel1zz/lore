@@ -132,7 +132,7 @@ export async function planKnownDefectDetachment(
   latest: ClosingReview,
   otherOpenPlans: readonly Pick<DocRecord, "slug" | "extra">[],
   reader: KnownDefectIssueReader | undefined,
-  acceptanceLog: GateAcceptanceLog | undefined,
+  acceptanceLog: GateAcceptanceLog,
 ): Promise<Result<KnownDefectDetachment, LoreError>> {
   const entries = readKnownDefects(plan.extra);
   const acceptedGates = await acceptedGatesOf(plan, latest, acceptanceLog);

@@ -59,7 +59,7 @@ import { err, ok, type DocId, type Result } from "@lore/core";
 import { DECISION_FLAG_ARGS, parseDecisionFlags } from "../decision-flags.js";
 import { DecisionGate } from "../../../service/decision-gate.js";
 import { SpawnDecisionGitPort } from "../../../service/decision-git-port.js";
-import { GateAcceptanceService, createGateAcceptanceLog, type GateAcceptanceLog } from "../../../service/gate-acceptance-service.js";
+import { GateAcceptanceService, createGateAcceptanceLog, unwiredGateAcceptanceLog, type GateAcceptanceLog } from "../../../service/gate-acceptance-service.js";
 import type { App } from "../../../app.js";
 import { createGitCommitSuiteRunner } from "../assess-suite-runner.js";
 import { regressionAtHead } from "../../../service/regression-at-head.js";
@@ -695,8 +695,6 @@ async function runAcceptGate(context: Parameters<typeof invocationOf>[0], positi
       // this verb takes no scores, so a decision naming scores or a table is refused rather than passed unchecked.
       gate: new DecisionGate(new SpawnDecisionGitPort(inv.cwd)),
       filing,
-      writer: app.corpusService,
-      by: actor,
       writerSource: inv.identity.claimedSource,
       decisions: app.decisionReadService,
       log: gateAcceptanceLogOf(app),
@@ -706,7 +704,7 @@ async function runAcceptGate(context: Parameters<typeof invocationOf>[0], positi
       inv.io.stderr.write(formatErrorFor(inv, accepted.error) + "\n");
       return exitCode(accepted.error);
     }
-    const line = `Accepted gate ${accepted.value.dimension} of plan ${accepted.value.plan} as a known defect (issue #${String(accepted.value.issue)}, review ${accepted.value.review}); the next \`lore assess --where needs-review --close\` may archive it.`;
+    const line = `Accepted gate ${accepted.value.dimension} of plan ${accepted.value.plan} (human decision record ${String(accepted.value.decision_record)}, issue #${String(accepted.value.issue)}, review ${accepted.value.review}); the next \`lore assess --where needs-review --close\` may archive it.`;
     if (args.json === true) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: accepted.value }, null, 2));
     else printLine(inv.io.stdout, line);
     return 0;
@@ -717,11 +715,12 @@ async function runAcceptGate(context: Parameters<typeof invocationOf>[0], positi
 
 /**
  * The decision-log reader of gate acceptances over the app's decision service.
- * reason: with no decision service wired the log reads as empty, so no agent acceptance is ever confirmed (never a grant).
+ * reason: with no decision service wired every read fails loud (`unwiredGateAcceptanceLog`), so a close never silently reads "not accepted".
  */
 function gateAcceptanceLogOf(app: App): GateAcceptanceLog {
   const decisions = app.decisionReadService;
-  return createGateAcceptanceLog({ listDecisionLog: async () => (decisions === undefined ? ok([]) : decisions.chainRows()) });
+  if (decisions === undefined) return unwiredGateAcceptanceLog();
+  return createGateAcceptanceLog({ listDecisionLog: async () => decisions.chainRows() });
 }
 
 /** The inputs of the `--close` batch, built by `run`. */

@@ -31,20 +31,10 @@ export const knownDefectEntrySchema = z.object({
   dimension: z.enum(MILESTONE_DIMENSIONS),
   fingerprint: z.string().min(1),
   /**
-   * True when the entry records a GATE the plan was accepted with (`lore assess --accept-gate`, BR-1500): a plain entry
-   * (an issue the batch filed) never lets a plan close past a failed or not-measured gate; a flagged one does.
+   * HISTORY ONLY: what `lore assess --accept-gate` wrote before an acceptance came from the decision log (#538). No reader
+   * gives it any authority: a gate is accepted only when the decision log holds an effective human accept for it.
    */
   gate_accepted: z.literal(true).optional(),
-  /**
-   * The human party that accepted the gate by its own direct call (`NameSource` human / dashboard / api-key). An agent run
-   * never carries it. Present with `gate_accepted`, it makes the acceptance human-backed without a decision record.
-   */
-  accepted_source: z.enum(["human", "dashboard", "api-key"]).optional(),
-  /**
-   * The id of the human-tty decision record (class governance-loosen, subject `<plan id>:<dimension>`, version = the
-   * fingerprint) an agent's acceptance waited for. A reader verifies it against the decision log, never trusts the number.
-   */
-  accepted_decision: z.number().int().positive().optional(),
 });
 export type KnownDefectEntry = z.infer<typeof knownDefectEntrySchema>;
 
@@ -101,15 +91,6 @@ export function readKnownDefects(extra: unknown): KnownDefectEntry[] {
     if (parsed.success) entries.push(parsed.data);
   }
   return entries;
-}
-
-/**
- * The dimensions the plan's known defects accept as gates (`gate_accepted`).
- *
- * @param entries - the plan's known-defect entries
- */
-export function acceptedGateDimensions(entries: readonly KnownDefectEntry[]): MilestoneDimension[] {
-  return [...new Set(entries.filter((e) => e.gate_accepted === true).map((e) => e.dimension))];
 }
 
 /** What the closing review says about one dimension, as {@link partitionKnownDefectsAtClose} reads it. */
