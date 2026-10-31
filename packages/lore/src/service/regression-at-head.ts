@@ -605,9 +605,13 @@ export async function regressionAtHead(
     return ok({ head: undefined, suite: undefined, files: [], charged: [], single_file_run_ids: [], rows, causes: causesOf(rows) });
   };
 
-  const resolvedHead = await ports.runner.resolveCommit(ports.headRef);
-  if (!resolvedHead.ok) return unmeasured(ports.headRef, `the suite could not be run at ${ports.headRef}: ${loreErrorText(resolvedHead.error)}`);
-  const headCommit = resolvedHead.value.commit;
+  // reason: a plan with no landing on main has no containment to show and no history to search: it reads (or runs) the suite at head as before.
+  let headCommit = ports.headRef;
+  if (real.length > 0) {
+    const resolvedHead = await ports.runner.resolveCommit(ports.headRef);
+    if (!resolvedHead.ok) return unmeasured(ports.headRef, `the suite could not be run at ${ports.headRef}: ${loreErrorText(resolvedHead.error)}`);
+    headCommit = resolvedHead.value.commit;
+  }
 
   const historyResult = real.length > 0 ? await ports.firstParentHistory(headCommit) : undefined;
   let attribution: Attribution | undefined;

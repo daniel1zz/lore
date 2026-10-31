@@ -542,23 +542,21 @@ describe("milestone review gates close", () => {
 
   // ── Part D, "Review inputs, measured once per batch" and "Accepted with known defects" (task D4) ──
 
-  it("milestone review gates close: the full suite runs ONCE per batch in a throwaway worktree of main and every plan's review sees it", { timeout: 300_000 }, () => {
+  // Changed by spec-a-plan-s-regression-reuses-a-stored-suite-that-contains (#534): a batch no longer runs the full suite at head up
+  // front; a plan reads (or, only when none is stored or in flight, runs) the suite that contains ITS landings. These plans change no
+  // code, so their regression is `na` and no full suite runs at all.
+  it("milestone review gates close: a batch of plans that change no code runs no full suite and leaves no worktree behind", { timeout: 300_000 }, () => {
     const first = makePlan("Suite one");
     const second = makePlan("Suite two");
     const batch = assessRows(["--where", "type=plan,status=approved"]);
     expect(batch.exitCode, batch.stderr).toBe(0);
     expect(batch.rows.map((r) => r.plan).sort()).toEqual([first.plan, second.plan].sort());
-    // one run for two plans: the fake `test` script appends one line per run.
-    expect(readJudgeFile("suite-runs.txt").trim().split("\n")).toHaveLength(1);
-    // both prompts carry the one run: the chain and the test command, their exits, the failing file.
+    // the fake `test` script appends one line per run: none ran.
+    expect(readJudgeFile("suite-runs.txt").trim()).toBe("");
     const prompts = readJudgeFile("prompts.txt").split("=====PROMPT=====").filter((p) => p.trim().length > 0);
     expect(prompts).toHaveLength(2);
-    for (const prompt of prompts) {
-      expect(prompt).toContain("`bun run check:plan-close` exit 0");
-      expect(prompt).toContain("`bun run test` exit 1");
-      expect(prompt).toContain("tests/unrelated.test.ts");
-    }
-    // the failing file is not tied to either plan (no landed diff), so neither plan's regression fails.
+    for (const prompt of prompts) expect(prompt).toContain("No full-suite run on main was supplied for this review");
+    // the failing file of the fake suite is not tied to either plan, so neither plan's regression fails.
     expect(batch.rows.every((r) => r.outcome === "PASS")).toBe(true);
     // the throwaway worktree is gone and the shared checkout is untouched.
     const worktrees = spawnSync("git", ["worktree", "list", "--porcelain"], { cwd: tmpDir, encoding: "utf8" }).stdout;

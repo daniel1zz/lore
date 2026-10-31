@@ -108,6 +108,11 @@ function world(cwd: string, shared?: InMemoryStore): World {
       for (const file of files) fileRuns.push({ commit, file });
       return ok(files.map((file): FileRunOutcome => ({ file, exit_code: stateAt(cwd, commit) === "red" ? 1 : 0, output_tail: "", duration_ms: 1 })));
     },
+    // reason: the batched search runs files together (spec-a-plan-s-regression-reuses-a-stored-suite-that-contains); one file is one run here either way.
+    runFilesTogether: async (commit, files) => {
+      for (const file of files) fileRuns.push({ commit, file });
+      return ok(files.map((file): FileRunOutcome => ({ file, exit_code: stateAt(cwd, commit) === "red" ? 1 : 0, output_tail: "", duration_ms: 1 })));
+    },
     withWorktree: async (commit, work) => {
       ownWorktrees.push(commit);
       await work("/fake/own-worktree");
