@@ -98,6 +98,7 @@ import type { RadiusDiffPort } from "./service/stamp-binding-reader.js";
 import { RunService } from "./service/run-service.js";
 import { WorktreeRemovalService, type WorktreeRemovalRunStore } from "./service/worktree-removal-service.js";
 import { DecisionService } from "./service/decision-service.js";
+import { ReviewRoundCap } from "./service/review-round-cap-service.js";
 import { createOverrideDecisionPort, type OverrideDecisionPort } from "./service/override-decision.js";
 import { createRealWorktreeProbe } from "./service/worktree-cleanup.js";
 import { createReadSessionHeartbeat, createWriteSessionHeartbeat } from "./adapters/session-heartbeat-port.js";
@@ -1003,6 +1004,8 @@ function buildAppFromSqlite(
   const retiredAcService = buildRetiredAcService(store, recordLockService, corpusService, ruleChangeService);
   wirePlanCloseRetirements(corpusService, retiredAcService);
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
+  // reason: BR-1531 — a judgment-required document's review rounds are capped per approval cycle; both roots wire it.
+  reviewService.setReviewRoundCap(new ReviewRoundCap({ store, judgments: judgmentService, decisions: new DecisionService({ store, executorRun: null }) }));
   // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
   reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
   taskWorkflowService.setOverrideDecisionPort(overrideDecisionPort);
@@ -1454,6 +1457,8 @@ function buildAppFromTurso(
   const retiredAcService = buildRetiredAcService(store, recordLockService, corpusService, ruleChangeService);
   wirePlanCloseRetirements(corpusService, retiredAcService);
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
+  // reason: BR-1531 — a judgment-required document's review rounds are capped per approval cycle; both roots wire it.
+  reviewService.setReviewRoundCap(new ReviewRoundCap({ store, judgments: judgmentService, decisions: new DecisionService({ store, executorRun: null }) }));
   // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
   reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
   taskWorkflowService.setOverrideDecisionPort(overrideDecisionPort);
