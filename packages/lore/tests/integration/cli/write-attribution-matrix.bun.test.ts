@@ -136,9 +136,10 @@ function makeStore(kind: StoreKind): StoreHandle {
 
 // ─── Services over a given store ─────────────────────────────────────────────
 
-function services(store: StoreInterface) {
+/** `gitCwd` makes the task service's git facts read that repository (the `done` kind needs a real commit to bind its pass to). */
+function services(store: StoreInterface, gitCwd?: string) {
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const twf = new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
+  const twf = new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(gitCwd === undefined ? {} : { currentWorkingDirectory: () => gitCwd }));
   twf.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = override refused
   return {
     corpus,
@@ -238,6 +239,8 @@ interface WriteKind {
   readonly act: (f: Fixture) => Promise<void>;
   /** A doc-mutating kind must write at least one version row (guards against a vacuous version check). */
   readonly writesVersion: boolean;
+  /** The task service of the write under test reads the repository this test runs in (its git facts), not the unit-test fake. */
+  readonly readsRepository?: boolean;
 }
 
 const SETUP_BY = "agent:matrix-setup";
@@ -387,10 +390,26 @@ const KINDS: readonly WriteKind[] = [
   {
     name: "done",
     writesVersion: true,
-    // reason: `lore done` judges the stored contract (AC-DCS1-7) and a code task needs a landing; this fixture has no git, so the task
-    // is a corpus task (never claimed, lands nothing, AC-DCS1-19) holding the stored contract of a corpus task with no oracle. The
-    // write under test is the same archive walk, attributed to the same run.
+    // reason: `lore done` judges the stored contract (AC-DCS1-7) and a code task needs a landing, so the task is a corpus task (never
+    // claimed, lands nothing, AC-DCS1-19) holding the stored contract of a corpus task with no oracle; its one runner-attested pass
+    // (the evidence floor the retired attestation override used to waive) is recorded in `prepare` on a commit of the repository this
+    // test runs in, which contains the contract's compile commit (the rule for a corpus task). The write under test is the same
+    // archive walk, attributed to the same run.
+    readsRepository: true,
+    prepare: async (f) => {
+      const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+      must(
+        (await f.w.twf.recordVerifiedEvidence(
+          f.ids["task"] as string,
+          { oracle: "test", command: "echo matrix-done-pass", result: "pass", recorded_by: f.by, capture_source: "runner", attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, head_sha: head } },
+          new Date().toISOString(),
+        )) as never,
+        "attested pass before done",
+      );
+    },
     setup: async ({ s }) => {
+      const root = execFileSync("git", ["rev-list", "--max-parents=0", "HEAD"], { encoding: "utf8" }).trim().split("\n").pop() ?? "";
+      const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).trim();
       const plan = await mkDoc(s, { type: "plan", title: "Matrix done plan", content: "body" }, SETUP_BY);
       const task = await mkDoc(
         s,
@@ -403,9 +422,9 @@ const KINDS: readonly WriteKind[] = [
             kind: "corpus",
             plan_id: plan.id,
             done_contract: {
-              compiled_at_commit: "0000000000000000000000000000000000000000",
+              compiled_at_commit: root,
               kind: "corpus",
-              base_branch: "main",
+              base_branch: branch,
               oracles: [],
               red_required: false,
               landing_route: "none",
@@ -423,7 +442,6 @@ const KINDS: readonly WriteKind[] = [
         (await f.w.twf.done(f.ids["task"] as string, {
           by: f.by,
           harnessRun: f.run,
-          overrideReason: "attribution matrix fixture: no runner-attested pass exists for this throwaway task",
         } as never)) as never,
         "done",
       );
@@ -446,7 +464,7 @@ async function runKind(
       await registerRun(handle.store, identity);
       target = await decorate(handle.store, identity);
     }
-    const f: Fixture = { s: raw, w: services(target), by: identity.claimed, run: identity.harnessRun as RunId, ids };
+    const f: Fixture = { s: raw, w: services(target, kind.readsRepository === true ? process.cwd() : undefined), by: identity.claimed, run: identity.harnessRun as RunId, ids };
     if (kind.prepare !== undefined) await kind.prepare(f);
     return await capture(handle.store, () => kind.act(f));
   } finally {

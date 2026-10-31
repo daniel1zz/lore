@@ -112,8 +112,6 @@ beforeAll(async () => {
   patchLoreConfig(dir, { workflow: { done_contract: { ...FIXTURE_DONE_CONTRACT_CONFIG }, gates: { "task-claim": { enabled: false } }, review: { judgment_required_types: [] } } });
   mustLore(["create", "prd", "--title", "Deprecation Root", "--content", "root", "--no-ai"], dir, SETUP);
   spec = JSON.parse(mustLore(["create", "spec", "--title", "Deprecation Spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai", "--json"], dir, SETUP).stdout).data.slug as string;
-  // AU-T7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
-  // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
 });
 
 afterAll(() => {

@@ -18,7 +18,12 @@
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { sessionActorFor } from "../../helpers/session-actor";
+import { landTask } from "../support/land-task.js";
 import {
   R1,
   R2,
@@ -38,20 +43,46 @@ const ANCHOR = "packages/core/src/session.ts";
 let plain: Corpus;
 let gated: Corpus;
 
+let wtRoot = "";
+let landedSeq = 0;
+
 beforeAll(async () => {
-  plain = await createCorpus();
+  // reason: `lore done` judges the stored contract, so the corpus `plain` (the done cases) is a git repository whose tasks are approved,
+  // claimed on a branch and landed; the holder check is the LAST floor (BR-209), so it is only reached by a task that met the others.
+  plain = await createCorpus({ gitBacked: true });
   gated = await createCorpus({ claimGates: "enabled" });
-  // AU-T7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
-  // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
+  wtRoot = mkdtempSync(join(tmpdir(), "ro-surface-wt-"));
 });
 
 afterAll(() => {
   plain.cleanup();
   gated.cleanup();
+  rmSync(wtRoot, { recursive: true, force: true });
 });
 
+/**
+ * A task approved (red run waived: not this suite's subject), claimed on a branch of its own by `run` as `name`, landed on main and
+ * holding a runner pass for every contract oracle: only the holder check is left for `lore done`. Replaces the retired attestation
+ * override, which this suite used only to get past the evidence floors.
+ */
+async function landedHeldTask(run: string | undefined, name: string): Promise<string> {
+  const target = await plain.newTarget("task");
+  if (run !== undefined) registerRun(plain.dir, run);
+  landedSeq += 1;
+  const branch = `ro-landed-${landedSeq}`;
+  await landTask(
+    {
+      dir: plain.dir,
+      git: (args) => execFileSync("git", [...args], { cwd: plain.dir, encoding: "utf8" }).trim(),
+      lore: (args) => runLore([...args], plain.dir, run, name),
+    },
+    { slug: target, branch, worktree: join(wtRoot, branch), claimValue: "branch", session: name },
+  );
+  return target;
+}
+
 function doneAs(dir: string, target: string, name: string, run?: string) {
-  return runLore(["done", target, "--override-attestation", "surface fixture: the holder check is under test"], dir, run, name);
+  return runLore(["done", target], dir, run, name);
 }
 
 function statusOf(dir: string, target: string): string {
@@ -63,10 +94,8 @@ function statusOf(dir: string, target: string): string {
 
 describe("lore done through the CLI decides the holder by run (spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-3)", () => {
   it("NEGATIVE: run R2 with the SAME derived name is refused a fresh claim of R1, the refusal names R1, nothing is archived", async () => {
-    const target = await plain.newTarget("task");
-    registerRun(plain.dir, R1);
+    const target = await landedHeldTask(R1, NAME);
     registerRun(plain.dir, R2);
-    expect(claim(plain.dir, target, NAME, { run: R1 }).exitCode).toBe(0);
 
     const refused = doneAs(plain.dir, target, NAME, R2);
 
@@ -77,9 +106,7 @@ describe("lore done through the CLI decides the holder by run (spec-run-only-wri
   });
 
   it("HAPPY control: the holding run R1 archives its own claim", async () => {
-    const target = await plain.newTarget("task");
-    registerRun(plain.dir, R1);
-    expect(claim(plain.dir, target, NAME, { run: R1 }).exitCode).toBe(0);
+    const target = await landedHeldTask(R1, NAME);
 
     const done = doneAs(plain.dir, target, NAME, R1);
 
@@ -88,9 +115,7 @@ describe("lore done through the CLI decides the holder by run (spec-run-only-wri
   });
 
   it("NEGATIVE: a caller with no run and the holder's name is refused a run-held fresh claim", async () => {
-    const target = await plain.newTarget("task");
-    registerRun(plain.dir, R1);
-    expect(claim(plain.dir, target, NAME, { run: R1 }).exitCode).toBe(0);
+    const target = await landedHeldTask(R1, NAME);
 
     const refused = doneAs(plain.dir, target, NAME);
 
@@ -100,8 +125,7 @@ describe("lore done through the CLI decides the holder by run (spec-run-only-wri
   });
 
   it("REGRESSION: with no run on either side the name decides (same name archives)", async () => {
-    const target = await plain.newTarget("task");
-    expect(claim(plain.dir, target, NAME).exitCode).toBe(0);
+    const target = await landedHeldTask(undefined, NAME);
 
     expect(doneAs(plain.dir, target, NAME).exitCode).toBe(0);
   });

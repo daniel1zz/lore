@@ -1,3 +1,4 @@
+// @spawns packages/lore/src/index.ts
 /**
  * Claim conflict, the `lore done` holder check and the `lore ready` overlap test identify the holder by RUN.
  *
@@ -20,7 +21,7 @@
  *                one holder and reports no overlap
  */
 
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { Database } from "bun:sqlite";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
@@ -30,6 +31,12 @@ import type { App } from "../../src/app.js";
 import type { CreateDocInput, DocRecord, RunId } from "@lore/core";
 import { cleanupWorktrees, commitAll, makeWorktree } from "./support/run-end-fixture.js";
 import { createLiveApp } from "../helpers/live-app.js";
+import { createApp } from "../../src/app.js";
+import { LIVE_TEST_RUN, liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { registerRunInDb } from "../helpers/test-run-identity.js";
+import { sessionActorFor } from "../helpers/session-actor.js";
+import { createCorpus, R1, R2, registerRun, runLore, type Corpus } from "./cli/support/claim-run-fixture.js";
+import { landHeldTask } from "./support/landed-held-task.js";
 
 import { ensureRequirementsDocId } from "../helpers/parented-create.js";
 setDefaultTimeout(120_000);
@@ -47,8 +54,6 @@ beforeEach(async () => {
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-run-owned-done-")));
   mkdirSync(join(tmpDir, ".lore"), { recursive: true });
   createLiveApp(dbPath()).close();
-  // AU-T7: `done --override-attestation` is decided; this suite's subject is not the override, so the class is loosened
-  // the documented way (a human-tty governance decision on a throwaway corpus), never by a bypass in product code.
   originalCwd = process.cwd();
   process.chdir(tmpDir);
 });
@@ -116,12 +121,8 @@ function claimAs(taskId: string, by: string, run: RunId | null, worktree?: strin
   return withApp(async (app) => {
     // reason: BR-1468 — a task that declares file anchors is claimed on a branch; the fixture names one (no repository is
     // involved: the branch is only a recorded name), and an anchorless task stays a corpus-only no-branch claim.
-    let branch = worktree;
-    if (branch === undefined) {
-      const task = await app.corpusService.get(taskId);
-      const anchors = task.ok ? task.value.doc.extra["file_anchors"] : undefined;
-      if (Array.isArray(anchors) && anchors.length > 0) branch = `run-owned-branch-${taskId.slice(-8).toLowerCase()}`;
-    }
+    // reason: AC-DCS1-14 — a code task is always claimed on a branch, anchored or not, so a caller that names none gets one of its own.
+    const branch = worktree ?? `run-owned-branch-${taskId.slice(-8).toLowerCase()}`;
     return app.taskWorkflowService.claim(taskId, {
       by,
       ...(run !== null ? { harnessRun: run } : {}),
@@ -130,14 +131,43 @@ function claimAs(taskId: string, by: string, run: RunId | null, worktree?: strin
   });
 }
 
-function doneAs(taskId: string, by: string, run: RunId | null) {
-  return withApp((app) =>
-    app.taskWorkflowService.done(taskId, {
-      by,
-      ...(run !== null ? { harnessRun: run } : {}),
-      overrideReason: "AC-ROI-3 fixture: the holder check is the behaviour under test, not the evidence floor",
-    }),
-  );
+/**
+ * The corpus of the `lore done` cases: a git repository (the done-contract model compiles a contract at a commit and judges a landing),
+ * in which every task is approved, claimed on a branch, landed and passing before the holder check is reached.
+ */
+let held: Corpus;
+let heldWorktrees = "";
+
+beforeAll(async () => {
+  held = await createCorpus({ gitBacked: true });
+  heldWorktrees = mkdtempSync(join(tmpdir(), "ro-service-wt-"));
+});
+
+afterAll(() => {
+  held.cleanup();
+  rmSync(heldWorktrees, { recursive: true, force: true });
+});
+
+/** The writer name every call of the `lore done` cases is made as (the session tier's name, so a claim and a done share it). */
+const HELD_NAME = sessionActorFor("agent:shared-name");
+
+/** `TaskWorkflowService.done` over the git-backed corpus, from its shared checkout, as `by` and `run`. */
+async function doneHeld(taskSlug: string, by: string, run: string | null) {
+  const built = createApp(join(held.dir, ".lore", "lore.db"), undefined, { ...liveAmbient(), cwd: held.dir }, liveWriteContext());
+  const app = "corpusService" in built ? built : built.ok ? built.value : undefined;
+  if (app === undefined) throw new Error(`createApp failed: ${JSON.stringify((built as { error?: unknown }).error)}`);
+  registerRunInDb(join(held.dir, ".lore", "lore.db"), LIVE_TEST_RUN);
+  try {
+    return await app.taskWorkflowService.done(taskSlug, { by, ...(run !== null ? { harnessRun: run as RunId } : {}) });
+  } finally {
+    app.close();
+  }
+}
+
+function heldStatus(taskSlug: string): string {
+  const shown = runLore(["get", taskSlug, "--json"], held.dir);
+  const parsed = JSON.parse(shown.stdout) as { data: { doc?: { status: string }; status?: string } };
+  return parsed.data.doc?.status ?? parsed.data.status ?? "unknown";
 }
 
 async function fetchTask(id: string): Promise<DocRecord> {
@@ -173,39 +203,33 @@ function errorText(result: { ok: boolean; error?: unknown }): string {
 
 describe("lore done decides the holder by run (spec-run-only-write-identity-and-run-end-claim-release#AC-ROI-3)", () => {
   it("NEGATIVE: refuses run B, which carries the same derived name as the holding run A, and the refusal names run A", async () => {
-    const { taskIds } = await createPlanWithTasks([[]]);
-    const runA = await newRun();
-    const runB = await newRun();
-    expect((await claimAs(taskIds[0]!, SHARED_NAME, runA)).ok).toBe(true);
+    const { slug } = await landHeldTask(held, heldWorktrees, R1, HELD_NAME);
+    registerRun(held.dir, R2);
 
-    const refused = await doneAs(taskIds[0]!, SHARED_NAME, runB);
+    const refused = await doneHeld(slug, HELD_NAME, R2);
 
     expect(refused.ok).toBe(false);
-    expect(errorText(refused)).toContain(runA);
+    expect(errorText(refused)).toContain(R1);
     expect(errorText(refused)).toContain("fresh claim");
-    expect((await fetchTask(taskIds[0]!)).status).not.toBe("archived");
+    expect(heldStatus(slug)).not.toBe("archived");
   });
 
   it("HAPPY control: the holding run itself archives its own fresh claim", async () => {
-    const { taskIds } = await createPlanWithTasks([[]]);
-    const runA = await newRun();
-    expect((await claimAs(taskIds[0]!, SHARED_NAME, runA)).ok).toBe(true);
+    const { slug } = await landHeldTask(held, heldWorktrees, R1, HELD_NAME);
 
-    const done = await doneAs(taskIds[0]!, SHARED_NAME, runA);
+    const done = await doneHeld(slug, HELD_NAME, R1);
 
     expect(done.ok).toBe(true);
-    expect((await fetchTask(taskIds[0]!)).status).toBe("archived");
+    expect(heldStatus(slug)).toBe("archived");
   });
 
   it("NEGATIVE: an unattested caller with the holder's name still cannot archive a run-held fresh claim", async () => {
-    const { taskIds } = await createPlanWithTasks([[]]);
-    const runA = await newRun();
-    expect((await claimAs(taskIds[0]!, SHARED_NAME, runA)).ok).toBe(true);
+    const { slug } = await landHeldTask(held, heldWorktrees, R1, HELD_NAME);
 
-    const refused = await doneAs(taskIds[0]!, SHARED_NAME, null);
+    const refused = await doneHeld(slug, HELD_NAME, null);
 
     expect(refused.ok).toBe(false);
-    expect(errorText(refused)).toContain(runA);
+    expect(errorText(refused)).toContain(R1);
   });
 
   it("REGRESSION: a claim that names no run is refused by the store (BR-1352), so no name-only holder can ever be archived by another name-only caller", async () => {
@@ -223,20 +247,18 @@ describe("lore done decides the holder by run (spec-run-only-write-identity-and-
   });
 
   it("BOUNDARY: a fresh claim whose run has ended with a clean worktree no longer blocks another run's done", async () => {
-    const { taskIds } = await createPlanWithTasks([[]]);
-    const runA = await newRun();
-    const runB = await newRun();
-    await endRun(runA);
-    expect((await claimAs(taskIds[0]!, SHARED_NAME, runA, makeWorktree({ dirty: false }))).ok).toBe(true);
+    // approved and claimed by run A on a clean linked worktree of its own, nothing landed; then run A ends
+    const { slug } = await landHeldTask(held, heldWorktrees, R1, HELD_NAME, { land: false });
+    registerRun(held.dir, R2);
+    expect(runLore(["run", "end", R1, "--reason", "session-end"], held.dir).exitCode).toBe(0);
 
-    const done = await doneAs(taskIds[0]!, SHARED_NAME, runB);
+    const done = await doneHeld(slug, HELD_NAME, R2);
 
-    // The claim names a worktree, so `done` also needs the landing `lore integrate` records (BR-1291); this fixture lands
-    // nothing. The holder check runs before that floor, so the refusal that remains is the landing floor's, and it names
-    // neither the ended run nor a fresh claim: the ended run's claim no longer holds the task against run B.
+    // The task holds no pass of its contract, so the evidence floor refuses (the holder check is the LAST floor, BR-209). The refusal
+    // that is reached names neither the ended run nor a fresh claim: the ended run's claim no longer holds the task against run B.
     expect(done.ok).toBe(false);
-    expect(errorText(done)).toContain("[floor: not-landed]");
-    expect(errorText(done)).not.toContain(runA);
+    expect(errorText(done)).toContain("[floor: attested-pass]");
+    expect(errorText(done)).not.toContain(R1);
     expect(errorText(done)).not.toContain("fresh claim");
   });
 });
