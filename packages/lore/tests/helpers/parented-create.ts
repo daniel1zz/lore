@@ -11,9 +11,9 @@
  *   corpus that already holds any requirements document (prd) reuses the first one rather than adding another; every
  *   failing service call throws (a fixture fault, never a silent fallback).
  * Side-effect class: IO (may write one requirements document into the corpus behind `service`, always a throwaway one).
+ *   It spawns nothing: the entry-point twin lives in parented-create-via-entry.ts so importing this file never reaches a spawn.
  */
 
-import { spawnSync } from "node:child_process";
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
 import type { CreateDocInput, DocId, DocRecord } from "@lore/core";
 import { ulid } from "ulidx";
@@ -88,21 +88,6 @@ export function ensureRequirementsDocSlug(run: CliRunner): string {
 /** {@link ensureRequirementsDocSlug} for an async `lore` driver. */
 export async function ensureRequirementsDocSlugAsync(run: AsyncCliRunner): Promise<string> {
   return slugFromList(await run(LIST_PRD_ARGS)) ?? slugFromCreate(await run(CREATE_PRD_ARGS));
-}
-
-/**
- * {@link ensureRequirementsDocSlug} for a suite that drives the lore entry point directly (`bun <entry> <args>`),
- * as the scripts' tests do.
- *
- * @param entry - Absolute path of `packages/lore/src/index.ts`.
- * @param cwd - The throwaway corpus directory (an initialised project).
- * @returns The requirements document's slug.
- */
-export function ensureRequirementsDocSlugViaEntry(entry: string, cwd: string): string {
-  return ensureRequirementsDocSlug((args) => {
-    const ran = spawnSync("bun", [entry, ...args], { cwd, encoding: "utf8" });
-    return { stdout: ran.stdout, stderr: ran.stderr, exitCode: ran.status };
-  });
 }
 
 /**

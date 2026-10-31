@@ -30,6 +30,8 @@
     "check:baseline-coverage": "bun scripts/check-baseline-coverage.ts",
     "check:baseline-coverage:changed": "bun scripts/check-baseline-coverage.ts --changed",
     "check:ac-oracle-ownership:changed": "bun scripts/check-ac-oracle-ownership.ts --changed",
+    "check:test-spawns": "bun scripts/check-test-spawns.ts",
+    "check:test-spawns:changed": "bun scripts/check-test-spawns.ts --changed",
     "test:file": "bun scripts/test-file.ts",
     "check:no-timer-retry": "bun scripts/check-no-timer-retry.ts",
     "check:ac-ref-integrity": "bun scripts/check-ac-ref-integrity.ts",
