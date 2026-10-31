@@ -16,6 +16,7 @@
  */
 
 import { Validator } from "@cfworker/json-schema";
+import { JSON_SCHEMA_2020_12_META_SCHEMA } from "./template-json-schema-meta.js";
 
 /** A JSON Schema node. `x-*` keywords are annotations the check library reads (see `template.ts`). */
 export type JsonSchemaNode = {
@@ -37,34 +38,48 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * Check a schema can be used: an object the library accepts (a bad `$ref` makes it throw).
- *
- * @param schema - the candidate JSON Schema node
- * @returns one message per problem; empty when usable
- */
-export function checkJsonSchemaUsable(schema: unknown): string[] {
-  if (!isPlainObject(schema)) return ["fields: a JSON Schema node must be an object"];
-  try {
-    new Validator(schema, VALIDATOR_DRAFT, false);
-  } catch (cause) {
-    return [`fields: not a usable JSON Schema (${cause instanceof Error ? cause.message : String(cause)})`];
-  }
-  return [];
+/** `#/a/b/0` -> ["a","b","0"]; `#` -> []. JSON Pointer escapes are decoded. */
+function pointerToSegments(pointer: string): string[] {
+  return pointer
+    .replace(/^#\/?/, "")
+    .split("/")
+    .filter((segment) => segment !== "")
+    .map((raw) => decodeURIComponent(raw).replace(/~1/g, "/").replace(/~0/g, "~"));
 }
 
-/** `#/a/b/0` -> `a.b[0]`; `#` -> "". JSON Pointer escapes are decoded. */
-function pointerToFieldPath(pointer: string): string {
-  const segments = pointer.replace(/^#\/?/, "").split("/").filter((segment) => segment !== "");
-  return segments.reduce((path, raw) => {
-    const segment = decodeURIComponent(raw).replace(/~1/g, "/").replace(/~0/g, "~");
+/** `["a","b","0"]` -> `a.b[0]`; `[]` -> "". */
+function segmentsToFieldPath(segments: readonly string[]): string {
+  return segments.reduce((path, segment) => {
     if (/^\d+$/.test(segment)) return `${path}[${segment}]`;
     return path === "" ? segment : `${path}.${segment}`;
   }, "");
 }
 
 /** Keywords whose output unit only restates "a child failed"; the child carries the real reason. */
-const WRAPPER_KEYWORDS = new Set(["properties", "items", "additionalProperties"]);
+const WRAPPER_KEYWORDS = new Set(["properties", "items", "additionalProperties", "$ref"]);
+
+/** One way a candidate `fields` value is not a JSON Schema: `path` is the segments inside the schema. */
+export interface JsonSchemaDefect {
+  readonly path: readonly string[];
+  readonly problem: string;
+}
+
+/**
+ * Check a candidate `fields` value IS a JSON Schema, against the official draft 2020-12 meta-schema
+ * (bundled, no network). A bad type name, a string where a number belongs, a non-array `required`
+ * are all refused here. Unknown keywords are accepted: the specification treats them as annotations.
+ *
+ * @param schema - the candidate JSON Schema node
+ * @returns every defect with its path inside the schema; empty when it is a valid schema
+ */
+export function checkJsonSchemaUsable(schema: unknown): JsonSchemaDefect[] {
+  if (!isPlainObject(schema)) return [{ path: [], problem: "a JSON Schema node must be an object" }];
+  const result = new Validator(JSON_SCHEMA_2020_12_META_SCHEMA as Record<string, unknown>, VALIDATOR_DRAFT, false).validate(schema);
+  if (result.valid) return [];
+  return result.errors
+    .filter((unit) => !WRAPPER_KEYWORDS.has(unit.keyword))
+    .map((unit) => ({ path: pointerToSegments(unit.instanceLocation), problem: unit.error }));
+}
 const REQUIRED_PATTERN = /^Instance does not have required property "(.*)"\.$/;
 
 /**
@@ -94,7 +109,7 @@ export function validateAgainstJsonSchema(schema: JsonSchemaNode, value: unknown
     if (unit.keyword === "false" && concrete.some((other) => other.instanceLocation === unit.instanceLocation || other.instanceLocation.startsWith(`${unit.instanceLocation}/`))) {
       continue;
     }
-    const base = pointerToFieldPath(unit.instanceLocation);
+    const base = segmentsToFieldPath(pointerToSegments(unit.instanceLocation));
     const required = REQUIRED_PATTERN.exec(unit.error);
     if (required !== null) {
       const name = required[1] ?? "";

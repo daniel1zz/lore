@@ -119,6 +119,42 @@ describe("template meta-schema", () => {
     expect(parseTemplate(baseTemplate({ fields, render: [{ heading: "H", fields: ["a"] }] })).ok).toBe(true);
   });
 
+  function fieldsIssues(fields: unknown): Array<{ path: string; problem: string }> {
+    const result = parseTemplate(baseTemplate({ fields, render: [{ heading: "H", fields: ["a"] }] }));
+    return result.ok ? [] : result.error;
+  }
+
+  it("refuses a bad type name, with a path under fields", () => {
+    const issues = fieldsIssues({ type: "object", properties: { a: { type: "strng" } } });
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.every((issue) => issue.path.startsWith("fields"))).toBe(true);
+    expect(issues.some((issue) => issue.path.startsWith("fields.properties.a.type"))).toBe(true);
+  });
+
+  it("refuses other non-schema content: wrong-typed keywords and non-schema children", () => {
+    expect(fieldsIssues({ type: "object", properties: { a: { type: "string", minLength: "3" } } }).length).toBeGreaterThan(0);
+    expect(fieldsIssues({ type: "object", required: "a", properties: { a: { type: "string" } } }).length).toBeGreaterThan(0);
+    expect(fieldsIssues({ type: "object", properties: { a: 5 } }).length).toBeGreaterThan(0);
+    expect(fieldsIssues({ type: "object", properties: { a: { type: "array", minItems: -1 } } }).length).toBeGreaterThan(0);
+    expect(fieldsIssues({ type: "object", properties: { a: { type: "string", pattern: "(" } } }).length).toBeGreaterThan(0);
+  });
+
+  it("accepts a valid schema using nested keywords", () => {
+    const fields = {
+      type: "object",
+      required: ["a"],
+      properties: {
+        a: { type: ["string", "null"], minLength: 1 },
+        b: { type: "array", items: { type: "object", properties: { c: { enum: [1, 2] } } }, uniqueItems: true },
+      },
+    };
+    expect(fieldsIssues(fields)).toEqual([]);
+  });
+
+  it("states unknown-keyword behaviour: a plain extension keyword is accepted (annotation), not refused", () => {
+    expect(fieldsIssues({ type: "object", properties: { a: { type: "string", "my-extension": { any: "thing" } } } })).toEqual([]);
+  });
+
   it("refuses a missing version, an empty render list and an empty heading", () => {
     expect(parseTemplate(baseTemplate({ version: 0 })).ok).toBe(false);
     expect(parseTemplate(baseTemplate({ render: [] })).ok).toBe(false);

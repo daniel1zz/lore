@@ -101,8 +101,8 @@ export const templateSchema = z
     render: z.array(templateRenderSectionSchema).min(1, "a template needs at least one render section"),
   })
   .superRefine((template, ctx) => {
-    for (const problem of checkJsonSchemaUsable(template.fields)) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: problem, path: ["fields"] });
+    for (const defect of checkJsonSchemaUsable(template.fields)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `fields is not a valid JSON Schema: ${defect.problem}`, path: ["fields", ...defect.path] });
     }
     if (template.fields.type !== "object") {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'fields must be a JSON Schema with type "object"', path: ["fields", "type"] });
