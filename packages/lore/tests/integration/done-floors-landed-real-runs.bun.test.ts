@@ -1,5 +1,6 @@
 // @spawns packages/lore/src/index.ts
 // @reads assets/project/reference-transaction
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * @spec_ref spec-defect-clusters-round-1-done-floors-judge-real-runs-on  AC-DCL-1 (cases a-h), D1;
  *   business rules BR-199, BR-212, BR-146; reports #171 #174 #188 #49 #51 + three local reports.
@@ -32,6 +33,7 @@ import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
 import { installShippedGuard } from "./support/main-guard-repo.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 import { landTask, recordContractPasses, type TaskWorld } from "./support/land-task.js";
 
 interface RunResult {
@@ -273,7 +275,10 @@ describe("AC-DCL-1 (e) — per criterion the latest attested result decides", ()
 
   it("(e) an attested fail recorded after an attested pass refuses exit 4 [floor: latest-attested-fail] naming the criterion", async () => {
     const spec = parseSlug(mustRun(["create", "spec", "--title", "Latest Spec", "--content", "## Overview\nx", "--no-ai"], dir));
-    mustRun(["ac", "add", spec, "AC-LATEST-1", "--statement", "A criterion.", "--mode", "script", "--oracle", "other", "--command", "true"], dir);
+    mustRun(["ac", "add", spec, "AC-LATEST-1", "--statement", "A criterion.", "--mode", "script", "--oracle", "test", "--command", "true"], dir);
+    // the claim passes the real task-claim gate: the plan's ancestor spec is approved (judgment is off in this corpus)
+    citeSpecViaCli(loreRunnerFor(runLore, dir), dir, undefined, spec, "AC-LATEST-1");
+    mustRun(["approve", spec], dir);
     const plan = parseSlug(mustRun(["create", "plan", "--title", "Latest Plan", "--parent", spec, "--content", "x", "--no-ai"], dir));
     const task = createTaskUnder(plan, "Latest Task", "AC-LATEST-1");
     await land(task, { recordPasses: false });

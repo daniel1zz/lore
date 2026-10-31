@@ -153,9 +153,7 @@ const HELD_NAME = sessionActorFor("agent:shared-name");
 
 /** `TaskWorkflowService.done` over the git-backed corpus, from its shared checkout, as `by` and `run`. */
 async function doneHeld(taskSlug: string, by: string, run: string | null) {
-  const built = createApp(join(held.dir, ".lore", "lore.db"), undefined, { ...liveAmbient(), cwd: held.dir }, liveWriteContext());
-  const app = "corpusService" in built ? built : built.ok ? built.value : undefined;
-  if (app === undefined) throw new Error(`createApp failed: ${JSON.stringify((built as { error?: unknown }).error)}`);
+  const app = createApp(join(held.dir, ".lore", "lore.db"), undefined, { ...liveAmbient(), cwd: held.dir }, liveWriteContext());
   registerRunInDb(join(held.dir, ".lore", "lore.db"), LIVE_TEST_RUN);
   try {
     return await app.taskWorkflowService.done(taskSlug, { by, ...(run !== null ? { harnessRun: run as RunId } : {}) });
