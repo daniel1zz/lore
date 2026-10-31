@@ -1,23 +1,20 @@
 /**
  * The suite-result store's service: per-(commit, file) test runs stored once and reused (BR-1497). No review runs the full
  * suite (spec `spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach`); the stored full-suite results older
- * measurements left behind are only READ (the main red/green ledger).
+ * measurements left behind are only READ (`listResults`).
  *
  * Purpose: make "what did this test file say at commit X" a stored fact: the first run of a (commit, file) stores it, every
- *   later review reads the store and runs nothing; the main red/green state the review records is derived from the stored
- *   suite results, so there is no second record of one run.
- * Public surface: SuiteResultService (runSingleFile, runBatch, rerunFiles, listFileRuns, listResults, listMainCheckedRows),
- *   CommitSuiteRunnerPort, RunBatchOptions, FileRunOutcome, SingleFileRunKind, FileRunKind, singleFileRunKey,
- *   suiteRunOfResult, deriveMainCheckedRows.
+ *   later review reads the store and runs nothing.
+ * Public surface: SuiteResultService (runSingleFile, runBatch, listFileRuns, listResults),
+ *   CommitSuiteRunnerPort, RunBatchOptions, FileRunOutcome, SingleFileRunKind, FileRunKind, singleFileRunKey.
  * Invariants:
- *   - Stored rows are never edited. Per-file re-runs (`rerunFiles`) are separate rows attached to a result id.
+ *   - Stored rows are never edited.
  *   - A file run (`runSingleFile`, `runBatch`) is stored keyed by (commit, file): its `suite_result_id` column holds
  *     {@link singleFileRunKey} (`file-<kind>@<commit>`), not a suite result id, so a commit that never had a full suite
  *     carries file runs and a later review reads them back (BR-1496).
  *   - A single-file run under lease `suite:C:F` (BR-1511): a caller that finds the key held waits, then reads the store and
  *     runs only when no row is stored after the wait.
- *   - Nothing here reads or writes the audit chain: main-red / main-red-green records stay audit rows (BR-1412), the
- *     "main was checked at <commit>" fact is {@link deriveMainCheckedRows} over the stored results.
+ *   - Nothing here reads or writes the audit chain.
  * Side-effect class: stateful (store writes, runner IO through the injected port).
  *
  * @spec_ref spec-the-milestone-review-measures-its-facts-per-landing-and (AC-AF-2, BR-1497, BR-1412)
@@ -25,8 +22,6 @@
 
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { StoreInterface, SuiteFileRunRecord, SuiteResultRecord } from "../store/store-interface.js";
-import { MAIN_CHECKED_ACTION, classifySuiteForMainRed, type MainRedRow } from "./milestone-review.js";
-import type { SuiteRun } from "./milestone-review-inputs.js";
 import { suiteFileLeaseKey, type ReviewLeases } from "./review-batch-lease.js";
 
 /** One test file re-run at a commit. */
@@ -87,42 +82,6 @@ export interface SuiteResultServiceDeps {
   readonly leases?: ReviewLeases;
 }
 
-/**
- * A stored result as the review's existing suite shape: `measured` carries the commands and failing files,
- * `unrunnable` is `not_measured` with its cause (never a pass).
- */
-export function suiteRunOfResult(result: SuiteResultRecord): SuiteRun {
-  if (result.status === "unrunnable") return { status: "not_measured", reason: result.cause ?? "the suite run did not complete" };
-  return {
-    status: "measured",
-    commit: result.commit_sha,
-    commands: result.commands.map((c) => ({ ...c })),
-    skipped: result.skipped.map((s) => ({ ...s })),
-    failing_test_files: result.failing_test_files.map((f) => ({ file: f.file, imports: [...f.imports] })),
-  };
-}
-
-/**
- * The "main was checked at <commit>: red|green" rows the main-red ledger folds, derived from stored results (oldest
- * first). An `unrunnable` result, and a measured run that proves neither red nor green, checked nothing and yields no row.
- *
- * @param results - stored suite results, oldest first
- */
-export function deriveMainCheckedRows(results: readonly SuiteResultRecord[]): MainRedRow[] {
-  const rows: MainRedRow[] = [];
-  for (const result of results) {
-    if (result.status !== "measured") continue;
-    const state = classifySuiteForMainRed(suiteRunOfResult(result));
-    if (state.state === "unmeasured") continue;
-    rows.push({
-      action: MAIN_CHECKED_ACTION,
-      timestamp: result.measured_at,
-      details: { commit: result.commit_sha, status: state.state, at: result.measured_at },
-    });
-  }
-  return rows;
-}
-
 /** Why a single file was run at a commit: a bisection probe, or the confirmation of one end of a transition (spec D6). */
 export type SingleFileRunKind = "bisect" | "confirm";
 
@@ -162,45 +121,6 @@ export function loreErrorText(error: LoreError): string {
 /** Stores and serves one suite result per commit. */
 export class SuiteResultService {
   constructor(private readonly deps: SuiteResultServiceDeps) {}
-
-  /**
-   * Re-runs the named test files at the commit of a stored result and stores one row per file attached to it.
-   *
-   * @param suiteResultId - id of the stored result the re-run belongs to
-   * @param files - repo-relative test files (at least one)
-   * @param runner - runs the files at the result's commit (or at `atCommit`)
-   * @param atCommit - re-run at this commit instead (the landing's `main_before`); the rows are still attached to `suiteResultId` and carry this commit
-   * @returns the stored per-file rows; `err` for an unknown result id, no files, a runner failure or a store failure
-   */
-  async rerunFiles(
-    suiteResultId: string,
-    files: readonly string[],
-    runner: CommitSuiteRunnerPort,
-    atCommit?: string,
-  ): Promise<Result<SuiteFileRunRecord[], LoreError>> {
-    if (files.length === 0) return err({ code: "VALIDATION_ERROR", field: "files", message: "rerunFiles needs at least one test file", rule: "BR-1497" });
-    const found = await this.deps.store.getSuiteResult(suiteResultId);
-    if (!found.ok) return found;
-    if (found.value === null) {
-      return err({ code: "VALIDATION_ERROR", field: "suite_result_id", message: `no stored suite result "${suiteResultId}"`, rule: "BR-1497" });
-    }
-    const commit = atCommit ?? found.value.commit_sha;
-    const ran = await runner.runFiles(commit, files);
-    if (!ran.ok) return ran;
-    const measuredAt = this.deps.now();
-    const rows: SuiteFileRunRecord[] = ran.value.map((o) => ({
-      suite_result_id: suiteResultId,
-      commit_sha: commit,
-      file: o.file,
-      exit_code: o.exit_code,
-      output_tail: o.output_tail,
-      duration_ms: o.duration_ms,
-      measured_at: measuredAt,
-    }));
-    const inserted = await this.deps.store.insertSuiteFileRuns(rows);
-    if (!inserted.ok) return inserted;
-    return ok(rows);
-  }
 
   /**
    * Runs ONE test file at `commit` and stores the outcome keyed by (commit, file, kind), once: when a row for that key and
@@ -343,12 +263,5 @@ export class SuiteResultService {
   /** Every stored suite result, oldest first (regression at the assessed commit reads the known state of each commit from it). */
   listResults(): Promise<Result<SuiteResultRecord[], LoreError>> {
     return this.deps.store.listSuiteResults();
-  }
-
-  /** The main-checked rows (red or green per measured commit) derived from every stored result, oldest first. */
-  async listMainCheckedRows(): Promise<Result<MainRedRow[], LoreError>> {
-    const all = await this.deps.store.listSuiteResults();
-    if (!all.ok) return all;
-    return ok(deriveMainCheckedRows(all.value));
   }
 }

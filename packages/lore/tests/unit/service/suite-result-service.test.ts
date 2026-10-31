@@ -32,12 +32,9 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import type { SuiteResultRecord } from "../../../src/store/store-interface.js";
 import {
   SuiteResultService,
-  deriveMainCheckedRows,
-  suiteRunOfResult,
   type CommitSuiteRunnerPort,
   type FileRunOutcome,
 } from "../../../src/service/suite-result-service.js";
-import { MAIN_CHECKED_ACTION, MAIN_RED_ACTION, classifySuiteForMainRed, foldMainRedRecords, planMainRedWrites } from "../../../src/service/milestone-review.js";
 
 const COMMIT_A = "a".repeat(40);
 const COMMIT_B = "b".repeat(40);
@@ -139,99 +136,6 @@ describe("suite-result store: stored results are read back", () => {
     expect(!ran.ok && "message" in ran.error ? ran.error.message : "").toContain("oracle lock");
     const rows = await service.listFileRuns(`file-batch@${COMMIT_A}`);
     expect(rows.ok && rows.value).toEqual([]);
-  });
-
-  it("AC-AF-2 a stored measured result is returned as the review's suite shape; an unrunnable one is not_measured with its cause", async () => {
-    const { seed } = build();
-    const measured = await seed(COMMIT_A, RED);
-    const unrunnable = await seed(COMMIT_B, UNRUNNABLE);
-    expect(suiteRunOfResult(measured)).toMatchObject({ status: "measured", commit: COMMIT_A });
-    expect(suiteRunOfResult(unrunnable)).toEqual({ status: "not_measured", reason: "no worktree" });
-  });
-});
-
-describe("suite-result store: main red/green is read from the store", () => {
-  it("AC-AF-2 main-checked rows are derived from measured results; an unrunnable result checks nothing", async () => {
-    const { service, seed } = build();
-    await seed(COMMIT_A, GREEN);
-    await seed(COMMIT_B, UNRUNNABLE);
-    const rows = await service.listMainCheckedRows();
-    expect(rows.ok).toBe(true);
-    if (!rows.ok) return;
-    expect(rows.value).toHaveLength(1);
-    expect(rows.value[0]).toMatchObject({ action: MAIN_CHECKED_ACTION, details: { commit: COMMIT_A, status: "green" } });
-  });
-
-  it("AC-AF-2 red at a later commit opens one main-red record whose range starts at the green commit stored before it, and writes no main-checked row", async () => {
-    const { service, seed } = build();
-    await seed(COMMIT_A, GREEN);
-    const redResult = await seed(COMMIT_B, RED);
-    // the store already holds the red commit's own check when the review records main red
-    const rows = await service.listMainCheckedRows();
-    if (!rows.ok) throw new Error("listMainCheckedRows failed");
-    const folded = foldMainRedRecords(rows.value);
-    expect(folded.ok).toBe(true);
-    if (!folded.ok) return;
-    expect(folded.value.checks.map((c) => [c.commit, c.status])).toEqual([
-      [COMMIT_A, "green"],
-      [COMMIT_B, "red"],
-    ]);
-    const measured = classifySuiteForMainRed(suiteRunOfResult(redResult) as Parameters<typeof classifySuiteForMainRed>[0]);
-    const written = planMainRedWrites(folded.value, measured, "2026-10-28T11:00:00.000Z");
-    expect(written.map((r) => r.action)).toEqual([MAIN_RED_ACTION]);
-    expect(written[0]?.details).toMatchObject({ range_from: COMMIT_A, range_to: COMMIT_B, failing_files: [FILE_X], failing_checks: ["bun run test"] });
-  });
-
-  it("AC-AF-2 red with no earlier check starts the range at null, not at the red commit itself", async () => {
-    const { service, seed } = build();
-    const redResult = await seed(COMMIT_B, RED);
-    const rows = await service.listMainCheckedRows();
-    if (!rows.ok) throw new Error("rows failed");
-    const folded = foldMainRedRecords(rows.value);
-    if (!folded.ok) throw new Error("fold failed");
-    const written = planMainRedWrites(folded.value, classifySuiteForMainRed(suiteRunOfResult(redResult) as Parameters<typeof classifySuiteForMainRed>[0]), "t");
-    expect(written[0]?.details).toMatchObject({ range_from: null, last_green_at: null });
-  });
-
-  it("AC-AF-2 deriveMainCheckedRows of nothing is empty", () => {
-    expect(deriveMainCheckedRows([])).toEqual([]);
-  });
-});
-
-describe("suite-result store: per-file re-runs", () => {
-  it("AC-AF-2 re-running named files at a result's commit stores one row per file attached to that result", async () => {
-    const { service, seed } = build();
-    const runner = fakeRunner();
-    const stored = await seed(COMMIT_A, RED);
-    const rerun = await service.rerunFiles(stored.id, [FILE_X, "packages/x/tests/y.test.ts"], runner);
-    expect(rerun.ok).toBe(true);
-    expect(runner.fileRuns).toEqual([{ commit: COMMIT_A, files: [FILE_X, "packages/x/tests/y.test.ts"] }]);
-    const listed = await service.listFileRuns(stored.id);
-    expect(listed.ok && listed.value.map((r) => [r.file, r.exit_code, r.output_tail, r.commit_sha, r.suite_result_id])).toEqual([
-      [FILE_X, 1, `out ${FILE_X}`, COMMIT_A, stored.id],
-      ["packages/x/tests/y.test.ts", 0, "out packages/x/tests/y.test.ts", COMMIT_A, stored.id],
-    ]);
-  });
-
-  it("AC-AF-2 a re-run for an unknown result id or with no files is refused and runs nothing", async () => {
-    const { service, seed } = build();
-    const runner = fakeRunner();
-    const unknown = await service.rerunFiles("suite-missing", [FILE_X], runner);
-    expect(unknown.ok).toBe(false);
-    const stored = await seed(COMMIT_A, GREEN);
-    const empty = await service.rerunFiles(stored.id, [], runner);
-    expect(empty.ok).toBe(false);
-    expect(runner.fileRuns).toEqual([]);
-  });
-
-  it("AC-AF-2 a failing file runner stores no per-file rows", async () => {
-    const { service, seed } = build();
-    const stored = await seed(COMMIT_A, GREEN);
-    const failing: CommitSuiteRunnerPort = { ...fakeRunner(), runFiles: async () => err({ code: "STORE_ERROR", message: "no test:file script" }) };
-    const rerun = await service.rerunFiles(stored.id, [FILE_X], failing);
-    expect(rerun.ok).toBe(false);
-    const listed = await service.listFileRuns(stored.id);
-    expect(listed.ok && listed.value).toEqual([]);
   });
 });
 
