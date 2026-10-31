@@ -1,3 +1,4 @@
+// @spawns-external true spawns the `true` binary to prove a spawn can start
 /** @spec_ref AC-OX-4 */
 /**
  * Unit suite for `scripts/oracle-lock.ts`'s `main`/`releaseLock`

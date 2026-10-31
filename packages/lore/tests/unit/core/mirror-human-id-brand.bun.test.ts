@@ -1,3 +1,4 @@
+// @spawns-external tsc type-checks a throwaway fixture project
 /**
  * AC-MIS-6 negative control (SPEC-mirror-identifier-ssot D3) — proves the
  * `MirrorHumanId` nominal brand (`packages/core/src/ordinal.ts`) actually bites

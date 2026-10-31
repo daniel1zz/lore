@@ -1,4 +1,5 @@
 // @reads packages/core/src/acceptance.ts
+// @spawns-external node runs the TypeScript compiler (`tsc`) over a throwaway fixture project
 /**
  * TG-52: the real-tsc oracle for the second half of AC-FALS-22 (spec-oracle-tier-falsifiability-
  * a-criterion-never-observed-red): "running the project over a fixture whose AcCoverageFact omits

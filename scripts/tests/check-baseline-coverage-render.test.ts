@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts -- scripts/check-baseline-coverage.ts runs the lore entry point as a child process (the test calls its pure renderers)
+// @spawns-external git scripts/check-baseline-coverage.ts and changed-files.ts run git
 /**
  * check:baseline-coverage renders only the undeclared commands `lore baseline coverage --commands-only --json` states
  * (spec-baseline-coverage-refuses-only-undeclared-commands-a-site). Dimensions: HAPPY (an undeclared command with its fix

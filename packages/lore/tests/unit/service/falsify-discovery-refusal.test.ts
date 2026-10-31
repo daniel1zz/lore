@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * Falsify path refuses non-reds — AC-EH-10
  * (spec-evidence-labels-and-reds-are-honest; BR-1075, BR-189; issue #53).

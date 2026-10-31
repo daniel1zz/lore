@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * AC-AF-8: the review diff is built from each landing's `main_before..landing_commit`, never from a commit range or a
  * slug search. Throwaway git repo; no corpus.

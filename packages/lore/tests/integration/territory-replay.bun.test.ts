@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * AC-REPLAY-1 (spec-multi-session-concurrency-queryable-ownership-checkout) —
  * the P1 sufficiency proof. Replays the 2026-08-11 diagnosis — "who owns this

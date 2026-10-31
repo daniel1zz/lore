@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * @spec_ref spec-a-plan-s-tests-and-criteria-are-measured-once-at-its (BR-1496)
  *

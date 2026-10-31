@@ -1,3 +1,6 @@
+// @spawns packages/lore/src/index.ts -- the main-guard fixture runs the lore entry point as a child process
+// @spawns-external git builds a throwaway git repository the test runs against
+// @spawns-external sh the main-guard fixture resolves the real git path through sh
 // @reads assets/project/reference-transaction
 // @reads assets/project/lore-config-template.yaml
 // @reads assets/governance/write-spec-rule.md

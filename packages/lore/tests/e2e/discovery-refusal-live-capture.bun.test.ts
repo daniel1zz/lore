@@ -1,3 +1,4 @@
+// @spawns-external bun runs `bun test` on a file that does not exist, to capture the live refusal output
 // @reads playwright.config.cjs
 // @reads playwright.config.js
 // @reads playwright.config.mjs

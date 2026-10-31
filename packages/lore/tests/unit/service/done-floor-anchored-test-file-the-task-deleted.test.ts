@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * task-done-floor-accepts-an-anchored-test-file-the-task-deleted
  *

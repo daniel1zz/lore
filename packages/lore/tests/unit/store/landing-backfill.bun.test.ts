@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * @spec_ref spec-lore-done-closes-a-commitless-task-through-an-audited-no  AC-ND-7 (D5, D7); issue #422
  * @task task-red-tests-landing-from-git-facts-and-the-one-time-back-fill (TDD-Role: red)

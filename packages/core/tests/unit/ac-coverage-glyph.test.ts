@@ -1,4 +1,5 @@
 // @reads packages/core/src/**
+// @spawns-external tsc type-checks a throwaway fixture project
 /**
  * RED suite for SPEC-143 AC-CT-1's PROJECTION half — `projectAcCoverageGlyph`
  * (`packages/core/src/acceptance.ts`, spec component C4). Written BEFORE the

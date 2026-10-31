@@ -169,7 +169,7 @@ export function runStaticFloor(packageJsonPath: string, run: StepRunner = spawnS
  * defects, scoped to the branch's own diff (`:changed`). Every other `check:*` script runs
  * at plan close (PLAN_CLOSE_STEPS). `--floor`, `--plan-close` and `--list` all read these two lists.
  */
-export const FLOOR_STEPS = ["install", "build", "typecheck", "baseline-coverage:changed", "ac-oracle-ownership:changed"] as const;
+export const FLOOR_STEPS = ["install", "build", "typecheck", "baseline-coverage:changed", "ac-oracle-ownership:changed", "test-spawns:changed"] as const;
 const FLOOR_COMMANDS: Readonly<Record<(typeof FLOOR_STEPS)[number], string>> = {
   install: "bun install --frozen-lockfile",
   build: "bun run build",
@@ -177,6 +177,8 @@ const FLOOR_COMMANDS: Readonly<Record<(typeof FLOOR_STEPS)[number], string>> = {
   // reason: the two checks that caught real defects return to landing scoped to the branch's own diff against main (--changed)
   "baseline-coverage:changed": "bun run check:baseline-coverage:changed",
   "ac-oracle-ownership:changed": "bun run check:ac-oracle-ownership:changed",
+  // reason: a test that spawns a process must declare it (@spawns / @spawns-external); refused at landing, scoped to the diff (AC-SC-2)
+  "test-spawns:changed": "bun run check:test-spawns:changed",
 };
 
 /** Every `check:*` script that is not an aggregate, in package.json order; a new check must be added here (the test fails otherwise). */
@@ -196,6 +198,7 @@ export const PLAN_CLOSE_STEPS: readonly string[] = [
   "check:prose-pins",
   "check:shipped-defaults",
   "check:ac-oracle-ownership",
+  "check:test-spawns",
   "check:evidence-identity-drop-set",
   "check:capture-source-buckets",
   "check:spec-mirror",

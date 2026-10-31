@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * AC-OWN-1 (spec-multi-session-concurrency-queryable-ownership-checkout) —
  * `partitionTerritory` (`adapters/cli/territory-partition.ts`) partitions

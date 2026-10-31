@@ -1,3 +1,6 @@
+// @spawns-external git builds the scratch workspace repository
+// @spawns-external bun runs fixture scripts and `bun test` inside the scratch workspace
+// @spawns-external vitest runs the real vitest binary in the scratch worktree
 // @reads packages
 // @reads packages/*/package.json
 // @reads package.json

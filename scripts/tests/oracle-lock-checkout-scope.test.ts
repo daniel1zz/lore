@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway repository with a linked worktree
 /** @spec_ref AC-OX-7 */
 /**
  * Unit suite for `scripts/oracle-lock.ts`'s `resolveDefaultLockDir`
