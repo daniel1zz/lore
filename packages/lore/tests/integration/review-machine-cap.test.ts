@@ -538,7 +538,8 @@ describe("AC-MC-2: test slots", () => {
     const sleeps: number[] = [];
     const waiter = slotsFor(w, identityOf(2102, START_B), 1, (line) => lines.push(line), sleeps);
     const run = waiter.run(async () => ok("ran"));
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    // reason: the waiter polls on an injected 3 ms sleep; wait for several polls by count, never by a fixed span (a loaded machine stretches it)
+    for (let waited = 0; sleeps.length <= 2 && waited < 400; waited += 1) await new Promise((resolve) => setTimeout(resolve, 5));
     expect(sleeps.length).toBeGreaterThan(2);
     await holding.handle.release();
     expect(await run).toEqual({ ok: true, value: "ran" });
