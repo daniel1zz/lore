@@ -1,0 +1,118 @@
+{
+  "doc_type": "prd",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["problem", "users", "goals", "requirements", "non_goals", "risks"],
+    "properties": {
+      "problem": {
+        "type": "object",
+        "title": "Problem",
+        "required": ["statement", "evidence"],
+        "properties": {
+          "statement": { "type": "string", "minLength": 1 },
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Each claim that the need is real, with its source (an interview, a measurement, an incident, an issue).",
+            "items": {
+              "type": "object",
+              "required": ["claim", "source"],
+              "properties": {
+                "claim": { "type": "string", "minLength": 1 },
+                "source": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      },
+      "users": {
+        "type": "array",
+        "title": "Users",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["role", "need"],
+          "properties": {
+            "role": { "type": "string", "minLength": 1 },
+            "need": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "goals": {
+        "type": "object",
+        "title": "Goals",
+        "x-goal": true,
+        "required": ["statement", "measure"],
+        "properties": {
+          "statement": { "type": "string", "minLength": 1 },
+          "measure": { "type": "string", "minLength": 1, "description": "The observable outcome and its target value." }
+        }
+      },
+      "requirements": {
+        "type": "array",
+        "title": "Requirements",
+        "x-scope-list": true,
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["id", "text"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "text": { "type": "string", "minLength": 1 },
+            "priority": { "type": "string", "enum": ["must", "should", "could"] }
+          }
+        }
+      },
+      "non_goals": {
+        "type": "array",
+        "title": "Non-goals",
+        "x-out-of-scope-list": true,
+        "items": {
+          "type": "object",
+          "required": ["id", "text"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "text": { "type": "string", "minLength": 1 },
+            "why": { "type": "string" }
+          }
+        }
+      },
+      "risks": {
+        "type": "array",
+        "title": "Risks",
+        "items": {
+          "type": "object",
+          "required": ["risk", "mitigation"],
+          "properties": {
+            "risk": { "type": "string", "minLength": 1 },
+            "mitigation": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "related": {
+        "type": "array",
+        "title": "Related documents",
+        "x-ref-list": true,
+        "items": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "dimensions": [
+    { "id": "need-evidence", "question": "What evidence shows the need is real (not assumed), and how strong is it?" },
+    { "id": "measurable-success", "question": "How will we observe that the goal was met, with what number or state and by when?" },
+    { "id": "out-of-scope", "question": "What do people probably expect from this that it will not do, and why not?" },
+    { "id": "users-and-adoption", "question": "Who has to change what they do for this to work, and what makes them do it?" },
+    { "id": "dependencies", "question": "Which other documents, systems or decisions does this depend on or constrain?", "needs_refs": true }
+  ],
+  "checks": ["goal-has-measure", "out-of-scope-not-in-scope", "refs-resolve"],
+  "render": [
+    { "heading": "Problem", "fields": ["problem"] },
+    { "heading": "Users", "fields": ["users"] },
+    { "heading": "Goals", "fields": ["goals"] },
+    { "heading": "Requirements", "fields": ["requirements"] },
+    { "heading": "Non-goals", "fields": ["non_goals"] },
+    { "heading": "Risks", "fields": ["risks"] },
+    { "heading": "Related documents", "fields": ["related"] }
+  ]
+}

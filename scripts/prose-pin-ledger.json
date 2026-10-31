@@ -29,6 +29,12 @@
       "literal_fingerprint": "a task names the issues it resolves",
       "consumer": "the agent reading the close-phase guidance and this repo's CLAUDE.md Dogfooding section",
       "reason": "AC-IGH-1 and AC-IGH-2 assert this exact wording by spec (BR-1153 modify): the guidance is about this wording."
+    },
+    {
+      "file": "packages/lore/tests/integration/review-leases.test.ts",
+      "literal_fingerprint": "another holder leases the plan",
+      "consumer": "the agent reading assets/skills/lore/SKILL.md or assets/skills/lore-autopilot/SKILL.md when `lore assess` exits 75, to know it must re-run later and nothing ran",
+      "reason": "R1's AC requires both skills to state what assess exit 75 means; the test pins that sentence because an agent acts on it (assess-exit-codes.ts is the code-side source)."
     }
   ]
 }
