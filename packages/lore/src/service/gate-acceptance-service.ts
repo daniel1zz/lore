@@ -121,19 +121,24 @@ export function createGateAcceptanceLog(store: Pick<StoreInterface, "listDecisio
   };
 }
 
+/** One accepted root cause with the issue it is filed under and the human decision record that accepts it. */
+export interface AcceptedCause {
+  /** The cause label (`main red: <path>` for a regression file; the cites label of another gate). */
+  readonly cause: string;
+  readonly issue: number;
+  readonly decision_record: number;
+}
+
 /** What one acceptance recorded. */
 export interface GateAcceptance {
   readonly plan: string;
   readonly dimension: GateDimension;
-  /** The issue the accepted finding is filed under (the first one when a regression is charged with several files). */
-  readonly issue: number;
-  /** Every issue the accepted gate is filed under: one per charged file for a regression (BR-1513), else `[issue]`. */
-  readonly issues: readonly number[];
   readonly review: string;
-  /** The id of the human decision record in the decision log that accepts the gate (the first one for several files). */
-  readonly decision_record: number;
-  /** Every human decision record that accepts the gate, one per charged file for a regression. */
-  readonly decision_records: readonly number[];
+  /**
+   * One entry per accepted root cause: one per charged file for a regression (BR-1513), one for any other gate. There is no
+   * "the" issue or "the" decision record of an acceptance, so no first-file view exists to read by mistake.
+   */
+  readonly accepted: readonly AcceptedCause[];
 }
 
 function refuse(field: string, message: string): LoreError {
@@ -328,9 +333,14 @@ export class GateAcceptanceService {
       }
       issues.push(group.issue.number);
     }
-    const firstIssue = issues[0];
-    const firstRecord = records[0];
-    if (firstIssue === undefined || firstRecord === undefined) {
+    const acceptedCauses: AcceptedCause[] = [];
+    for (const [index, group] of filed.value.entries()) {
+      const issue = issues[index];
+      const decisionRecord = records[index];
+      if (issue === undefined || decisionRecord === undefined) continue;
+      acceptedCauses.push({ cause: group.cause.label, issue, decision_record: decisionRecord });
+    }
+    if (acceptedCauses.length === 0 || acceptedCauses.length !== parts.length) {
       return err(refuse("accept-gate", `the ${dimension} finding of ${plan.slug} could not be filed as an issue`));
     }
 
@@ -358,12 +368,12 @@ export class GateAcceptanceService {
       changeSummary: `Accepted gate ${dimension} with a decision (issue ${issues.map((n) => `#${String(n)}`).join(", ")}, human decision record ${records.join(", ")})`,
       decision,
       auditAction: "update",
-      auditDetails: { operation: "accept-gate", dimension, fingerprint: fingerprints[0], fingerprints, decision_record: firstRecord, decision_records: records, issue: firstIssue, issues, review: latest.doc.slug, rule: "BR-1500" },
+      auditDetails: { operation: "accept-gate", dimension, fingerprints, decision_records: records, issues, review: latest.doc.slug, rule: "BR-1500" },
       lock: "none",
       by: this.ports.by,
     });
     if (!written.ok) return written;
-    return ok({ plan: plan.slug, dimension, issue: firstIssue, issues, review: latest.doc.slug, decision_record: firstRecord, decision_records: records });
+    return ok({ plan: plan.slug, dimension, review: latest.doc.slug, accepted: acceptedCauses });
   }
 
   /**

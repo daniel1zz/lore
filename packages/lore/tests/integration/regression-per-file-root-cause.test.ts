@@ -19,6 +19,7 @@ import {
   MILESTONE_DIMENSIONS,
   err,
   ok,
+  partitionKnownDefectsAtClose,
   readKnownDefects,
   renderMilestoneReviewContent,
   type DocId,
@@ -138,14 +139,18 @@ interface World {
 
 /**
  * A plan whose stored review charged `charged` to its regression gate, with one open known-defect entry per file in
- * `entries` (file -> issue number).
+ * `entries` (file -> issue number). `otherPlanLinks` are files of `entries` that a second open plan also links.
  */
-async function worldWith(charged: readonly string[], entries: Readonly<Record<string, number>>): Promise<World> {
+async function worldWith(charged: readonly string[], entries: Readonly<Record<string, number>>, otherPlanLinks: readonly string[] = []): Promise<World> {
   const store = actedStore(new InMemoryStore());
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(undefined));
   const known = Object.entries(entries).map(([file, number]) => ({ repo_id: REPO_ID, number, dimension: "regression", fingerprint: fingerprintOfFile(file) }));
   const plan = await seed(store, docOf("plan", "Regression plan", known.length > 0 ? { known_defects: known } : {}, "approved"));
   await seed(store, docOf("task", "Landed task", { plan_id: plan.id }, "archived", plan.id));
+  if (otherPlanLinks.length > 0) {
+    const shared = known.filter((k) => otherPlanLinks.some((file) => entries[file] === k.number));
+    await seed(store, docOf("plan", "Other plan", { known_defects: shared }, "approved"));
+  }
   const bundle = await corpus.getPlanBundle(plan.id);
   if (!bundle.ok) throw new Error(JSON.stringify(bundle.error));
   const dimensions = Object.fromEntries(
@@ -325,6 +330,29 @@ describe("AC-PF-2 a fixed file closes only its own issue", () => {
     if (!filed.ok) return;
     expect(tracker.filedTitles).toEqual([titleOfFile(FILE_C)]);
     expect(filed.value.map((g) => g.reused)).toEqual([true, true, false]);
+  });
+
+  it("AC-PF-2 BOUNDARY: a fixed file's issue another open plan still links is commented, never closed", async () => {
+    const w = await worldWith([FILE_B], { [FILE_A]: 1, [FILE_B]: 2 }, [FILE_A]);
+    await w.accept(FILE_B);
+    expect((await w.close()).ok).toBe(true);
+    expect(readKnownDefects((await w.reload()).extra).map((e) => e.number)).toEqual([2]);
+    expect(w.github.comments.map((c) => c.issue)).toEqual([1]);
+    expect(w.github.closed).toEqual([]);
+  });
+
+  it("AC-PF-2 NEGATIVE: an accepted security gate keeps an entry with an older fingerprint, as before (only a regression is per file)", () => {
+    const entries = [
+      { repo_id: REPO_ID, number: 1, dimension: "security" as const, fingerprint: "OLD" },
+      { repo_id: REPO_ID, number: 2, dimension: "regression" as const, fingerprint: "OLD-FILE" },
+    ];
+    const split = partitionKnownDefectsAtClose(
+      entries,
+      { security: { verdict: "fail", failingFingerprints: ["NEW"] }, regression: { verdict: "fail", failingFingerprints: ["NEW-FILE"] } },
+      ["security", "regression"],
+    );
+    expect(split.kept.map((e) => e.number)).toEqual([1]);
+    expect(split.detached.map((d) => d.entry.number)).toEqual([2]);
   });
 
   it("AC-PF-2 REGRESSION: still-red a and b keep both entries, so a failing set that did not shrink detaches nothing", async () => {

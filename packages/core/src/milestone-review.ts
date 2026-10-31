@@ -31,7 +31,7 @@ export const MILESTONE_DIMENSIONS = [
 
 export type MilestoneDimension = (typeof MILESTONE_DIMENSIONS)[number];
 
-/** Dimensions whose root cause is measured (suite failing set, contradicted rules), never taken from the judge's cites. */
+/** Dimensions whose root cause is measured (the files charged to the plan, contradicted rules), never taken from the judge's cites. */
 export const MEASURED_CAUSE_DIMENSIONS: readonly MilestoneDimension[] = ["regression", "snapshot_accuracy"];
 
 /**
