@@ -191,7 +191,7 @@ export class SuiteResultService {
    * @param files - repo-relative test files (at least one)
    * @param runner - must implement `runFilesTogether`
    * @param options - `buildFirst`: the runner builds the compiled binary in the worktree before the tests run (a selected file declares `@spawns dist/lore`)
-   * @returns the first stored row of each file, in the order given; `err` when the runner cannot batch, fails, reports no or an incomplete outcome (nothing stored) or the store fails
+   * @returns the first stored row of each file, in the order given; `err` when the runner cannot batch, fails, or leaves a file without a complete outcome (the files it did finish are stored, the others never) or the store fails
    */
   async runBatch(commit: string, files: readonly string[], runner: CommitSuiteRunnerPort, options: RunBatchOptions = {}): Promise<Result<SuiteFileRunRecord[], LoreError>> {
     if (files.length === 0) return err({ code: "VALIDATION_ERROR", field: "files", message: "runBatch needs at least one test file", rule: "BR-1496" });
@@ -229,17 +229,30 @@ export class SuiteResultService {
     if (!ran.ok) return ran;
     const measuredAt = this.deps.now();
     const rows: SuiteFileRunRecord[] = [];
+    let unfinished: LoreError | undefined;
     for (const file of missing) {
       const outcome = ran.value.find((o) => o.file === file);
-      if (outcome === undefined) return err({ code: "STORE_ERROR", message: `the runner reported no outcome for ${file} in the batch at ${commit}` });
-      if (outcome.incomplete !== undefined) return err({ code: "STORE_ERROR", message: `${file} did not complete in the batch at ${commit}: ${outcome.incomplete}` });
+      if (outcome === undefined) {
+        unfinished ??= { code: "STORE_ERROR", message: `the runner reported no outcome for ${file} in the batch at ${commit}` };
+        continue;
+      }
+      if (outcome.incomplete !== undefined) {
+        unfinished ??= { code: "STORE_ERROR", message: `${file} did not complete in the batch at ${commit}: ${outcome.incomplete}` };
+        continue;
+      }
       if (!isTestResultExit(outcome.exit_code)) {
-        return err({ code: "STORE_ERROR", message: `${file} did not run in the batch at ${commit}: ${nonRunCause("bun run test:file", outcome.exit_code, outcome.output_tail)}` });
+        unfinished ??= { code: "STORE_ERROR", message: `${file} did not run in the batch at ${commit}: ${nonRunCause("bun run test:file", outcome.exit_code, outcome.output_tail)}` };
+        continue;
       }
       rows.push({ suite_result_id: key, commit_sha: commit, file, exit_code: outcome.exit_code, output_tail: outcome.output_tail, duration_ms: outcome.duration_ms, measured_at: measuredAt });
     }
-    const inserted = await this.deps.store.insertSuiteFileRuns(rows);
-    if (!inserted.ok) return inserted;
+    // reason: #568 — the files the runner FINISHED are stored even when others in the batch did not (a timed-out chunk keeps what it completed);
+    // the unfinished ones are stored never, so a retry runs exactly them. The call still fails while any file is unfinished.
+    if (rows.length > 0) {
+      const partial = await this.deps.store.insertSuiteFileRuns(rows);
+      if (!partial.ok) return partial;
+    }
+    if (unfinished !== undefined) return err(unfinished);
     // reason: the insert is ignored for a (key, file) a concurrent review stored first; read the winners back so every review sees one outcome.
     const after = await this.storedRowsOf(key, files);
     if (!after.ok) return after;
