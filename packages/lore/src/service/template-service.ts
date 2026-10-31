@@ -51,6 +51,13 @@ export interface ResolvedTemplate {
   readonly template: Template;
 }
 
+/**
+ * What the service reads of a templated document: its address (for messages), type (kind lookup) and `extra`. A
+ * stored `DocRecord` satisfies it, and so does a document that is about to be written and has no row yet — which is
+ * how the write path validates BEFORE anything is stored.
+ */
+export type TemplatedDocLike = Pick<DocRecord, "slug" | "type" | "extra">;
+
 /** Statuses of a template snapshot that count as approved. */
 const APPROVED_STATUSES: readonly string[] = ["approved", "active"];
 
@@ -151,7 +158,7 @@ export class TemplateService {
    * @param doc - a templated document (`extra.template_ref`, `extra.fields`)
    * @returns deterministic markdown, or the resolution refusal
    */
-  async render(doc: DocRecord): Promise<Result<string, LoreError>> {
+  async render(doc: TemplatedDocLike): Promise<Result<string, LoreError>> {
     const loaded = await this.loadPinned(doc);
     if (!loaded.ok) return loaded;
     return ok(renderDocument(loaded.value.template, loaded.value.fields));
@@ -164,7 +171,7 @@ export class TemplateService {
    * @param doc - a templated document
    * @returns the problems (empty = valid), or the resolution refusal
    */
-  async validate(doc: DocRecord): Promise<Result<TemplateProblem[], LoreError>> {
+  async validate(doc: TemplatedDocLike): Promise<Result<TemplateProblem[], LoreError>> {
     const loaded = await this.loadPinned(doc);
     if (!loaded.ok) return loaded;
     const { template, fields } = loaded.value;
@@ -180,7 +187,7 @@ export class TemplateService {
    * @param doc - a templated document
    * @returns the findings (empty = clean), or the resolution refusal
    */
-  async checks(doc: DocRecord): Promise<Result<CheckFinding[], LoreError>> {
+  async checks(doc: TemplatedDocLike): Promise<Result<CheckFinding[], LoreError>> {
     const loaded = await this.loadPinned(doc);
     if (!loaded.ok) return loaded;
     const { template, fields } = loaded.value;
@@ -229,7 +236,7 @@ export class TemplateService {
     return ok([...byVersion.values()]);
   }
 
-  private async loadPinned(doc: DocRecord): Promise<Result<{ template: Template; fields: Record<string, unknown> }, LoreError>> {
+  private async loadPinned(doc: TemplatedDocLike): Promise<Result<{ template: Template; fields: Record<string, unknown> }, LoreError>> {
     const ref: unknown = doc.extra["template_ref"];
     if (typeof ref !== "string" || ref === "") {
       return err(validationError("extra.template_ref", `${doc.slug} has no extra.template_ref: it is not a templated document`, ref));
@@ -243,7 +250,7 @@ export class TemplateService {
     return ok({ template: template.value, fields });
   }
 
-  private criteriaOf(doc: DocRecord): { id: string; cites: string[] }[] {
+  private criteriaOf(doc: TemplatedDocLike): { id: string; cites: string[] }[] {
     const raw: unknown = doc.extra["acceptance_criteria"];
     if (!Array.isArray(raw)) return [];
     const criteria: { id: string; cites: string[] }[] = [];

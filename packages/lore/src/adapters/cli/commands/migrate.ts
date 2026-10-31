@@ -54,6 +54,10 @@
  *                      every stored plan (BL-D2, BR-250). Preview is the DEFAULT; `--apply` writes one audit
  *                      row per plan carrying the removed value; a second `--apply` writes nothing. Thin
  *                      pipe over `PlanOutlineExemptMigrationService`.
+ *   templates [--apply] Seed every shipped template (`assets/templates/*.json`) whose document type/kind has no
+ *                      approved corpus template, as an approved template document (BR-1528). Never overwrites or
+ *                      revises an approved template; a slug held by a draft template is reported BLOCKED (exit 4) and
+ *                      left alone. Preview is the DEFAULT; a second `--apply` writes nothing.
  *   outline-sections [--apply] Remove the stored outline (`extra.outline`) from every PRD, now that the
  *                      outline command family is gone. Preview is the DEFAULT; `--apply` writes one version
  *                      and one audit row per PRD (the previous version and the row's `details.removed` keep
@@ -64,7 +68,12 @@
 import { dirname } from "path";
 import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, findLoreDbPath, formatError, formatErrorFor } from "../utils.js";
+import { exitCode, findLoreDbPath, formatError, formatErrorFor, resolveActor } from "../utils.js";
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { resolveAssetsRoot } from "../setup-args.js";
+import { readShippedTemplateSeeds } from "../template-seeds.js";
+import { TemplateSeedService } from "../../../service/template-seed-service.js";
 import { resolveCorpus } from "../corpus-resolution.js";
 import { migrateConfigKeys, migrateMemoryLimits } from "@lore/core/node";
 import { listMemoryFileFindings } from "../memory-limits-migration.js";
@@ -76,6 +85,9 @@ import { printLine } from "../output.js";
 import { runMigrateSchema } from "../migrate-schema.js";
 import { findLoreProjectRoot, runFragmentsMigration } from "../migrate-fragments-wiring.js";
 
+// packages/lore/src/adapters/cli/commands/migrate.ts -> repo root is 6 levels up (same as init.ts).
+const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..", "..");
+
 export default defineLoreCommand({
   meta: {
     name: "migrate",
@@ -85,9 +97,9 @@ export default defineLoreCommand({
     version: {
       type: "positional",
       description:
-        "Migration action: schema | v1 | phases | spec-kind | tasks-to-phases | outline-sections | ordinals | spec-parents | plan-outline-exempt | config-keys | memory-limits | audit-backfill | fragments" + "\n" +
+        "Migration action: schema | v1 | phases | spec-kind | tasks-to-phases | templates | outline-sections | ordinals | spec-parents | plan-outline-exempt | config-keys | memory-limits | audit-backfill | fragments" + "\n" +
         "Fragments: `fragments --scope user|project [--apply]` (rewrite old audience/mode/delivery fragment frontmatter to `inject`; preview by default, `--apply` writes; exit 5 concurrent change, 4 refused file). " +
-        "Corpus migration: `schema [--dry-run]` (the ONLY command that upgrades the corpus to this binary's schema; every other command refuses an older corpus with exit 4; one audit row per upgrade), `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `ordinals` (SPEC-084 ordinal repair migration), `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores), `plan-outline-exempt` (remove the legacy outline-sync exemption from every stored plan; preview by default, `--apply` writes), `outline-sections` (remove the stored outline from every PRD, archived in its previous version; preview by default, `--apply` writes), `config-keys` (rename retired keys in .lore/config.yaml; preview by default, `--apply` writes), `memory-limits` (remove the retired memory-file adoption setting and list the findings a person must fix; preview by default, `--apply` writes), or `audit-backfill` (record pre-writer versions as reconstructed audit entries and remove the retired audit cut-off; preview by default, `--apply` writes)",
+        "Corpus migration: `schema [--dry-run]` (the ONLY command that upgrades the corpus to this binary's schema; every other command refuses an older corpus with exit 4; one audit row per upgrade), `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `ordinals` (SPEC-084 ordinal repair migration), `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores), `plan-outline-exempt` (remove the legacy outline-sync exemption from every stored plan; preview by default, `--apply` writes), `outline-sections` (remove the stored outline from every PRD, archived in its previous version; preview by default, `--apply` writes), `templates` (seed every shipped template with no approved corpus template as an approved template document, never overwriting; preview by default, `--apply` writes), `config-keys` (rename retired keys in .lore/config.yaml; preview by default, `--apply` writes), `memory-limits` (remove the retired memory-file adoption setting and list the findings a person must fix; preview by default, `--apply` writes), or `audit-backfill` (record pre-writer versions as reconstructed audit entries and remove the retired audit cut-off; preview by default, `--apply` writes)",
       required: true,
     },
     from: {
@@ -100,7 +112,7 @@ export default defineLoreCommand({
     },
     apply: {
       type: "boolean",
-      description: "[ordinals, spec-parents, plan-outline-exempt, outline-sections, config-keys, memory-limits, audit-backfill, fragments] Execute the migration (default is dry-run/preview-only)",
+      description: "[templates, ordinals, spec-parents, plan-outline-exempt, outline-sections, config-keys, memory-limits, audit-backfill, fragments] Execute the migration (default is dry-run/preview-only)",
     },
     scope: {
       type: "string",
@@ -151,6 +163,7 @@ export default defineLoreCommand({
       args.version !== "spec-kind" &&
       args.version !== "tasks-to-phases" &&
       args.version !== "outline-sections" &&
+      args.version !== "templates" &&
       args.version !== "ordinals" &&
       args.version !== "spec-parents" &&
       args.version !== "plan-outline-exempt" &&
@@ -159,7 +172,7 @@ export default defineLoreCommand({
       args.version !== "audit-backfill"
     ) {
       inv.io.stderr.write(
-        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, outline-sections, ordinals, spec-parents, plan-outline-exempt, config-keys, memory-limits, audit-backfill.\n`,
+        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, templates, outline-sections, ordinals, spec-parents, plan-outline-exempt, config-keys, memory-limits, audit-backfill.\n`,
       );
       exitCli(2);
     }
@@ -360,6 +373,48 @@ export default defineLoreCommand({
         for (const e of report.errors) printLine(inv.io.stdout, `  error ${e}`);
         if (!apply) printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
         return failed ? 4 : 0;
+      } finally {
+        app.close();
+      }
+    }
+
+    // ── templates action ──────────────────────────────────────────────────
+    // BR-1528 — creates, as approved corpus templates, every shipped seed whose type/kind has none; an approved
+    // template is never overwritten. Preview is the default; `--apply` writes.
+    if (args.version === "templates") {
+      const assetsRoot = resolveAssetsRoot({ repoRoot: REPO_ROOT, isCompiled: inv.isCompiled, execPath: inv.execPath });
+      const seeds = readShippedTemplateSeeds(assetsRoot);
+      if (!seeds.ok) {
+        inv.io.stderr.write(formatErrorFor(inv, seeds.error) + "\n");
+        return exitCode(seeds.error);
+      }
+      const { app } = loadLoreApp({ inv });
+      try {
+        if (app.templateService === undefined) {
+          inv.io.stderr.write("Internal error: TemplateService not wired on App\n");
+          return 1;
+        }
+        const seeder = new TemplateSeedService(app.templateService, app.corpusService);
+        const apply = args.apply === true;
+        const result = apply ? await seeder.apply(seeds.value, { by: resolveActor(inv) }) : await seeder.preview(seeds.value);
+        if (!result.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, result.error) + "\n");
+          return exitCode(result.error);
+        }
+        const blocked = result.value.filter((outcome) => outcome.action === "blocked");
+        if (args.json) {
+          printLine(inv.io.stdout, JSON.stringify({ ok: blocked.length === 0, data: { applied: apply, outcomes: result.value } }, null, 2));
+          return blocked.length === 0 ? 0 : 4;
+        }
+        printLine(inv.io.stdout, apply ? "Template seeding complete" : "Template seeding (preview)");
+        printLine(inv.io.stdout, "─".repeat(40));
+        for (const outcome of result.value) {
+          const detail = outcome.action === "seeded" ? outcome.slug : outcome.action === "present" ? `approved ${outcome.ref}, left as is` : `${outcome.slug}: ${outcome.reason}`;
+          const verb = outcome.action === "seeded" ? (apply ? "seeded " : "would seed") : outcome.action === "present" ? "present" : "BLOCKED";
+          printLine(inv.io.stdout, `  ${verb.padEnd(10)} ${outcome.slot.padEnd(28)} ${detail}`);
+        }
+        if (!apply && result.value.some((outcome) => outcome.action === "seeded")) printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
+        return blocked.length === 0 ? 0 : 4;
       } finally {
         app.close();
       }

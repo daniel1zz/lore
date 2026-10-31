@@ -1775,6 +1775,21 @@ function buildSuiteResultService(store: StoreInterface): SuiteResultService {
 }
 
 /**
+ * Arms template validation and body rendering on the one document write path (BR-1528/BR-1529): the
+ * `CorpusService` gets the `TemplateService` and the create policy from `workflow.structured_documents`.
+ * Both composition roots call it, so no surface is composed with an unvalidated write route.
+ */
+function wireStructuredWrite(app: App, config: LoreConfig | undefined): void {
+  if (app.templateService === undefined) return;
+  app.corpusService.setStructuredWrite({
+    templates: app.templateService,
+    // reason: inlined (same expression as `resolveRequireStructuredCreate`, @lore/core) because this function sits in the
+    // app.ts composition root, whose import block is held by another task's claim; the default is `false` either way.
+    requireStructuredCreate: config?.workflow?.structured_documents?.require_create ?? false,
+  });
+}
+
+/**
  * Builds the post-archive issue step and hands it to every service that commits an archive
  * (spec-archiving-the-work-that-resolves-a-defect-report-closes D4). The closer exists only for a
  * GitHub-repo `feedback.upstream` — NOT the vendor-consent shape, which names the lore vendor's own
@@ -2127,6 +2142,7 @@ function createAppUnscoped(
       // reason: D2 — a SQLite file is persistent, so verify runs in a worker over this same file (read-only).
       buildAuditVerifyRunner({ kind: "sqlite", dbPath }, { anchorRoot: repoRoot }),
     );
+    wireStructuredWrite(sqliteApp, config);
     wireIssueCloseOnArchive(sqliteApp, sqliteStore, config, ambient);
     wirePlanCloseIssues(sqliteApp, config, ambient, dbPath);
     return sqliteApp;
@@ -2240,6 +2256,7 @@ function createAppUnscoped(
         // opened without the remote URL (no second thread syncing the embedded replica).
         buildAuditVerifyRunner({ kind: "turso", localPath: dbPath }, { anchorRoot: repoRoot }),
       );
+    wireStructuredWrite(tursoApp, config);
     wireIssueCloseOnArchive(tursoApp, store, config, ambient);
     wirePlanCloseIssues(tursoApp, config, ambient, dbPath);
     return { ok: true, value: tursoApp };
