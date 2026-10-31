@@ -8,6 +8,9 @@
  * that RUN; a test spawning `lore` from PATH, or a test that is never selected, escapes it. This static check refuses
  * the landing instead.
  *
+ * Declaration on a helper: a NON-test module whose header carries `@spawns-external` and no `@spawns` covers its own spawn
+ * sites for every test that imports it (external programs cannot select tests; see `externalOnlyHelpers`); `lore` from
+ * PATH is never covered that way. Everything else is carried by the test file.
  * Rule: a test file (`*.test.ts` / `*.test.tsx` under packages/<pkg>/tests/** or scripts/**) that reaches a spawn site
  * needs at least one `@spawns <path>` or `@spawns-external <program> <reason>` header line; if any reached site spawns
  * `lore` from PATH it needs a `@spawns` line matching `dist/lore`. A reached module is any NON-production module:
@@ -226,7 +229,8 @@ function collectBindings(withStrings: string): SpawnBindings {
     }
     if (braces !== null) for (const { imported, local } of parseNamedList(braces[1]!)) bind(moduleName, "named", imported, local);
   }
-  const loaderRe = `(?:await\\s+)?(?:require|import)\\(\\s*["'](${moduleAlternation})["']\\s*\\)`;
+  // `createRequire(import.meta.url)("node:child_process")` is a require too (test helpers use it to dodge a mocked module)
+  const loaderRe = `(?:await\\s+)?(?:require|import|createRequire\\([^)]*\\))\\(\\s*["'](${moduleAlternation})["']\\s*\\)`;
   for (const match of withStrings.matchAll(new RegExp(`(?:const|let|var)\\s*\\{([^}]*)\\}\\s*=\\s*${loaderRe}`, "g"))) {
     for (const { imported, local } of parseNamedList(match[1]!)) bind(match[2]!, "named", imported, local);
   }
@@ -278,7 +282,7 @@ export function scanSpawnSites(content: string): SpawnSite[] {
     }
   }
   // `(await import("node:child_process")).spawnSync(...)` / `require("child_process").execSync(...)`: the call hangs off the loader
-  const loaderCall = new RegExp(`(?:require|import)\\(\\s*["'](?:${CHILD_PROCESS_MODULES.join("|")})["']\\s*\\)\\s*\\)?\\s*\\.\\s*(${CHILD_PROCESS_APIS.join("|")})\\s*\\(`, "g");
+  const loaderCall = new RegExp(`(?:require|import|createRequire\\([^)]*\\))\\(\\s*["'](?:${CHILD_PROCESS_MODULES.join("|")})["']\\s*\\)\\s*\\)?\\s*\\.\\s*(${CHILD_PROCESS_APIS.join("|")})\\s*\\(`, "g");
   for (const match of withStrings.matchAll(loaderCall)) push(match.index!, match[1]!, match.index! + match[0].length, false);
   const seen = new Set<string>();
   return found
@@ -396,16 +400,44 @@ export function selectChangedTests(fileMap: FileMap, changedPaths: readonly stri
 }
 
 /**
+ * Non-test modules whose own header carries `@spawns-external` and no `@spawns`: they start programs outside the repository
+ * and say which. Such a program can never select a test, so naming it once on the helper covers every importer; without
+ * this, a helper every test reaches (the test identity helper reads its own start time with `ps`) would force one
+ * identical line into hundreds of test files. A helper that starts a repository file declares `@spawns` or nothing, and
+ * its importers keep carrying the declaration.
+ */
+function externalOnlyHelpers(fileMap: FileMap): Set<string> {
+  const covered = new Set<string>();
+  for (const [file, content] of fileMap) {
+    if (isTestFile(file)) continue;
+    try {
+      const declarations = parseSpawnDeclarations(content);
+      if (declarations.external.length > 0 && declarations.spawns.length === 0) covered.add(file);
+    } catch (error) {
+      if (!(error instanceof DeclaredInputsError)) throw error; // a malformed header covers nothing
+    }
+  }
+  return covered;
+}
+
+/**
  * Violations over `testFiles` (default: every test file in `fileMap`).
  * @throws SpawnCheckError("no-test-files") when there is no test file to check: a pass over nothing is not a pass
  */
 export function findSpawnViolations(fileMap: FileMap, testFiles: readonly string[] = [...fileMap.keys()].filter(isTestFile)): SpawnViolation[] {
   if (testFiles.length === 0) throw new SpawnCheckError("no-test-files", "check:test-spawns: no test files to check (refusing to report a pass over nothing)");
   const { forward, sites } = analyse(fileMap);
+  const covered = externalOnlyHelpers(fileMap);
   const violations: SpawnViolation[] = [];
   for (const test of testFiles) {
     const reached: Array<SpawnSite & { file: string; chain: string[] }> = [];
-    for (const [module, chain] of reach(test, forward)) for (const site of sites.get(module) ?? []) reached.push({ ...site, file: module, chain });
+    for (const [module, chain] of reach(test, forward)) {
+      for (const site of sites.get(module) ?? []) {
+        // a helper that names its own external programs has declared them for every importer; `lore` from PATH never is
+        if (module !== test && covered.has(module) && !site.loreFromPath) continue;
+        reached.push({ ...site, file: module, chain });
+      }
+    }
     if (reached.length === 0) continue;
     const first = reached[0]!;
     let declarations: SpawnDeclarations;
@@ -435,7 +467,7 @@ export function formatViolation(violation: SpawnViolation): string {
   const via = chain.length > 1 ? `\n    via ${chain.join(" -> ")}` : "";
   if (missing === "malformed-declaration") return `${testFile}: malformed spawn declaration: ${detail ?? ""}\n    spawn call site: ${where}${via}`;
   const fix =
-    missing === "dist-lore"
+    missing === "dist-lore" || site.loreFromPath
       ? "it spawns `lore` from PATH: add `// @spawns dist/lore`"
       : "add `// @spawns <repo path>` or `// @spawns-external <program> <reason>` to its leading comment block";
   return `${testFile}: undeclared spawn at ${where}${via}\n    ${fix}`;

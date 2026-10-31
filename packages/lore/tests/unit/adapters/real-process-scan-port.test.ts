@@ -1,3 +1,4 @@
+// @spawns-external sleep a long-running child whose working directory the process scan must find
 /**
  * @spec_ref spec-one-worktree-removal-test-for-the-guard-lore-done-and-a (D1: the process scan lives once, in lore)
  * @task task-single-worktree-removal-test-used-by-the-hook-lore-done

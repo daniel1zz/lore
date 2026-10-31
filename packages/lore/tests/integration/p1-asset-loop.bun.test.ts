@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * @spec_ref IoC vertical-slice tech-spec §4.1/§11, P1 — end-to-end proof of the "asset
  * discovery + feeding" closed loop: a user-authored `knowledge/skill` doc (created

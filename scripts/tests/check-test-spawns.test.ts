@@ -134,6 +134,27 @@ describe("a test that spawns through its imports", () => {
     expect(violationsOf({ ...files, [TEST_PATH]: files[TEST_PATH]!.replace(/^\/\/.*\n/, "") }).map((v) => v.testFile)).toEqual([TEST_PATH]);
   });
 
+  it("a helper whose own header names only external programs covers its importers; one that spawns a repo file does not", () => {
+    const test = `import "../helpers/helper-a";\n${TEST_BODY}`;
+    expect(violationsOf({ [TEST_PATH]: test, [HELPER_A]: `// @spawns-external echo prints a greeting\n${SPAWN_SYNC_SOURCE}` })).toEqual([]);
+    expect(violationsOf({ [TEST_PATH]: test, [HELPER_A]: `// @spawns packages/lore/src/index.ts\n// @spawns-external echo x\n${SPAWN_SYNC_SOURCE}` })).toHaveLength(1);
+    expect(violationsOf({ [TEST_PATH]: test, [HELPER_A]: `// @spawns-external echo\n${SPAWN_SYNC_SOURCE}` })).toHaveLength(1);
+  });
+
+  it("a helper covered by `@spawns-external` never covers `lore` from PATH", () => {
+    const violations = violationsOf({
+      [TEST_PATH]: `import "../helpers/helper-a";\n${TEST_BODY}`,
+      [HELPER_A]: '// @spawns-external git x\nimport { spawnSync } from "node:child_process";\nspawnSync("lore", []);\n',
+    });
+    expect(violations).toHaveLength(1);
+    expect(formatViolation(violations[0]!)).toContain("@spawns dist/lore");
+  });
+
+  it("a spawn through createRequire(...)(\"node:child_process\") is recognised", () => {
+    const source = 'import { createRequire } from "node:module";\nconst { spawnSync: run } = createRequire(import.meta.url)("node:child_process");\nrun("ps");\n';
+    expect(scanSpawnSites(source).map((s) => s.api)).toEqual(["spawnSync"]);
+  });
+
   it("an import that cycles back does not loop", () => {
     const violations = violationsOf({
       [TEST_PATH]: `import "../helpers/helper-a";\n${TEST_BODY}`,

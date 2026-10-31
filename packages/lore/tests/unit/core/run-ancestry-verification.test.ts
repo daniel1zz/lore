@@ -1,3 +1,5 @@
+// @spawns-external bun starts a short-lived child process whose ancestry the test inspects
+// @spawns-external ps runs a stub ps script written into a throwaway directory
 /**
  * @spec_ref spec-a-lore-call-s-run-identity-is-injected-per-bash-call-and#AC-RV-3
  * @task task-red-tests-export-prefix-ancestry-verification-refusal (RED; implementation lands in a later task of the same plan)

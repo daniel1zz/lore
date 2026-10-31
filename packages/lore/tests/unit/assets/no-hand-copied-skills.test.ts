@@ -1,4 +1,5 @@
 // @reads assets/skills/**
+// @spawns-external git lists the tracked files of this checkout
 /**
  * Issue #218 guard: `assets/skills/<name>/` is the single source of a shipped
  * skill; `lore setup` renders the real copy. A git-tracked

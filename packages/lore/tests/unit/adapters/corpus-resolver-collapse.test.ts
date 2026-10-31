@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * @spec_ref spec-corpus-resolution-carries-provenance-and-a-foreign-write AC-CP-2
  *   (plus the two additions from the dispatching task's §5.1/§5.2: the

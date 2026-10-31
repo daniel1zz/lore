@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * AC-EH-5 (a)-(e) (spec-evidence-labels-and-reds-are-honest, BR-1074) — `VerifyRunnerService.verifyFalsifier`
  * refuses a STORED out-of-range falsifier expected exit code BEFORE anything runs: no control run, no evidence

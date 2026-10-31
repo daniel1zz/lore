@@ -1,4 +1,5 @@
 // @reads packages/lore/src/adapters/http/dashboard-assets-loader.ts
+// @spawns-external bun runs the lore typecheck script (`bun run typecheck:lore`) in a process group
 /**
  * RED scenarios for the dashboard assets loader (spec
  * spec-dashboard-production-packaging-one-command-lore-dashboard, DD-1).

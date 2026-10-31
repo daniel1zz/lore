@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * @spec_ref spec-corpus-resolution-carries-provenance-and-a-foreign-write#AC-CP-5
  *   (§D5 adapter matrix — THE HTTP ROW, driven at the WIRED path)

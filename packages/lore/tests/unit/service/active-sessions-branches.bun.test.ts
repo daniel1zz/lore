@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * AC-OWN-3 (spec-multi-session-concurrency-queryable-ownership-checkout) —
  * `SessionService.bootstrap`'s `active_sessions[].branches` is POPULATED from

@@ -1,3 +1,4 @@
+// @spawns-external sh run-chain's step runner, imported for its pure functions only
 // @reads scripts/run-chain.ts
 // @reads .claude/**
 // @reads .gitattributes

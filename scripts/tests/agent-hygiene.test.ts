@@ -1,3 +1,5 @@
+// @spawns-external git reads the porcelain status of a throwaway checkout
+// @spawns-external bun runs a parent script and the process-group runner in a throwaway directory
 // @reads assets/agents/**
 // @reads assets/skills/**
 // @reads assets/hooks/**

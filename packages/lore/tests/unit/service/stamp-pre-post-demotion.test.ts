@@ -1,3 +1,4 @@
+// @spawns-external git builds a throwaway git repository the test runs against
 /**
  * AC-CT-5 (SPEC-143, corrected 2026-10-17 / R13) — the runner reads the state
  * stamp (`head_sha` + `worktree_dirty`) BEFORE and AFTER the AC command.

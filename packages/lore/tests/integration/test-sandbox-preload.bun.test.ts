@@ -1,3 +1,5 @@
+// @spawns-external sh the child-environment probe runs `sh -c` to read the sandbox marker
+// @spawns-external bun runs a nested vitest project in a throwaway directory
 // @reads scripts/test-isolation-env.ts
 // @reads scripts/test-isolation-setup.ts
 /**

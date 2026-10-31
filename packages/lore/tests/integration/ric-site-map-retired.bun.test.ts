@@ -1,3 +1,4 @@
+// @spawns-external bun runs inline code that seeds a site-map value into a throwaway database
 // @reads packages/**
 // @reads scripts/**
 // @reads assets/**
