@@ -73,7 +73,7 @@ export const REVIEW_BATCH_JOB = "review-batch";
 
 /** The keyed leases of one process (plan, suite, issue keys, BR-1511); `holder` identifies it (actor plus pid). */
 export function buildReviewLeases(app: App, holder: string): ReviewLeases | undefined {
-  return app.reviewLeaseStore === undefined ? undefined : new ReviewLeases(app.reviewLeaseStore, holder);
+  return app.reviewLeaseStore === undefined ? undefined : new ReviewLeases(app.reviewLeaseStore, holder, Date.now, undefined, undefined, undefined, (request) => app.corpusService.appendAudit(request));
 }
 
 /** Spec of one delegated detached job. */

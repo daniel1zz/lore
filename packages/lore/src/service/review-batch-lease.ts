@@ -4,7 +4,7 @@
  * Purpose: let exactly one holder do one piece of review work at a time across processes (and, through the synced corpus,
  *   machines): one lease row per key, so reviews of different plans run concurrently while the same plan, the same
  *   (commit, file) test run and the same root cause's issue write each have one holder.
- * Public surface: {@link ReviewLeases}, {@link LeaseStorePort}, {@link LeaseHandle}, {@link LeaseOutcome}, the key builders
+ * Public surface: {@link ReviewLeases}, {@link LeaseStorePort}, {@link LeaseAuditPort}, {@link LeaseHandle}, {@link LeaseOutcome}, the key builders
  *   {@link planLeaseKey} / {@link suiteFileLeaseKey} / {@link issueLeaseKey} / {@link issueWriteLeaseKey} /
  *   {@link batchLeaseKey} / {@link testSlotLeaseKey}, {@link REVIEW_LEASE_EXPIRY_MS}, {@link REVIEW_LEASE_RENEW_MS},
  *   {@link LEASE_WAIT_POLL_MS}, {@link UNKNOWN_MACHINE_ID}.
@@ -35,17 +35,30 @@
 
 import { randomBytes } from "node:crypto";
 import { ok, type LoreError, type Result } from "@lore/core";
-import type { AuditEntry } from "@lore/core";
 import type { LeaseAcquisition, LeaseRecord, LeaseTakeover } from "../store/store-shared.js";
 import { defaultLeaseLiveness, formatHolder, isHolderProvablyDead, type LeaseLiveness, type LocalProcessIdentity } from "./review-lease-liveness.js";
 
 /** The audit action of a takeover of a dead holder's lease (BR-1514). */
 export const REVIEW_LEASE_TAKEOVER_ACTION = "review_lease_takeover";
 
-/** The lease verbs of the store, plus the audit append a takeover owes. */
+/**
+ * The one audit row a takeover owes, in the shape of `CorpusService.appendAudit`'s request (the one audit write path;
+ * this module never writes an audit row through the store).
+ */
+export interface LeaseAuditRequest {
+  readonly action: string;
+  readonly sessionId: string;
+  readonly by: string;
+  readonly timestamp: string;
+  readonly details: Readonly<Record<string, unknown>>;
+}
+
+/** The audit port of {@link ReviewLeases}: wired to `CorpusService.appendAudit` (`(r) => corpusService.appendAudit(r)`). */
+export type LeaseAuditPort = (request: LeaseAuditRequest) => Promise<Result<void, LoreError>>;
+
+/** The lease verbs of the store (the audit append of a takeover goes through {@link LeaseAuditPort}, not the store). */
 export interface LeaseStorePort {
   takeOverLease(name: string, expectedHolder: string, newHolder: string, expiresAtIso: string): Promise<Result<LeaseTakeover, LoreError>>;
-  appendAuditEntry(entry: AuditEntry): Promise<Result<void, LoreError>>;
   acquireLease(name: string, holder: string, nowIso: string, expiresAtIso: string): Promise<Result<LeaseAcquisition, LoreError>>;
   renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>>;
   releaseLease(name: string, holder: string): Promise<Result<void, LoreError>>;
@@ -133,6 +146,11 @@ export class ReviewLeases {
     private readonly schedule: Schedule = intervalSchedule,
     private readonly sleep: Sleep = timerSleep,
     private readonly liveness: LeaseLiveness = defaultLeaseLiveness,
+    /**
+     * The audit write path for a takeover row. reason: without it a dead holder's lease is never taken over (the key
+     * stays `busy` until expiry): a takeover with no audit row must not stand. Production wiring always passes it.
+     */
+    private readonly audit?: LeaseAuditPort,
   ) {}
 
   /** Takes the lease of `key` (a live lease of another holder is `busy`; an expired one is taken over) and starts the renewal timer. */
@@ -218,6 +236,7 @@ export class ReviewLeases {
     expiresAtIso: string,
   ): Promise<Result<{ readonly state: "taken" } | { readonly state: "busy"; readonly holder: string; readonly expires_at: string }, LoreError>> {
     const stillBusy = { state: "busy" as const, holder: busy.holder, expires_at: busy.expires_at };
+    if (this.audit === undefined) return ok(stillBusy);
     if (!(await isHolderProvablyDead(busy.holder, identity, this.liveness.probe))) return ok(stillBusy);
     const swapped = await this.store.takeOverLease(key, busy.holder, holder, expiresAtIso);
     if (!swapped.ok) return swapped;
@@ -230,10 +249,10 @@ export class ReviewLeases {
       }
       return ok({ state: "busy", holder: current.holder, expires_at: current.expires_at });
     }
-    const audited = await this.store.appendAuditEntry({
+    const audited = await this.audit({
       timestamp: new Date(this.clock()).toISOString(),
-      actor: this.holder,
-      session_id: this.holder,
+      by: this.holder,
+      sessionId: this.holder,
       action: REVIEW_LEASE_TAKEOVER_ACTION,
       details: { key, dead_holder: busy.holder, new_holder: holder, rule: "BR-1514" },
     });
