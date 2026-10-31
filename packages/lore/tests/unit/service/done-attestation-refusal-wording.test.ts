@@ -38,8 +38,8 @@
  *                self-reported, never as runner-captured
  *   ERROR:       a genuinely self-reported population is STILL described
  *                accurately (AC-2) — the word was not merely deleted
- *   STATE:       the three OTHER independent `done()` floors (red-first,
- *                declared-ac_scope/no-new-tests, unfiltered-test-file-anchor)
+ *   STATE:       the OTHER independent `done()` floors (red-first,
+ *                contract-oracles, unfiltered-test-file)
  *                still fire independently, and none masks another (AC-5); the
  *                audited `--override-attestation` still archives and still
  *                records its reason verbatim (AC-6)
@@ -68,6 +68,7 @@ import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
+import { LANDING_COMMIT, landedTaskExtra, unitDoneContract } from "./done-contract-unit-fixture.js";
 // ─── Harness ────────────────────────────────────────────────────────────────
 
 function makeServices() {
@@ -95,10 +96,16 @@ async function createTask(
     title,
     parent_id: planId,
     content: "body",
-    extra: { plan_id: planId, ...extraOpts },
+    // reason: `done` judges the stored contract and the landing (AC-DCS1-7); the fixture stores the shapes approve and integrate write.
+    extra: { plan_id: planId, ...landedTaskExtra(), ...extraOpts },
   } as CreateDocInput);
   if (!result.ok) throw new Error(`task create failed: ${JSON.stringify(result.error)}`);
   return result.value.id;
+}
+
+/** A contract that holds no oracle: only the attested-pass floor stands, which is what the override waives (it waives nothing after it). */
+function noOracleContractExtra(): Record<string, unknown> {
+  return { done_contract: { ...unitDoneContract(), oracles: [] } };
 }
 
 /** A SELF-REPORTED `result:"pass"` row — `capture_source: "self-report"`, the shape a
@@ -146,7 +153,8 @@ function attestedPass(overrides: Partial<VerifiedEvidenceInput> = {}): VerifiedE
     result: "pass",
     recorded_by: "runner",
     capture_source: "runner",
-    attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+    // reason: AC-DCS1-27 (b) — a pass counts for a code oracle when it names the landing it was recorded for.
+    attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, recorded_at_landing: LANDING_COMMIT },
     ...overrides,
   };
 }
@@ -451,7 +459,7 @@ describe("REGRESSION — AC-4: the refused set, error identity and exit code are
   it("an already-archived task is STILL an idempotent no-op, evaluated before this floor", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId);
+    const taskId = await createTask(corpusService, planId, "Wording Task", noOracleContractExtra());
 
     await taskWorkflowService.addEvidence(taskId, runnerCapturedPass());
     const first = await taskWorkflowService.done(taskId, { by: "alice", overrideReason: "manual browser check" });
@@ -473,11 +481,11 @@ describe("REGRESSION — AC-4: the refused set, error identity and exit code are
 // each floor is identified below by its OWN message tokens, plus a NEGATIVE
 // condition asserting the attestation floor's new wording is absent. That pair
 // is what proves the floors stayed independent instead of one absorbing another.
-describe("STATE — AC-5: the three OTHER independent done() floors still fire, and none masks another", () => {
+describe("STATE — AC-5: the OTHER independent done() floors still fire, and none masks another", () => {
   it("the red-first floor fires with its OWN message once the attestation floor is satisfied", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId, "Red First Task", { red_first: true });
+    const taskId = await createTask(corpusService, planId, "Red First Task", landedTaskExtra({ redRequired: true }));
 
     // Attestation floor satisfied; the red-first floor must now be the blocker.
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-08-06T09:00:00.000Z");
@@ -486,39 +494,37 @@ describe("STATE — AC-5: the three OTHER independent done() floors still fire, 
     expect(done.ok).toBe(false);
     if (done.ok) return;
     expect(done.error.code).toBe("VALIDATION_ERROR");
-    expect(messageOf(done.error)).toContain("extra.red_first");
+    expect(messageOf(done.error)).toContain("red_required: true");
     expect(messageOf(done.error)).toContain("expected-fail");
+    expect(messageOf(done.error)).toContain("[floor: red-first]");
     // The attestation floor's own wording must NOT appear — it already passed.
     expect(messageOf(done.error)).not.toContain("runner-captured");
     expect(messageOf(done.error)).not.toContain("capture_source");
   });
 
-  it("the declared-ac_scope no-new-tests floor fires with its OWN message once the attestation floor is satisfied", async () => {
+  it("the contract-oracles floor fires with its OWN message once the attestation floor is satisfied by a pass of another command", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    // An EXPLICITLY EMPTY declaration arms the floor (keyed on PRESENCE).
-    const taskId = await createTask(corpusService, planId, "Declared Scope Task", { ac_scope: [] });
+    const taskId = await createTask(corpusService, planId, "Oracle Task");
 
-    await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-08-06T09:00:00.000Z");
+    // An attested pass that counts, but of a command that is not the contract's typecheck oracle.
+    await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass({ command: "bun run lint" }), "2026-08-06T09:00:00.000Z");
 
     const done = await taskWorkflowService.done(taskId, { by: "alice" });
     expect(done.ok).toBe(false);
     if (done.ok) return;
     expect(done.error.code).toBe("VALIDATION_ERROR");
-    expect(messageOf(done.error)).toContain("EMPTY extra.ac_scope");
-    expect(messageOf(done.error)).toContain("--declare-no-new-tests");
+    expect(messageOf(done.error)).toContain("[floor: contract-oracles]");
+    expect(messageOf(done.error)).toContain("typecheck");
     expect(messageOf(done.error)).not.toContain("runner-captured");
     expect(messageOf(done.error)).not.toContain("capture_source");
   });
 
-  it("the unfiltered-test-file-anchor floor fires with its OWN message once the attestation floor is satisfied", async () => {
+  it("the unfiltered-test-file oracle floor fires with its OWN message once the attestation floor is satisfied", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const ANCHOR = "packages/lore/tests/unit/service/done-attestation-refusal-wording.test.ts";
-    const taskId = await createTask(corpusService, planId, "Anchored Task", {
-      file_anchors: [ANCHOR],
-      red_first: true,
-    });
+    const taskId = await createTask(corpusService, planId, "Anchored Task", landedTaskExtra({ redRequired: true, testFiles: [ANCHOR] }));
 
     // Satisfies the attestation floor AND the red-first floor, leaving the
     // test-file-anchor floor as the only remaining blocker.
@@ -540,7 +546,7 @@ describe("STATE — AC-5: the three OTHER independent done() floors still fire, 
   it("the attestation floor is checked FIRST — a red-first task with NO attested pass reports the ATTESTATION field, not the red one", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId, "Both Floors Task", { red_first: true });
+    const taskId = await createTask(corpusService, planId, "Both Floors Task", landedTaskExtra({ redRequired: true }));
 
     await taskWorkflowService.addEvidence(taskId, runnerCapturedPass());
 
@@ -552,7 +558,7 @@ describe("STATE — AC-5: the three OTHER independent done() floors still fire, 
     // load-bearing (a task can be in violation of both; the operator must be
     // told about the one checked first, exactly as before this change).
     expect(messageOf(done.error)).toContain("runner-captured");
-    expect(messageOf(done.error)).not.toContain("extra.red_first");
+    expect(messageOf(done.error)).not.toContain("red_required");
   });
 });
 
@@ -560,7 +566,7 @@ describe("STATE — AC-6: the audited --override-attestation escape still archiv
   it("archives an unattested runner-captured task and stamps the reason verbatim on every audit step", async () => {
     const { corpusService, store, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId);
+    const taskId = await createTask(corpusService, planId, "Wording Task", noOracleContractExtra());
 
     await taskWorkflowService.addEvidence(taskId, runnerCapturedPass());
 

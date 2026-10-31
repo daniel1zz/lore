@@ -139,7 +139,7 @@ describe("removed hooks — integrate own-diff output lists bound prose", () => 
       { "src/bound.ts": "export const a = 1;\n", "src/free.ts": "export const b = 1;\n", "CLAUDE.md": "# Notes\n\nThe constant lives in `src/bound.ts`.\n" },
       "base",
     );
-    const task = f.createTask("Bound", ["src/bound.ts", "src/free.ts"]);
+    const task = f.createTask("Bound", ["src/bound.ts", "src/free.ts"], "code");
     f.makeBranch("bound-b", { "src/bound.ts": "export const a = 2;\n", "src/free.ts": "export const b = 2;\n" });
     f.claim(task, "bound-b");
 

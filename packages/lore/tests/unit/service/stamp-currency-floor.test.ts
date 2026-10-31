@@ -60,6 +60,7 @@ import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
+import { LANDING_COMMIT, landedTaskExtra } from "./done-contract-unit-fixture.js";
 // ─── Harness ────────────────────────────────────────────────────────────────
 
 const NOW = "2026-10-17T10:00:00.000Z";
@@ -82,7 +83,8 @@ async function createTask(c: Corpus, title: string): Promise<DocRecord> {
     title,
     parent_id: plan.value.id,
     content: "body",
-    extra: { plan_id: plan.value.id },
+    // reason: `lore done` judges the stored contract and the landing (AC-DCS1-7); the fixture stores the shapes approve and integrate write.
+    extra: { plan_id: plan.value.id, ...landedTaskExtra() },
   } as CreateDocInput);
   if (!task.ok) throw new Error(`task create failed: ${JSON.stringify(task.error)}`);
   return task.value;
@@ -98,7 +100,8 @@ function attestedPass(extraAttestation: Partial<Attestation> = {}): VerifiedEvid
     result: "pass",
     recorded_by: "runner",
     capture_source: "runner",
-    attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, ...extraAttestation },
+    // reason: AC-DCS1-27 (b) — a pass counts for a code oracle when it names the landing it was recorded for.
+    attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, recorded_at_landing: LANDING_COMMIT, ...extraAttestation },
   };
 }
 

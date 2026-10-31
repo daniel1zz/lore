@@ -204,7 +204,7 @@ describe("TaskWorkflowService.setAnchors/addAnchors/removeAnchors — read-modif
       title: "RMW Task",
       parent_id: planId,
       content: "# Task",
-      extra: { plan_id: planId },
+      extra: { plan_id: planId, kind: "code" },
     } as CreateDocInput);
     return task.id;
   }
@@ -321,7 +321,7 @@ describe("TaskWorkflowService.setAnchors/addAnchors/removeAnchors — read-modif
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", branch: "wt-a" });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", branch: "wt-a", worktree: "wt-a" });
     expect(claimResult.ok).toBe(true);
 
     // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
@@ -343,7 +343,7 @@ describe("TaskWorkflowService.setAnchors/addAnchors/removeAnchors — read-modif
     expect(anchorResult.ok).toBe(true);
     if (!anchorResult.ok) return;
 
-    expect(anchorResult.value.extra["claim"]).toMatchObject({ by: "alice", branch: "wt-a" });
+    expect(anchorResult.value.extra["claim"]).toMatchObject({ by: "alice", branch: "wt-a", worktree: "wt-a" });
     const evidenceArr = anchorResult.value.extra["verification_evidence"];
     expect(Array.isArray(evidenceArr)).toBe(true);
     expect((evidenceArr as unknown[]).length).toBe(1);

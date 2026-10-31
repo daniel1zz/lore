@@ -90,22 +90,25 @@ function build(script: Script, shared?: { store: InMemoryStore }): Fixture {
         failing_test_files: failing.map((file) => ({ file, imports: [] })),
       });
     },
-    runFiles: async (commit, files) => {
-      for (const file of files) fileRuns.push({ commit, file });
-      if (script.failRunFiles === true) return err({ code: "STORE_ERROR", message: "no test:file script" });
-      return ok(
-        files.map((file): FileRunOutcome => {
-          const index = indexOf(commit);
-          const key = `${String(index)}:${file}`;
-          const count = seen.get(key) ?? 0;
-          seen.set(key, count + 1);
-          const seq = script.files[file]?.sequence?.[index];
-          const exit = seq !== undefined ? (seq[Math.min(count, seq.length - 1)] ?? 0) : redAt(file, index) ? 1 : 0;
-          return { file, exit_code: exit, output_tail: `out ${key}`, duration_ms: 1 };
-        }),
-      );
-    },
+    runFiles: async (commit, files) => runFilesAt(commit, files),
+    // reason: the search runs files together (spec: one batched invocation per probed commit); the model has no interference, so a batch is the per-file runs.
+    runFilesTogether: async (commit, files) => runFilesAt(commit, files),
   };
+  async function runFilesAt(commit: string, files: readonly string[]): Promise<Result<readonly FileRunOutcome[], LoreError>> {
+    for (const file of files) fileRuns.push({ commit, file });
+    if (script.failRunFiles === true) return err({ code: "STORE_ERROR", message: "no test:file script" });
+    return ok(
+      files.map((file): FileRunOutcome => {
+        const index = indexOf(commit);
+        const key = `${String(index)}:${file}`;
+        const count = seen.get(key) ?? 0;
+        seen.set(key, count + 1);
+        const seq = script.files[file]?.sequence?.[index];
+        const exit = seq !== undefined ? (seq[Math.min(count, seq.length - 1)] ?? 0) : redAt(file, index) ? 1 : 0;
+        return { file, exit_code: exit, output_tail: `out ${key}`, duration_ms: 1 };
+      }),
+    );
+  }
   const ports: RegressionAtHeadPorts = {
     suites: service,
     runner,
@@ -156,12 +159,15 @@ describe("regression at the assessed commit", () => {
     expect(dimensionOf(r.rows).verdict).toBe("pass");
   });
 
-  it("AC-AO-1 a file red in the head suite but green on its confirm run is flaky: not charged, no bisection", async () => {
-    const f = build({ commits: 10, files: { [FILE]: { redFrom: 6, sequence: { 9: [0] } } } });
+  // retired by spec-a-plan-s-regression-reuses-a-stored-suite-that-contains: there is no per-file confirmation at head any more
+  // (the suite read is the definition of red); a red that does not repeat alone is caught by the end confirmations instead.
+  it("AC-AO-1 a file red in the suite at head whose first failing commit is green on its confirm run alone is flaky-bisection: not charged, no run at head", async () => {
+    const f = build({ commits: 10, files: { [FILE]: { redFrom: 9, sequence: { 9: [0] } } } });
     const r = await measure(f, [landingAt(6)]);
-    expect(r.files[0]).toEqual({ file: FILE, outcome: "flaky" });
+    expect(r.files[0]).toMatchObject({ file: FILE, outcome: "not-measured", cause: "flaky-bisection" });
     expect(r.charged).toEqual([]);
-    expect(f.fileRuns).toEqual([{ commit: f.head, file: FILE }]);
+    // the only run at head is the confirmation of the transition (which here IS head); there is no separate head confirm
+    expect(f.fileRuns.filter((run) => run.commit === f.head)).toEqual([{ commit: f.head, file: FILE }]);
   });
 
   it("AC-AO-1 a file absent before the plan's landing that is red at head is charged to the landing that added it, absent commits cost no run", async () => {
@@ -210,6 +216,7 @@ describe("regression at the assessed commit", () => {
     const timedOut: CommitSuiteRunnerPort = {
       ...f.ports.runner,
       runFiles: async (_commit, files) => ok(files.map((file): FileRunOutcome => ({ file, exit_code: 1, output_tail: "", duration_ms: 1, incomplete: "timed out after 3600000 ms" }))),
+      runFilesTogether: async (_commit, files) => ok(files.map((file): FileRunOutcome => ({ file, exit_code: 1, output_tail: "", duration_ms: 1, incomplete: "timed out after 3600000 ms" }))),
     };
     const r = await measure({ ...f, ports: { ...f.ports, runner: timedOut } }, [landingAt(6)]);
     expect(r.files[0]).toMatchObject({ file: FILE, outcome: "not-measured" });

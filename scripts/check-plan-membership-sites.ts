@@ -278,6 +278,14 @@ const RULE_RAW_MEMBERSHIP_COMPARISON: PlanMembershipRule = {
         "no planId to compare against; routing it through isPlanMember would be a type error, " +
         "not a de-duplication. Adjudicated in plan-membership.ts's own JSDoc (Proxy section).",
     },
+    {
+      file: "packages/lore/src/service/task-workflow-service.ts",
+      reason:
+        "PLAN-ID RESOLUTION, not a membership test: `criteriaBySpec` reads `typeof task.extra[\"plan_id\"] === \"string\" " +
+        "&& task.extra[\"plan_id\"] !== \"\"` to RESOLVE which plan a task declares (falling back to parent_id) so it can " +
+        "load that plan and its specs. There is no planId to compare against, so isPlanMember cannot express it. " +
+        "CAVEAT: this exempts the whole file from R2; every real membership test in it already uses isPlanMember.",
+    },
   ],
 };
 
@@ -344,6 +352,14 @@ const RULE_PLAN_SCOPE_ON_PARENT_ID_PROXY: PlanMembershipRule = {
         "deliberately compares BOTH keys — finding tasks parented under a plan they are not " +
         "members of is its entire purpose, and it already routes membership through the shared " +
         "predicate. It is the one legitimate use of the proxy comparison and must stay.",
+    },
+    {
+      file: "packages/lore/src/service/rule-change-service.ts",
+      reason:
+        "KNOWLEDGE GROUPING, not task membership: `landingPlanViews` collects the UAT verdict docs (`type knowledge`, " +
+        "`sub_type uat`) filed under a plan; a knowledge doc has no `extra.plan_id`, its `parent_id` IS its plan link " +
+        "(same basis as session-service's handoff groupings). The task side of that function already uses isPlanMember. " +
+        "CAVEAT: this exempts the whole file from R3.",
     },
   ],
 };

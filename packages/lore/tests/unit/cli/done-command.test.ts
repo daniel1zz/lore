@@ -41,6 +41,7 @@ import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
+import { LANDING_COMMIT, landedTaskExtra } from "../service/done-contract-unit-fixture.js";
 function makeTaskDoc(overrides: Partial<DocRecord> = {}): DocRecord {
   return {
     id: "01HDONE0000000000000000001",
@@ -255,7 +256,8 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
       title,
       parent_id: planId,
       content: "body",
-      extra: { plan_id: planId },
+      // reason: `done` judges the stored contract and the landing (AC-DCS1-7); the fixture stores the shapes approve and integrate write.
+      extra: { plan_id: planId, ...landedTaskExtra() },
     } as CreateDocInput);
     if (!result.ok) throw new Error(`Failed to create task: ${JSON.stringify(result.error)}`);
     return result.value.id;
@@ -292,7 +294,8 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
       // now compile-time-required on VerifiedEvidenceInput; "runner" is the
       // value the real-world caller (VerifyRunnerService) actually proves.
       capture_source: "runner",
-      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+      // reason: AC-DCS1-27 (b) — a pass counts for a code oracle when it names the landing it was recorded for.
+      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, recorded_at_landing: LANDING_COMMIT },
       ...overrides,
     };
   }
@@ -445,7 +448,7 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
       type: "task",
       title: "Adhoc Planless Task",
       content: "body",
-      extra: { adhoc: true },
+      extra: { adhoc: true, ...landedTaskExtra() },
     } as CreateDocInput);
     if (!adhocTask.ok) throw new Error(`Failed to create adhoc task: ${JSON.stringify(adhocTask.error)}`);
     const adhocId = adhocTask.value.id;

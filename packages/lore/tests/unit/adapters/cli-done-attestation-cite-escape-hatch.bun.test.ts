@@ -1,75 +1,56 @@
 // @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
- * `lore done --override-attestation-cite <n>` — the CLI author→trip
- * end-to-end oracle for
- * task-lore-done-override-attestation-demands-fresh-prose-that.
+ * `lore done --override-attestation-cite <n>` — the CLI end-to-end oracle for
+ * task-lore-done-override-attestation-demands-fresh-prose-that, under the done-contract model
+ * (spec-done-contract-compiled-at-approve-task-kinds-write-sets, AC-DCS1-7).
  *
- * `--override-attestation-cite` is an ADDED, alternative way to satisfy the
- * SAME attestation floor `--override-attestation "<reason>"` bypasses —
- * citing an existing `extra.verification_evidence` row (1-based index)
- * instead of retyping its measurement as fresh prose. This suite proves the
- * flag reaches the COMPILED binary end to end (argv parsing → doc read →
- * validation → `TaskWorkflowService.done` → the audit write), mirroring
- * `cli-done-attestation-escape-hatch.bun.test.ts`'s own oracle shape for the
- * pre-existing free-text flag — every STATE assertion below reads the ACTUAL
- * `.lore` audit table via `lore audit <doc> --json`, and the free-text
- * regression assertion proves the two paths remain fully independent.
+ * `--override-attestation-cite` is an ADDED, alternative way to satisfy the SAME attestation floor `--override-attestation
+ * "<reason>"` bypasses — citing an existing `extra.verification_evidence` row (1-based index) instead of retyping its
+ * measurement as fresh prose. `lore done` now judges a task only by the contract stored at approve, in the fixed floor order of
+ * BR-209, and the escape waives the ATTESTED-PASS floor and nothing after it: a task whose contract oracle has no counted pass is
+ * still refused, at the first oracle floor ([floor: unfiltered-test-file] for an anchored test file, then [floor: contract-oracles]).
  *
- * Spawns the COMPILED `dist/lore` binary (Bun.spawnSync) against a THROWAWAY
- * corpus (mkdtemp + `lore init`) — never touches the repo's own `.lore/`
- * corpus (project CLAUDE.md hard rule). Requires `bun run build` first;
- * `assertFreshBinary` fails loud before any test runs if `dist/lore` is
- * missing or older than the newest `.ts` source under
- * `packages/{lore,core}/src`.
+ * Two fixtures, by what each case needs:
+ *   - a planless `--adhoc` code task holding no contract, for the cases the command refuses BEFORE any floor (the citation checks
+ *     and the usage errors);
+ *   - {@link makeOverrideWorld}: a real repository where a code task is approved (red waived), claimed on a branch in a linked
+ *     worktree, committed on and landed on main, for the cases that reach the floors.
+ * Both are throwaway (mkdtemp + `lore init`, HOME outside the repository); this repository's own `.lore/` is never touched.
  *
- * Fixture: `--adhoc` tasks (SPEC-069 D2), same shape the sibling suite uses —
- * structurally unattestable (`lore verify` has no script-mode AC to bind to),
- * so each can only reach `archived` via an override, never a real attested
- * pass.
+ * Retired with the model (spec AC-DCS1-6, named in the commit): the no-new-test declaration flag these cases used to
+ * carry, and every case that archived a task through a citation alone (the snapshot of the cited row in the archived record).
+ * After an override the contract oracles are judged by counted passes, so no task with a compiled contract is archived by an
+ * override; the audit-stamping of an archive through an override is covered at the service layer by a contract with no oracle
+ * (task-workflow-service.test.ts).
  *
  * Coverage:
- *   HAPPY:       citing a valid `result:pass` row with a non-empty
- *                `output_tail` archives the task; the audit trail's
- *                `override_reason` carries the row's snapshotted identifying
- *                fields (oracle/command/result/recorded_at/recorded_by/
- *                capture_source) verbatim, and NEVER the word "attested"/
- *                "attestation" (never lets a self-report read as attested)
- *   NEGATIVE ×3: citing a `fail` row / an empty-`output_tail` row (via a real
- *                `--capture` of a silent `true`) / an out-of-range index each
- *                refuse (exit 4), name the row and the exact reason, and
- *                archive NOTHING (status/version unchanged)
- *   REGRESSION:  the pre-existing free-text `--override-attestation
- *                "<reason>"` path behaves exactly as before — unaffected by
- *                this flag's addition
- *   REGRESSION:  `lore done` with NEITHER escape hatch still refuses a
- *                self-reported-only task (exit 4), never a silent default
- *   BOUNDARY:    index 0 (out of range, 1-based) and index 1 (the first, and
- *                only, valid row) on the SAME single-row task; a task with
- *                ZERO evidence rows refuses citing index 1
- *   USAGE ERROR: a non-integer index (exit 2, before the corpus is touched);
- *                supplying BOTH `--override-attestation` and
- *                `--override-attestation-cite` together (exit 2, mutually
- *                exclusive)
+ *   HAPPY:       a valid citation (a pass row with a non-empty tail) passes the citation checks and waives the attestation floor;
+ *                the oracle floor then refuses (exit 4), nothing is written and no audit row carries an override marker
+ *   NEGATIVE ×3: citing a `fail` row / an empty-`output_tail` row (via a real `--capture` of a silent `true`) / an out-of-range
+ *                index each refuse (exit 4), name the row and the exact reason, and write NOTHING (status/version unchanged)
+ *   REGRESSION:  the free-text `--override-attestation "<reason>"` path is unaffected by this flag's addition
+ *   REGRESSION:  `lore done` with NEITHER escape hatch refuses an unevidenced landed task at attested-pass (exit 4)
+ *   BOUNDARY:    index 0 (out of range, 1-based) is refused while index 1 (the first, and only, valid row) passes the citation
+ *                checks on the SAME single-row task; a task with ZERO evidence rows refuses citing index 1
+ *   USAGE ERROR: a non-integer index (exit 2, before the corpus is touched); supplying BOTH `--override-attestation` and
+ *                `--override-attestation-cite` together (exit 2, mutually exclusive)
  *
  * @spec_ref task-lore-done-override-attestation-demands-fresh-prose-that
+ * @spec_ref spec-done-contract-compiled-at-approve-task-kinds-write-sets
  *
- * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
- * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
- * history of this file; the assertions and the throwaway-corpus rule are unchanged.
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through dist/lore.
  */
 
-import { describe, expect, it, beforeAll, beforeEach, afterEach, vi } from "vitest";
+import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { makeOverrideWorld, type OverrideWorld } from "./done-override-world";
 
-setDefaultTimeout(60_000);
-
-// tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
-const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
+setDefaultTimeout(180_000);
 
 interface RunResult {
   readonly stdout: string;
@@ -110,64 +91,33 @@ async function getDoc(slug: string, cwd: string): Promise<DocJson> {
   return (JSON.parse(result.stdout) as { data: { doc: DocJson } }).data.doc;
 }
 
-interface AuditEntryJson {
-  readonly action: string;
-  readonly details?: Record<string, unknown>;
-}
-
-/** Every audit row for `slug`, via the REAL `lore audit <doc> --json` CLI verb. */
-async function getAuditEntries(slug: string, cwd: string): Promise<AuditEntryJson[]> {
-  const result = await mustRun(["audit", slug, "--json"], cwd);
-  return (JSON.parse(result.stdout) as { data: { entries: AuditEntryJson[] } }).data.entries;
-}
-
 /**
- * Creates a planless (`--adhoc`) task and returns its slug — byte-identical
- * fixture shape to `cli-done-attestation-escape-hatch.bun.test.ts`'s own
- * `createAdhocTask` (not imported from there — that file sits outside this
- * task's declared file anchors, and a shared helper only one of the two call
- * sites could be pointed at is worse than two documented copies).
- *
- * `--ac-scope ""` ALSO arms `lore done`'s INDEPENDENT no-new-tests floor
- * (task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed), so every
- * archiving call below carries {@link NO_NEW_TESTS_REASON} alongside
- * whichever attestation escape it exercises — a DIFFERENT floor with a
- * DIFFERENT escape than this suite's subject.
+ * Creates a planless (`--adhoc`) code task and returns its slug. `--ac-scope ""` is required on the ad-hoc branch; the task holds
+ * no contract (it was never approved), which is all the citation checks and the usage errors need.
  */
 async function createAdhocTask(cwd: string, title: string): Promise<string> {
   const created = await mustRun(
-    ["create", "task", "--title", title, "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"],
+    ["create", "task", "--title", title, "--kind", "code", "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"],
     cwd,
   );
   return (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
 }
 
-/** See {@link createAdhocTask}'s own doc comment. */
-const NO_NEW_TESTS_REASON = "cite-escape-hatch fixture: no new test, this suite asserts the citation escape";
+/** The arguments of ONE self-reported `result:"pass"` evidence row with a real, non-empty `output_tail` — the shape a citation ACCEPTS. */
+const CITABLE_PASS_ARGS = [
+  "--oracle",
+  "manual",
+  "--command",
+  "manual check: verified in staging",
+  "--result",
+  "pass",
+  "--output-tail",
+  "confirmed working via manual QA",
+] as const;
 
-/**
- * Records ONE self-reported `result:"pass"` evidence row with a real,
- * non-empty `output_tail` — the exact shape `--override-attestation-cite`
- * should ACCEPT. `oracle:"manual"` is the one kind whose self-reported tail
- * `rejectMissingPassOutputTail` still lets through non-empty (mirrors the
- * free-text sibling suite's own `recordSelfReportedPass`).
- */
+/** Records the citable pass row in the `--adhoc` fixture. */
 async function recordCitablePass(slug: string, cwd: string): Promise<void> {
-  await mustRun(
-    [
-      "evidence",
-      slug,
-      "--oracle",
-      "manual",
-      "--command",
-      "manual check: verified in staging",
-      "--result",
-      "pass",
-      "--output-tail",
-      "confirmed working via manual QA",
-    ],
-    cwd,
-  );
+  await mustRun(["evidence", slug, ...CITABLE_PASS_ARGS], cwd);
 }
 
 /** Records ONE self-reported `result:"fail"` evidence row — a row that must NEVER be citable. */
@@ -176,13 +126,9 @@ async function recordCitableFail(slug: string, cwd: string): Promise<void> {
 }
 
 /**
- * Records ONE `--capture`-produced `result:"pass"` row whose `output_tail` is
- * GENUINELY EMPTY (`--capture` spawns `true`, a real command that exits 0 and
- * prints nothing) — a row that must NEVER be citable either, even though it
- * IS runner-captured (`capture_source:"runner"`), because the citation floor
- * (task-lore-done-override-attestation-demands-fresh-prose-that) refuses an
- * empty tail unconditionally, mirroring the "empty tail is never AC coverage"
- * rule applied everywhere else in this repo.
+ * Records ONE `--capture`-produced `result:"pass"` row whose `output_tail` is GENUINELY EMPTY (`--capture` spawns `true`, a real
+ * command that exits 0 and prints nothing) — a row that must NEVER be citable either, even though it IS runner-captured, because
+ * the citation floor refuses an empty tail unconditionally.
  */
 async function recordCitablePassWithEmptyTail(slug: string, cwd: string): Promise<void> {
   await mustRun(["evidence", slug, "--oracle", "test", "--command", "true", "--result", "pass", "--capture"], cwd);
@@ -193,10 +139,7 @@ let tmpDir: string;
 beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-done-cite-escape-hatch-"));
   await mustRun(["init"], tmpDir);
-  // AU-T7: `--override-attestation` is decided; this suite's subject is the audited escape, so the class is loosened
-  // the documented way (a human-tty governance decision), never by a bypass in product code.
-  // An --adhoc task parents to the corpus root PRD (CorpusService._createImpl) —
-  // one must exist first, mirroring every other --adhoc fixture in this repo.
+  // An --adhoc task parents to the corpus root PRD (CorpusService._createImpl) — one must exist first.
   await mustRun(["create", "prd", "--title", "Cite Escape Hatch Root", "--content", "## Overview\nroot", "--no-ai"], tmpDir);
 });
 
@@ -208,52 +151,7 @@ afterEach(() => {
   }
 });
 
-describe("HAPPY — citing a valid pass row with a non-empty tail archives the task", () => {
-  it("index 1, a real pass row with a real tail, reaches exit 0 and the task is archived", async () => {
-    const slug = await createAdhocTask(tmpDir, "Citable Pass Task");
-    await recordCitablePass(slug, tmpDir);
-
-    const result = await mustRun(
-      ["done", slug, "--override-attestation-cite", "1", "--declare-no-new-tests", NO_NEW_TESTS_REASON],
-      tmpDir,
-    );
-    expect(result.exitCode).toBe(0);
-    expect((await getDoc(slug, tmpDir)).status).toBe("archived");
-  });
-
-  it("the archived record snapshots the cited row's identifying fields verbatim, and never reads as attested", async () => {
-    const slug = await createAdhocTask(tmpDir, "Snapshot Task");
-    await recordCitablePass(slug, tmpDir);
-
-    await mustRun(["done", slug, "--override-attestation-cite", "1", "--declare-no-new-tests", NO_NEW_TESTS_REASON], tmpDir);
-
-    const doneSteps = (await getAuditEntries(slug, tmpDir)).filter((e) => e.details?.["done"] === true);
-    expect(doneSteps.length).toBeGreaterThan(0);
-    for (const step of doneSteps) {
-      const reason = step.details?.["override_reason"];
-      expect(typeof reason).toBe("string");
-      const text = reason as string;
-      // Self-containment (AC-2): every identifying field is present verbatim —
-      // an auditor reading ONLY this archived record, never the task, can
-      // recover exactly what was cited.
-      expect(text).toContain("verification_evidence[1]");
-      expect(text).toContain("oracle=manual");
-      expect(text).toContain("command=manual check: verified in staging");
-      expect(text).toContain("result=pass");
-      expect(text).toContain("recorded_by=");
-      expect(text).toContain("recorded_at=");
-      expect(text).toContain("capture_source=self-report");
-      // AC-3: never launders a self-report into something that reads as attested.
-      expect(text.toLowerCase()).not.toContain("attested");
-      expect(text.toLowerCase()).not.toContain("attestation:");
-      // attestation_overridden:true is the PRE-EXISTING, correct signal that an
-      // override bypassed the floor — it does not itself claim attestation.
-      expect(step.details?.["attestation_overridden"]).toBe(true);
-    }
-  });
-});
-
-describe("NEGATIVE — a fail row is refused; nothing is archived", () => {
+describe("NEGATIVE — a fail row is refused; nothing is written", () => {
   it("citing a result:fail row exits 4, names the row, and leaves the task untouched", async () => {
     const slug = await createAdhocTask(tmpDir, "Fail Row Task");
     await recordCitableFail(slug, tmpDir);
@@ -271,7 +169,7 @@ describe("NEGATIVE — a fail row is refused; nothing is archived", () => {
   });
 });
 
-describe("NEGATIVE — an empty-output_tail pass row is refused; nothing is archived", () => {
+describe("NEGATIVE — an empty-output_tail pass row is refused; nothing is written", () => {
   it("citing a genuinely-empty-tail (real --capture of `true`) pass row exits 4 and leaves the task untouched", async () => {
     const slug = await createAdhocTask(tmpDir, "Empty Tail Task");
     await recordCitablePassWithEmptyTail(slug, tmpDir);
@@ -294,7 +192,7 @@ describe("NEGATIVE — an empty-output_tail pass row is refused; nothing is arch
   });
 });
 
-describe("NEGATIVE — an out-of-range index is refused; nothing is archived", () => {
+describe("NEGATIVE — an out-of-range index is refused; nothing is written", () => {
   it("citing index 99 on a single-row task exits 4, names the valid range, and leaves the task untouched", async () => {
     const slug = await createAdhocTask(tmpDir, "Out Of Range Task");
     await recordCitablePass(slug, tmpDir);
@@ -311,7 +209,7 @@ describe("NEGATIVE — an out-of-range index is refused; nothing is archived", (
   });
 });
 
-describe("BOUNDARY — index 0 (out of range) vs index 1 (the only valid row) on the same single-row task", () => {
+describe("BOUNDARY — index 0 is out of range", () => {
   it("index 0 is refused as out of range, never treated as the first row", async () => {
     const slug = await createAdhocTask(tmpDir, "Off By One Task");
     await recordCitablePass(slug, tmpDir);
@@ -320,18 +218,6 @@ describe("BOUNDARY — index 0 (out of range) vs index 1 (the only valid row) on
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("out of range");
     expect((await getDoc(slug, tmpDir)).status).toBe("draft");
-  });
-
-  it("index 1 on the SAME single-row task succeeds", async () => {
-    const slug = await createAdhocTask(tmpDir, "Off By One Task Valid Index");
-    await recordCitablePass(slug, tmpDir);
-
-    const result = await mustRun(
-      ["done", slug, "--override-attestation-cite", "1", "--declare-no-new-tests", NO_NEW_TESTS_REASON],
-      tmpDir,
-    );
-    expect(result.exitCode).toBe(0);
-    expect((await getDoc(slug, tmpDir)).status).toBe("archived");
   });
 });
 
@@ -390,41 +276,70 @@ describe("USAGE ERROR — --override-attestation and --override-attestation-cite
   });
 });
 
-describe("REGRESSION — the pre-existing free-text --override-attestation path is unaffected", () => {
-  it("a real free-text reason still archives an otherwise-blocked self-reported-only task", async () => {
-    const slug = await createAdhocTask(tmpDir, "Free Text Regression Task");
-    await recordCitablePass(slug, tmpDir);
+describe("the escapes on a landed code task with a stored contract (real repository, linked worktree)", () => {
+  let world: OverrideWorld;
 
-    const result = await mustRun(
-      [
-        "done",
-        slug,
-        "--override-attestation",
-        "manual browser check: verified in staging",
-        "--declare-no-new-tests",
-        NO_NEW_TESTS_REASON,
-      ],
-      tmpDir,
-    );
-    expect(result.exitCode).toBe(0);
-    expect((await getDoc(slug, tmpDir)).status).toBe("archived");
-
-    // The free-text reason lands VERBATIM, not the citation's composed-snapshot shape.
-    const doneSteps = (await getAuditEntries(slug, tmpDir)).filter((e) => e.details?.["done"] === true);
-    expect(doneSteps.every((e) => e.details?.["override_reason"] === "manual browser check: verified in staging")).toBe(
-      true,
-    );
+  beforeAll(async () => {
+    world = await makeOverrideWorld();
   });
-});
 
-describe("REGRESSION — no escape hatch at all still refuses a self-reported-only task", () => {
-  it("neither --override-attestation nor --override-attestation-cite → exit 4, task stays draft", async () => {
-    const slug = await createAdhocTask(tmpDir, "No Escape Hatch At All Task");
-    await recordCitablePass(slug, tmpDir);
+  afterAll(() => {
+    world.dispose();
+  });
 
-    const result = await runLore(["done", slug], tmpDir);
+  /** Asserts the refusal of an escape: exit 4 at the oracle floor, the attestation floor waived, nothing written. */
+  async function expectWaivedThenRefused(slug: string, args: readonly string[]): Promise<void> {
+    const before = await world.readTask(slug);
+    const result = await world.run(["done", slug, ...args]);
+    expect(result.exitCode, `${result.stdout}${result.stderr}`).toBe(4);
+    // the landed task anchors one test file, so its contract holds a `test:` oracle, judged right after the red run
+    expect(result.stderr).toContain("[floor: unfiltered-test-file]");
+    expect(result.stderr).not.toContain("[floor: attested-pass]");
+    const after = await world.readTask(slug);
+    expect(after.status).toBe(before.status);
+    expect(after.version).toBe(before.version);
+    const rows = await world.auditRows(slug);
+    expect(rows.every((row) => row.details?.["override_reason"] === undefined)).toBe(true);
+    expect(rows.every((row) => row.details?.["attestation_overridden"] === undefined)).toBe(true);
+  }
+
+  it("HAPPY: citing index 1, a real pass row with a real tail, passes the citation checks and waives the attestation floor; the oracle floor then refuses", async () => {
+    const slug = await world.landTask("Citable Pass Task");
+    await world.mustRun(["evidence", slug, ...CITABLE_PASS_ARGS]);
+
+    await expectWaivedThenRefused(slug, ["--override-attestation-cite", "1"]);
+  });
+
+  it("BOUNDARY: index 1 on the single-row task passes the citation checks (the same task index 0 was refused on)", async () => {
+    const slug = await world.landTask("Off By One Task Valid Index");
+    await world.mustRun(["evidence", slug, ...CITABLE_PASS_ARGS]);
+
+    const zero = await world.run(["done", slug, "--override-attestation-cite", "0"]);
+    expect(zero.exitCode).toBe(4);
+    expect(zero.stderr).toContain("out of range");
+
+    await expectWaivedThenRefused(slug, ["--override-attestation-cite", "1"]);
+  });
+
+  it("REGRESSION: the free-text --override-attestation path is unaffected — it waives the attestation floor and the oracle floor refuses", async () => {
+    const slug = await world.landTask("Free Text Regression Task");
+    await world.mustRun(["evidence", slug, ...CITABLE_PASS_ARGS]);
+
+    await expectWaivedThenRefused(slug, ["--override-attestation", "manual browser check: verified in staging"]);
+  });
+
+  it("REGRESSION: neither --override-attestation nor --override-attestation-cite refuses [floor: attested-pass] (exit 4), task unchanged", async () => {
+    const slug = await world.landTask("No Escape Hatch At All Task");
+    await world.mustRun(["evidence", slug, ...CITABLE_PASS_ARGS]);
+    const before = await world.readTask(slug);
+
+    const result = await world.run(["done", slug]);
     expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("[floor: attested-pass]");
     expect(result.stderr).toContain("--override-attestation");
-    expect((await getDoc(slug, tmpDir)).status).toBe("draft");
+
+    const after = await world.readTask(slug);
+    expect(after.status).toBe(before.status);
+    expect(after.version).toBe(before.version);
   });
 });

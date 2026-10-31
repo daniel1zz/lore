@@ -182,7 +182,7 @@ async function seedFixture(cwd: string): Promise<void> {
   // Source task for the phase migration — its evidence (ac_ref AC-SC-1) is
   // merged onto the phase doc, then the task itself is archived.
   await mustRun(
-    ["create", "task", "--title", "Migration Source", "--parent", PLAN_SLUG, "--plan-id", PLAN_SLUG, "--phase", "Alpha", "--content", "body", "--no-ai"],
+    ["create", "task", "--title", "Migration Source", "--kind", "code", "--parent", PLAN_SLUG, "--plan-id", PLAN_SLUG, "--phase", "Alpha", "--content", "body", "--no-ai"],
     cwd,
   );
   // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
@@ -211,6 +211,8 @@ async function createTask(
     "task",
     "--title",
     title,
+    "--kind",
+    "code",
     "--parent",
     PLAN_SLUG,
     "--plan-id",

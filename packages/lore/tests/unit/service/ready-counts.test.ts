@@ -26,7 +26,7 @@ async function setup() {
   };
   const plan = await mk({ type: "plan", parent_id: await ensureRequirementsDocId(cs), title: "Counts Plan", content: "# P" } as CreateDocInput);
   const task = (title: string) =>
-    mk({ type: "task", title, parent_id: plan.id, content: `# ${title}`, extra: { plan_id: plan.id } } as CreateDocInput);
+    mk({ type: "task", title, parent_id: plan.id, content: `# ${title}`, extra: { plan_id: plan.id, kind: "code" } } as CreateDocInput);
   return { cs, twf, plan, task };
 }
 
@@ -41,7 +41,7 @@ describe("ready() counts (gh-177)", () => {
       expect((await cs.set(t.id, { status: "approved" })).ok).toBe(true);
       expect((await cs.set(t.id, { status: "archived" })).ok).toBe(true);
     }
-    const claim = await twf.claim(d.id, { by: "agent:x" });
+    const claim = await twf.claim(d.id, { by: "agent:x", worktree: "wt-x" });
     expect(claim.ok).toBe(true);
 
     const res = await twf.ready(plan.id);

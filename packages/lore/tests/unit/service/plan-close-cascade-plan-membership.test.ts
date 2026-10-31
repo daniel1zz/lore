@@ -50,7 +50,7 @@ import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
  * file compiles before the paired implement task adds `setDoneFloorPort`; wiring
  * goes through {@link wireDoneFloorPort}, whose existence check is an assertion.
  */
-type StubFloor = "attested-pass" | "red-first" | "no-new-tests" | "unfiltered-test-file";
+type StubFloor = "not-landed" | "attested-pass" | "red-first" | "unfiltered-test-file" | "contract-oracles";
 type StubVerdict = Result<{ floor: StubFloor; error: LoreError } | null, LoreError>;
 
 class StubDoneFloorPort {
@@ -280,9 +280,9 @@ describe("cascadeArchiveOnPlanClose port contract (AC-AP-5, BR-1072, D5/D6)", ()
   });
 
   // (b) {floor, error} -> skipped with that floor, task untouched.
-  it("(b) NEGATIVE: a stub returning {floor:'no-new-tests', error} puts that member in skipped with the floor and leaves it open; the other member is archived", async () => {
+  it("(b) NEGATIVE: a stub returning {floor:'contract-oracles', error} puts that member in skipped with the floor and leaves it open; the other member is archived", async () => {
     let refusedId = "";
-    const port = new StubDoneFloorPort((id) => (id === refusedId ? floorRefusal("no-new-tests") : ok(null)));
+    const port = new StubDoneFloorPort((id) => (id === refusedId ? floorRefusal("contract-oracles") : ok(null)));
     const { corpusService } = makeServices(port);
     const plan = await createPlan(corpusService, "Port Floor Plan");
     const refused = await createTask(corpusService, plan.id, plan.id, "Refused member");
@@ -297,8 +297,8 @@ describe("cascadeArchiveOnPlanClose port contract (AC-AP-5, BR-1072, D5/D6)", ()
 
     const skipped = cascade.skipped.find((s) => s.doc_id === refused.id) as { floor?: string; reason: string } | undefined;
     expect(skipped, "the refused member is listed in skipped").toBeDefined();
-    expect(skipped?.floor).toBe("no-new-tests");
-    expect(skipped?.reason).toContain("no-new-tests");
+    expect(skipped?.floor).toBe("contract-oracles");
+    expect(skipped?.reason).toContain("contract-oracles");
     expect(cascade.failed).toEqual([]);
     expect(cascade.archived.map((a) => a.doc_id)).toEqual([cleared.id]);
 

@@ -173,7 +173,7 @@ function createPlan(dir: string, parentSlug: string, title: string): string {
 
 function createTask(dir: string, planSlug: string, title: string): string {
   const r = runLore(
-    ["create", "task", "--plan-id", planSlug, "--title", title, "--content", "task body", "--no-ai"],
+    ["create", "task", "--plan-id", planSlug, "--title", title, "--kind", "code", "--content", "task body", "--no-ai"],
     dir,
   );
   if (r.exitCode !== 0) throw new Error(`create task failed: ${r.stderr}`);

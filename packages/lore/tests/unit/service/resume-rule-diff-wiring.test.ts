@@ -85,13 +85,13 @@ async function makeFixture(): Promise<Fixture> {
   } as CreateDocInput);
   const plan = await mustCreate({ type: "plan", title: "Wiring Plan", parent_id: spec.id, content: "p" } as CreateDocInput);
   const task = await mustCreate({
-    type: "task", title: "Wiring Task", parent_id: plan.id, content: "body", extra: { plan_id: plan.id },
+    type: "task", title: "Wiring Task", parent_id: plan.id, content: "body", extra: { plan_id: plan.id, kind: "code" },
   } as CreateDocInput);
   return { plan, task, ruleId };
 }
 
 async function claimAt(task: DocRecord, iso: string): Promise<void> {
-  const r = await workflow.claim(task.id, { by: "agent:resumer" }, () => iso);
+  const r = await workflow.claim(task.id, { by: "agent:resumer", worktree: "wt-resumer" }, () => iso);
   if (!r.ok) throw new Error(`claim failed: ${JSON.stringify(r.error)}`);
 }
 

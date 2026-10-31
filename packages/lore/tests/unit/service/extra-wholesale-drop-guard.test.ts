@@ -63,7 +63,7 @@ async function createTask(cs: CorpusService, planId: string, title = "Task"): Pr
     title,
     parent_id: planId,
     content: "body",
-    extra: { plan_id: planId },
+    extra: { plan_id: planId, kind: "code" },
   } as CreateDocInput);
   if (!r.ok) throw new Error(`task create failed: ${JSON.stringify(r.error)}`);
   return r.value.id;
@@ -148,7 +148,7 @@ describe("CorpusService.set — task.extra.claim / verification_evidence wholesa
     const planId = await createPlanWithPhases(corpusService, phaseService, []);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "agent:alice" });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "agent:alice", worktree: "wt-alice" });
     expect(claimResult.ok).toBe(true);
 
     const result = await corpusService.set(taskId, { extra: { assignee: "agent:alice" } });
@@ -193,7 +193,7 @@ describe("CorpusService.set — task.extra.claim / verification_evidence wholesa
     const planId = await createPlanWithPhases(corpusService, phaseService, []);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "agent:alice" });
+    await taskWorkflowService.claim(taskId, { by: "agent:alice", worktree: "wt-alice" });
     // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
     // predicate-to-its-own) — see the NEGATIVE test above in this file.
     await taskWorkflowService.addEvidence(taskId, {
