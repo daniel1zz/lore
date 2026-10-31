@@ -29,6 +29,7 @@ import { actedStore } from "../../live-invocation.js";
 import { runOfName } from "../../helpers/test-run-identity.js";
 
 import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
+import { unitDoneContract } from "./done-contract-unit-fixture.js";
 const GIT_ENV = {
   ...process.env,
   GIT_AUTHOR_NAME: "Tester",
@@ -57,7 +58,31 @@ function commit(dir: string, file: string, message: string): string {
   return run(dir, "rev-parse", "HEAD");
 }
 
-async function makeArchivableTask(probeRepo: string = process.cwd()): Promise<{ svc: TaskWorkflowService; taskId: string }> {
+/**
+ * What the approve compile stores for a `corpus` task compiled at `compiledAt` (spec AC-DCS1-2: a corpus task always has the one
+ * oracle `corpus:files-unchanged`, lands nothing, and waives no red run because none is required of it).
+ */
+function corpusContract(compiledAt: string): Record<string, unknown> {
+  return {
+    compiled_at_commit: compiledAt,
+    kind: "corpus",
+    base_branch: "main",
+    oracles: [{ id: "corpus:files-unchanged" }],
+    red_required: false,
+    landing_route: "none",
+    new_symbols: [],
+    added_oracles: [],
+  };
+}
+
+/**
+ * A draft task of the given kind holding the stored contract `done` judges (AC-DCS1-7). A `code` task holds no landing yet
+ * (the test's `recordLanding` writes it); a `corpus` task lands nothing and is compiled at `compiledAt`.
+ */
+async function makeArchivableTask(
+  probeRepo: string = process.cwd(),
+  shape: { readonly kind: "code" } | { readonly kind: "corpus"; readonly compiledAt: string } = { kind: "code" },
+): Promise<{ svc: TaskWorkflowService; taskId: string }> {
   const store = actedStore(new InMemoryStore());
   const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const svc = new TaskWorkflowService(
@@ -72,34 +97,37 @@ async function makeArchivableTask(probeRepo: string = process.cwd()): Promise<{ 
     title: "Range task",
     parent_id: plan.value.id,
     content: "body",
-    extra: { plan_id: plan.value.id },
+    extra:
+      shape.kind === "code"
+        ? { plan_id: plan.value.id, kind: "code", done_contract: unitDoneContract() }
+        : { plan_id: plan.value.id, kind: "corpus", done_contract: corpusContract(shape.compiledAt) },
   } as CreateDocInput);
   if (!task.ok) throw new Error("task");
-  const ev = await svc.recordVerifiedEvidence(
-    task.value.id,
-    {
-      oracle: "tsc",
-      command: "bun run typecheck",
-      result: "pass",
-      recorded_by: "runner",
-      capture_source: "runner",
-      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
-    },
-    "2026-10-12T09:00:00.000Z",
-  );
-  if (!ev.ok) throw new Error(`evidence ${JSON.stringify(ev.error)}`);
   return { svc, taskId: task.value.id };
 }
 
 /**
- * A runner-attested pass the landing predicate counts: recorded AFTER the latest claim and bound to a clean commit
- * (`head_sha`). The legacy fixtures recorded theirs before the claim and bound to nothing, which a branch claim no longer accepts.
+ * A runner-attested pass of the contract's typecheck oracle that counts for a code task (AC-DCS1-27 (b)): it names the landing
+ * it was recorded for, which is what `lore integrate` stamps on the rows it records at a landing.
  */
-async function recordCountingPass(svc: TaskWorkflowService, taskId: string, headSha: string): Promise<void> {
+async function recordLandedPass(svc: TaskWorkflowService, taskId: string, landingCommit: string): Promise<void> {
   const ev = await svc.recordVerifiedEvidence(
     taskId,
     {
       oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_by: "runner", capture_source: "runner",
+      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, recorded_at_landing: landingCommit },
+    },
+    new Date(Date.now() + 1000).toISOString(),
+  );
+  if (!ev.ok) throw new Error(`evidence ${JSON.stringify(ev.error)}`);
+}
+
+/** A runner-attested pass of the `corpus:files-unchanged` oracle taken at `headSha`, a commit of main (the rule for a corpus task, AC-DCS1-19). */
+async function recordCorpusPass(svc: TaskWorkflowService, taskId: string, headSha: string): Promise<void> {
+  const ev = await svc.recordVerifiedEvidence(
+    taskId,
+    {
+      oracle: "other", command: "corpus:files-unchanged", result: "pass", recorded_by: "runner", capture_source: "runner",
       attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, head_sha: headSha, worktree_dirty: false },
     },
     new Date(Date.now() + 1000).toISOString(),
@@ -128,24 +156,13 @@ describe("lore done under the dispatch protocol: --worktree is a branch NAME (is
     if (!plan.ok) throw new Error("plan");
     const created = await cs.create({
       type: "task", title: "Branch task", parent_id: plan.value.id, content: "body",
-      extra: { plan_id: plan.value.id },
+      extra: { plan_id: plan.value.id, kind: "code", done_contract: unitDoneContract() },
     } as CreateDocInput);
     if (!created.ok) throw new Error("task");
     const taskId = created.value.id;
-    const ev = await svc.recordVerifiedEvidence(
-      taskId,
-      {
-        oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_by: "runner",
-        capture_source: "runner",
-        attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
-      },
-      "2026-10-12T09:00:00.000Z",
-    );
-    if (!ev.ok) throw new Error("evidence");
 
     const claim = await svc.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "agent-branch-x" });
     expect(claim.ok).toBe(true);
-    await recordCountingPass(svc, taskId, base);
     const c1 = commit(repo, "a.txt", "feat: a");
     const c2 = commit(repo, "b.txt", "feat: b");
     run(repo, "checkout", "-q", "main");
@@ -154,6 +171,8 @@ describe("lore done under the dispatch protocol: --worktree is a branch NAME (is
     const mergeSha = run(repo, "rev-parse", "main");
     const recorded = await svc.recordLanding({ branch: "agent-branch-x", branch_head: c2, main_before: base, main_after: mergeSha, landing_commit: mergeSha });
     expect(recorded.ok && recorded.value).toEqual([created.value.slug]);
+    // reason: AC-DCS1-27 (b) — the pass `lore integrate` records at this landing names it; done counts only that (or a same-tree row).
+    await recordLandedPass(svc, taskId, mergeSha);
 
     const done = await svc.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(done.ok).toBe(true);
@@ -179,12 +198,12 @@ describe("lore done records extra.commit_range (issue #180)", () => {
 
     const claim = await svc.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repo });
     expect(claim.ok).toBe(true);
-    await recordCountingPass(svc, taskId, base);
     commit(repo, "a.txt", "feat: a");
     const head = commit(repo, "b.txt", "feat: b");
     // the working copy is main itself, so its commits are on main already; the landing is what done reads (BR-1291)
     const recorded = await svc.recordLanding({ branch: "main", branch_head: head, main_before: base, main_after: head, landing_commit: head });
     expect(recorded.ok).toBe(true);
+    await recordLandedPass(svc, taskId, head);
 
     const done = await svc.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(done.ok).toBe(true);
@@ -201,7 +220,8 @@ describe("lore done records extra.commit_range (issue #180)", () => {
     run(repo, "checkout", "-q", "-b", "feat-unlanded");
     const { svc, taskId } = await makeArchivableTask(repo);
     expect((await svc.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "feat-unlanded" })).ok).toBe(true);
-    await recordCountingPass(svc, taskId, base);
+    // a pass naming some landing: the branch never landed, so the not-landed floor refuses before any evidence is judged
+    await recordLandedPass(svc, taskId, base);
     commit(repo, "a.txt", "feat: a");
 
     const done = await svc.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
@@ -210,8 +230,15 @@ describe("lore done records extra.commit_range (issue #180)", () => {
     expect(!done.ok && "message" in done.error ? done.error.message : "").toContain("[floor: not-landed]");
   });
 
-  it("BOUNDARY: a task never claimed with a worktree records not-measured with a reason, and still archives", async () => {
-    const { svc, taskId } = await makeArchivableTask();
+  it("BOUNDARY: a corpus task never claimed (it lands nothing) records not-measured with a reason, and still archives", async () => {
+    // reason: only a check or corpus task is closed without a branch (AC-DCS1-14); its pass counts at a main commit that contains
+    // the compile commit (AC-DCS1-27), so the repository is real and the row ran on main's head.
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "lore-done-range-corpus-")));
+    dirs.push(repo);
+    run(repo, "init", "-q", "-b", "main");
+    const base = commit(repo, "seed.txt", "seed");
+    const { svc, taskId } = await makeArchivableTask(repo, { kind: "corpus", compiledAt: base });
+    await recordCorpusPass(svc, taskId, base);
 
     const done = await svc.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(done.ok).toBe(true);
