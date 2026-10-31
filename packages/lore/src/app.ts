@@ -142,6 +142,7 @@ import { ExecutionLogService } from "./service/execution-log-service.js";
 import { createRealMigrationGit } from "./adapters/real-done-contract-migration-git.js";
 import { TaskFinishService } from "./service/task-finish-service.js";
 import { TaskStartService } from "./service/task-start-service.js";
+import { DispatchService, type DispatchAssets } from "./service/dispatch-service.js";
 import { IntegrateOracleService } from "./service/integrate-oracle-service.js";
 import { IntegrateQueue, QUEUE_WAIT_SECONDS_DEFAULT } from "./service/integrate-queue.js";
 import { FlakyLedgerService } from "./service/issue-filing-service.js";
@@ -385,6 +386,7 @@ export interface App {
    * contract. Wired by {@link wireDoneContract} at both composition sites.
    */
   taskStartService?: TaskStartService;
+  createDispatchService?: (assets: DispatchAssets) => DispatchService;
   /**
    * `lore integrate`'s evidence at landing (AC-DCS2-1..4): selects the landing tasks, runs the union of their contract oracles on the
    * merged tree and records the rows. Wired by {@link wireDoneContract} at both composition sites, so no capability exists without
@@ -1896,6 +1898,8 @@ function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | 
   // reason: AC-DCS1-13 — start composes the workflow service (the lease check and the one claim write).
   // reason: AC-DCS2-16 — start recompiles through the SAME service approve uses and stores a changed contract through the one write route.
   app.taskStartService = new TaskStartService({ store, workflow: app.taskWorkflowService, contracts });
+  // reason: AC-DCS2-6 — dispatch reads the stored contract through the store; the command binds the assets root of the running binary.
+  app.createDispatchService = (assets) => new DispatchService({ store, assets });
 }
 
 /**

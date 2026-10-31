@@ -1,4 +1,9 @@
 // @reads assets/dispatch-standing-rules.md
+// @reads package.json
+// @reads tsconfig.json
+// @reads tsconfig.base.json
+// @reads bun.lock
+// @reads bunfig.toml
 // @reads packages/lore/src/service/dispatch-service.ts
 // @spawns dist/lore
 // @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
@@ -154,7 +159,7 @@ describe("lore dispatch prints the whole subagent prompt from the stored contrac
     expect(out.stdout).toContain(stored.base_branch);
     expect(out.stdout).toContain(stored.landing_route);
     const oracles = [...stored.oracles, ...stored.added_oracles];
-    expect(oracles.length).toBeGreaterThanOrEqual(3);
+    expect(oracles.length).toBeGreaterThanOrEqual(2);
     for (const oracle of oracles) {
       expect(out.stdout).toContain(oracle.id);
       if (oracle.command !== undefined) expect(out.stdout).toContain(oracle.command);

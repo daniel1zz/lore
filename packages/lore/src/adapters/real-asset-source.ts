@@ -180,6 +180,35 @@ export const RETIRED_FROM_INSTALL_PATHS = new Set<string>(
 export const BINARY_READ_ONLY_TOP_DIRS: readonly string[] = ["context", "project"];
 
 /**
+ * Files that sit DIRECTLY in the `assets/` root (no directory), binary-read only like {@link BINARY_READ_ONLY_TOP_DIRS}:
+ * fingerprinted by the embedded manifest (generator kind `root`), shipped in the npm package, never installed.
+ * `dispatch-standing-rules.md` is the standing rules `lore dispatch` prints (AC-DCS2-6, ledger D29).
+ */
+export const BINARY_READ_ONLY_ROOT_FILES: readonly string[] = ["dispatch-standing-rules.md"];
+
+/**
+ * Reads one {@link BINARY_READ_ONLY_ROOT_FILES} file off a resolved assets root (the `DispatchAssets` port).
+ *
+ * @param assetsRoot - absolute path to the binary's `assets/` directory.
+ * @returns a reader; `read(name)` is `err(VALIDATION_ERROR)` for a name not listed or a file that cannot be read, never a partial text.
+ */
+export function createRootAssetReader(assetsRoot: string): { read(name: string): Promise<Result<string, LoreError>> } {
+  return {
+    async read(name) {
+      if (!BINARY_READ_ONLY_ROOT_FILES.includes(name)) {
+        return err({ code: "VALIDATION_ERROR", field: "name", message: `"${name}" is not a shipped root asset (${BINARY_READ_ONLY_ROOT_FILES.join(", ")})`, value: name });
+      }
+      const path = join(assetsRoot, name);
+      try {
+        return ok(readFileSync(path, "utf8"));
+      } catch (cause) {
+        return err({ code: "VALIDATION_ERROR", field: "assetsRoot", message: `cannot read shipped asset ${path}: ${cause instanceof Error ? cause.message : String(cause)}`, value: assetsRoot });
+      }
+    },
+  };
+}
+
+/**
  * Predicate form of {@link RETIRED_FROM_INSTALL_PATHS} — `path` is the FULL
  * path relative to `assetsRoot`, never a bare filename (a bare-filename check
  * would risk excluding an unrelated same-named file nested elsewhere). Also
@@ -196,6 +225,7 @@ export const BINARY_READ_ONLY_TOP_DIRS: readonly string[] = ["context", "project
  */
 export function isRetiredFromInstall(path: string): boolean {
   if (RETIRED_FROM_INSTALL_PATHS.has(path)) return true;
+  if (BINARY_READ_ONLY_ROOT_FILES.includes(path)) return true;
   return BINARY_READ_ONLY_TOP_DIRS.some((dir) => path.startsWith(`${dir}/`));
 }
 
@@ -301,6 +331,7 @@ export function listBinaryReadAssetPaths(assetsRoot: string): string[] {
     if (!existsSync(dirPath)) continue;
     for (const rel of walkFilesRelative(dirPath)) out.push(`${dir}/${rel}`);
   }
+  for (const file of BINARY_READ_ONLY_ROOT_FILES) if (existsSync(join(assetsRoot, file))) out.push(file);
   return out.sort();
 }
 

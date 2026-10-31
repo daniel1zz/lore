@@ -147,6 +147,8 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     finish: () => import("./commands/finish.js"),
     // start (AC-DCS1-13, AC-DCS1-14) — creates the task's worktree on the contract base, installs, claims and prints the contract.
     start: () => import("./commands/start.js"),
+    // dispatch (AC-DCS2-6) — prints the subagent prompt of a code task from its stored contract and the shipped standing rules.
+    dispatch: () => import("./commands/dispatch.js"),
     evidence: () => import("./commands/evidence.js"),
     // done (spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3) —
     // evidence-validated atomic lifecycle walk to archived; see commands/done.ts's

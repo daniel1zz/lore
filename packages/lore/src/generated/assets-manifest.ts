@@ -15,8 +15,8 @@
  * for the kind -> ownership derivation rules.
  */
 
-/** One of the six vendored top-level `assets/` directories. */
-export type AssetEntryKind = "skill" | "agent" | "hook" | "governance" | "project" | "context";
+/** One of the six vendored top-level `assets/` directories, or `root` (a file directly in `assets/`). */
+export type AssetEntryKind = "skill" | "agent" | "hook" | "governance" | "project" | "context" | "root";
 
 /** Update-time handling region (SPEC-076 §C1) — see the generator's doc comment. */
 export type AssetOwnership = "managed" | "merged" | "user_once";
@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "5aecdef5a7a56a6d12cdfef1eda06d5c99218ec04718684c4f3a26bea6dcce74",
+  tree_digest: "99849f1759ed6ae50022daa9488bb6396344fea7055b46954e0ecd915bb7ec7c",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "be7b99d5d1f72cf4ff8579ab09c2e42454c03ec0e0f9ba4e8fdb303b4a6cb73f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -61,6 +61,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "context/dispatch-bundle.md", kind: "context", ownership: "managed", sha256: "e748d87ff02b7748e65bfeec898e333aa7e7af99dca25467f60e1c2cd0cf6f01" },
   { path: "context/evidence-attestation.md", kind: "context", ownership: "managed", sha256: "1f346093405fc4931c45aea88eeb848dc40ebac3ab8a0141e23e786224f69ce9" },
   { path: "context/worktree-dispatch.md", kind: "context", ownership: "managed", sha256: "4916cddccb5a6204c8cab4d01f6b58d2e32250637898428316969ee1e94eb534" },
+  { path: "dispatch-standing-rules.md", kind: "root", ownership: "managed", sha256: "70c5b114b8be5926a6c14a4d19c3d73c023574923806237e2f4c2a1b8482d9ef" },
   { path: "governance/claude-md-contract.md", kind: "governance", ownership: "managed", sha256: "015ea383571af5c5588c593c99055025645297162a935c0620036ca38fbc02b3" },
   { path: "governance/seat-briefing.md", kind: "governance", ownership: "managed", sha256: "62d33fe1d7f5124e74247fb0491ef65600e11ff8179ba77efc29bbb130ad1894" },
   { path: "governance/write-spec-rule.md", kind: "governance", ownership: "managed", sha256: "f462760ebe190352453fdc0b4a29ef3e02f0d57878a4477a2ac26f13230965b7" },
