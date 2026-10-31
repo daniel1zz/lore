@@ -67,6 +67,11 @@ import { pendingRevisionsOf } from "./baseline-items.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
+/** What approval needs of the template service: the cross-field findings of a templated document (structural, no import of the service). */
+export interface TemplateChecksPort {
+  checks(doc: DocRecord): Promise<Result<readonly { readonly check: string; readonly entry: string; readonly problem: string }[], LoreError>>;
+}
+
 /**
  * A document waiting for human review.
  * Subset of DocRecord with review-relevant fields.
@@ -335,6 +340,42 @@ export class ReviewService {
 
   private roundCap: ReviewRoundCap | undefined;
 
+  /**
+   * Wires the template cross-field checks run at approval (spec-every-document-is-stored-as-structured-fields-validated-by,
+   * AC-ST-3/AC-ST-4). Set by the composition root; absent (bare test construction) = no template check.
+   * ⛔ Production roots (`app.ts`) always wire it, so an unwired check is never a production fallback.
+   */
+  setTemplateChecks(port: TemplateChecksPort): void {
+    this.templateChecks = port;
+  }
+
+  private templateChecks: TemplateChecksPort | undefined;
+
+  /**
+   * Runs the cross-field checks the document's PINNED template lists, for ANY templated type (a document with no
+   * `extra.template_ref` is legacy and is not checked). Independent of `judgmentRequiredTypes` and of the `gate`
+   * dependency: the checks are deterministic and cannot run at write time (criteria are added after create).
+   *
+   * @returns ok when no check fires, else VALIDATION_ERROR (exit 4) naming every failing check and entry
+   */
+  private async enforceTemplateChecks(doc: DocRecord): Promise<Result<void, LoreError>> {
+    if (this.templateChecks === undefined) return ok(undefined);
+    const ref: unknown = doc.extra["template_ref"];
+    if (typeof ref !== "string" || ref === "") return ok(undefined);
+    const findings = await this.templateChecks.checks(doc);
+    if (!findings.ok) return findings;
+    if (findings.value.length === 0) return ok(undefined);
+    const lines = findings.value.map((finding) => `  - [${finding.check}] ${finding.entry}: ${finding.problem}`);
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "template-checks",
+      message:
+        `${doc.slug} fails ${String(findings.value.length)} cross-field check(s) of ${ref}; fix the fields ` +
+        `(\`lore set ${doc.slug} --fields-file <yaml|json>\`, \`lore template check ${doc.slug}\` reports them) and approve again:\n${lines.join("\n")}`,
+      value: findings.value,
+    });
+  }
+
   /** The refusal of an action on a capped document: names the cap and the pending decision a human answers. */
   private async roundCapRefusal(doc: DocRecord, state: RoundCapState, asked: string): Promise<LoreError> {
     if (this.roundCap === undefined) return { code: "STORE_ERROR", message: "review round cap is not wired" };
@@ -436,6 +477,10 @@ export class ReviewService {
     doc: DocRecord,
     opts?: { skipJudgmentGate?: boolean },
   ): Promise<Result<ApprovalGateOutcome, LoreError>> {
+    // reason: first, before the judgment and promote gates: a structural defect the author can fix deterministically is
+    // reported before any judge round is spent on the document (and for every type, not only judgment-required ones).
+    const templateChecked = await this.enforceTemplateChecks(doc);
+    if (!templateChecked.ok) return templateChecked;
     const gated = await this.enforceTypeGates(doc, opts);
     if (!gated.ok) return gated;
     // reason: BR-1007 — unconditional (no `gate` dependency, no config switch): a spec's

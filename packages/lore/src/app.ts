@@ -1781,6 +1781,8 @@ function buildSuiteResultService(store: StoreInterface): SuiteResultService {
  */
 function wireStructuredWrite(app: App, config: LoreConfig | undefined): void {
   if (app.templateService === undefined) return;
+  // reason: the same TemplateService runs the cross-field checks at approval (AC-ST-3/AC-ST-4); one wiring site, both roots.
+  app.reviewService.setTemplateChecks(app.templateService);
   app.corpusService.setStructuredWrite({
     templates: app.templateService,
     // reason: inlined (same expression as `resolveRequireStructuredCreate`, @lore/core) because this function sits in the
