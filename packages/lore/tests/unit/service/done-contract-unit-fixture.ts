@@ -1,3 +1,4 @@
+// @spawns-external git the fixture builds a throwaway git repository for the landing it stores
 /**
  * Test fixture: the stored done contract, landing record and runner-attested rows that a service-level unit test of
  * `TaskWorkflowService.done` needs now that `done` judges only the contract stored at approve

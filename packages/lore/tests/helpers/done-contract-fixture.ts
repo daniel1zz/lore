@@ -1,3 +1,4 @@
+// @spawns-external git the fixture builds and reads a throwaway git repository
 /**
  * Test helper: the throwaway project every done-contract test (spec-done-contract-compiled-at-approve-task-kinds-write-sets,
  * AC-DCS1-*) builds on.

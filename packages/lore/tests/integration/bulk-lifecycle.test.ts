@@ -11,7 +11,10 @@
  * row), REGRESSION (`archive --apply` exits 1 on a failed candidate; archived -> deprecated stays invalid).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// reason: each task a case lands (approve, claim, branch commit, landing, contract passes) costs several CLI spawns
+vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 import { execFileSync, spawnSync } from "node:child_process";
 import { Database } from "bun:sqlite";
 import { landTask, type TaskWorld } from "./support/land-task.js";
@@ -282,7 +285,9 @@ describe("bulk lifecycle: row fails alone", () => {
     const pinned = new Map(preview.rows.map((r) => [r.slug, r.version]));
 
     // `stale` changes after the preview: its version moves.
-    expect(runLore(["set", stale, "--title", "Moved after preview"], tmpDir).exitCode).toBe(0);
+    // reason: an approved task's title is locked (record-edit gate), so its version is moved by a working-state write, a note of evidence
+    const moved = runLore(["evidence", stale, "--oracle", "manual", "--command", "echo moved", "--result", "pass", "--output-tail", "moved after the preview"], tmpDir);
+    expect(moved.exitCode, moved.stderr).toBe(0);
     const staleVersionNow = versionOf(stale, tmpDir);
     expect(staleVersionNow).toBeGreaterThan(pinned.get(stale) ?? 0);
 
@@ -365,35 +370,40 @@ describe("bulk lifecycle: archive --apply exit code", () => {
     expect(statusOf(without, tmpDir)).toBe(before);
   });
 
-  it("lore archive --apply exits 1 when a candidate failed (INVALID_TRANSITION), 0 when none did", () => {
-    patchLoreConfig(tmpDir, 'workflow:\n  gates:\n    "plan-close":\n      enabled: false\n');
+  // reason: the retired case made `archive --apply` exit 1 with a FAILED row by parking a straggler in review (in-review -> archived
+  // is no lifecycle step). A task that holds a contract has been approved and can no longer be parked in review; the failing candidate
+  // is a task parked in review that was never approved: it holds no contract, so `lore done` cannot judge it and its row is FAILED.
+  it("lore archive --apply exits 1 when a candidate failed (no contract to judge), 0 when none did", async () => {
+    patchLoreConfig(
+      tmpDir,
+      [
+        "workflow:", "  gates:", '    "plan-close":', "      enabled: false",
+        "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"', "",
+      ].join("\n"),
+    );
     expect(runLore(["set", planSlug, "--status", "approved"], tmpDir).exitCode).toBe(0);
-    // An open task under an archived plan is an R4 candidate; in-review -> archived is not a legal step. BR-1379 no
-    // longer lets the write path create it under an archived plan, so the plan is archived directly afterwards.
-    // reason: a task is approved with its contract before it can be archived, and approved -> in-review is not a lifecycle step, so
-    // the failing candidate here is an expired handoff (R3) parked in review: the same illegal archive step, with no contract.
-    const straggler = slugOf(runLore(["handoff", "--next", "resume", "--plan", planSlug], tmpDir).stdout);
-    const handoffId = (JSON.parse(runLore(["get", straggler, "--json"], tmpDir).stdout) as { data: { doc: { id: string } } }).data.doc.id;
-    const db = new Database(join(tmpDir, ".lore", "lore.db"));
-    try {
-      db.query("UPDATE docs SET created_at = ? WHERE id = ?").run(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), handoffId);
-    } finally {
-      db.close();
-    }
-    expect(runLore(["set", straggler, "--status", "in-review"], tmpDir).exitCode).toBe(0);
+    // An open task under an archived plan is an R4 candidate. BR-1379 no longer lets the write path create it under an archived
+    // plan, so the plan is archived directly afterwards.
+    const straggler = createTask("Straggler in review, never approved");
+    const parked = runLore(["set", straggler, "--status", "in-review"], tmpDir);
+    expect(parked.exitCode, parked.stderr).toBe(0);
+    const good = createTask("Straggler that lands");
+    await landAttested(good);
     archivePlanWithoutCascade(tmpDir, planSlug);
-    expect(runLore(["archive", "--sweep"], tmpDir).exitCode).toBe(3);
-
     const apply = runLore(["archive", "--apply"], tmpDir);
-    expect(apply.exitCode).toBe(1);
+    expect(apply.exitCode, apply.stdout + apply.stderr).toBe(1);
     expect(apply.stdout).toContain("FAILED");
     expect(apply.stdout).toContain(straggler);
+    expect(apply.stdout).toContain("holds no done contract");
+    // the failed row wrote nothing; the landed straggler is archived by the same apply
     expect(statusOf(straggler, tmpDir)).toBe("in-review");
+    expect(statusOf(good, tmpDir)).toBe("archived");
 
-    // Control: a corpus whose candidates all succeed still exits 0.
+    // Control: once the unjudgeable straggler is abandoned, nothing fails and the apply exits 0.
     expect(runLore(["set", straggler, "--status", "draft"], tmpDir).exitCode).toBe(0);
+    expect(runLore(["set", straggler, "--status", "deprecated"], tmpDir).exitCode).toBe(0);
     const ok = runLore(["archive", "--apply"], tmpDir);
-    expect(ok.exitCode).toBe(0);
-    expect(ok.stdout).toContain("OK");
+    expect(ok.exitCode, ok.stdout + ok.stderr).toBe(0);
+    expect(ok.stdout).not.toContain("FAILED");
   });
 });

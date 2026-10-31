@@ -1,3 +1,5 @@
+// @spawns packages/lore/src/index.ts -- through the claim-run fixture the helper runs the lore entry point
+// @spawns-external git the helper runs git in the fixture repository
 /**
  * Integration-test helper: a task held by a run, at the point where only the holder check of `lore done` is left.
  *

@@ -1,3 +1,4 @@
+// @spawns-external git the helper runs git in the fixture repository
 /**
  * Integration-test helper: archives a GitHub-issue CARRIER task through `lore done` under the done-contract model.
  *

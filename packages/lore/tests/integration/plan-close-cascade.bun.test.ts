@@ -1,3 +1,4 @@
+// @spawns-external git the fixture builds a throwaway git repository (a check task's pass is bound to a main commit)
 /**
  * @spec_ref spec-lifecycle-archival-plan-close-cascade-deterministic
  *   §Candidate Rules R1, §Design Decisions D2, AC-097-2

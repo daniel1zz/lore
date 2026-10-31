@@ -1,5 +1,7 @@
 // @reads assets/project/lore-config-template.yaml
 // @reads assets/project/reference-transaction
+// @spawns-external sh excludes the linked-worktree directory from the fixture repository
+// @spawns-external git builds, reads and prunes the fixture repository
 /**
  * done-contract-done-floors-compiled.bun.test.ts — `lore done`, plan close and `lore archive --apply` judge a task by the
  * contract stored at approve (spec-done-contract-compiled-at-approve-task-kinds-write-sets), observed through the `lore`

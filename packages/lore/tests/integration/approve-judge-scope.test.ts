@@ -1,4 +1,5 @@
 // @reads packages/lore/src/service/review-service.ts
+// @spawns-external git the shared done-contract constants live in a helper that builds git repositories
 // @reads packages/lore/src/ai/review-template.ts
 // @reads assets/project/lore-config-template.yaml
 // @reads packages/core/src/config.ts

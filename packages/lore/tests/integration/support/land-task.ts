@@ -1,3 +1,4 @@
+// @spawns-external git the helper commits in a linked worktree and merges the branch in the fixture repository
 /**
  * Integration-test helper: takes a task a test already created through the stages the done contract demands, so a test whose
  * subject is what happens AT or AFTER `lore done` (floors, archive walks, readers of the landing) states only that.
