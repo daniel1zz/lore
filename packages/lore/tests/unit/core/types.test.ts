@@ -417,7 +417,8 @@ describe("DOC_TYPE_ROLE_MAP (AC-CORE-001.05)", () => {
 
   it("[negative/AC-CORE-001.N02] does not include invalid types", () => {
     const validTypes = Object.keys(DOC_TYPE_ROLE_MAP);
-    expect(validTypes).toHaveLength(8);
+    expect(validTypes).toHaveLength(9);
+    expect(validTypes).toContain("template");
     expect(validTypes).not.toContain("unknown");
   });
 });

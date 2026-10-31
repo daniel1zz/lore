@@ -22,7 +22,7 @@ import { BUILT_IN_TEMPLATES, renderTemplate } from "../../../src/ai/templates.js
 // ─── BUILT_IN_TEMPLATES coverage ────────────────────────────────────────────
 
 describe("BUILT_IN_TEMPLATES", () => {
-  const EXPECTED_DOC_TYPES = ["prd", "spec", "adr", "plan", "knowledge", "task", "phase", "baseline"] as const;
+  const EXPECTED_DOC_TYPES = ["prd", "spec", "adr", "plan", "knowledge", "task", "phase", "baseline", "template"] as const;
 
   it("has exactly one entry for every DocType", () => {
     expect(Object.keys(BUILT_IN_TEMPLATES).sort()).toEqual([...EXPECTED_DOC_TYPES].sort());

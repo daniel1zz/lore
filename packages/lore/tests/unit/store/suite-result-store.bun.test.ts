@@ -164,8 +164,8 @@ describe("migration-045 single-file runs are unique per (key, file) (#528)", () 
   const base = { commit_sha: COMMIT, file: "tests/a.test.ts", duration_ms: 5, measured_at: "2026-10-28T10:01:00.000Z" };
   const key = `file-bisect@${COMMIT}`;
 
-  it("AC-AF-2 the schema version is 45", () => {
-    expect(LATEST_SCHEMA_VERSION).toBe(45);
+  it("AC-AF-2 the schema version includes 045 (046 widened docs.type for templates)", () => {
+    expect(LATEST_SCHEMA_VERSION).toBe(46);
   });
 
   it("AC-AF-2 a second row for the same single-file key and file is ignored, the first stays; another file or key still stores", async () => {
