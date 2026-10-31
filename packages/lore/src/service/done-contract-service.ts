@@ -23,23 +23,31 @@ import {
   isTaskKind,
   isTestFileAnchor,
   ok,
+  readClaimRecord,
   resolveRecordedGoverningSpec,
   specAcceptanceCriteriaSchema,
+  withExecutionLogEntries,
   type AcceptanceCriterion,
   type DocRecord,
   type DoneContract,
   type DoneContractOracle,
+  type ExecutionLogEntry,
   type LoreError,
   type Result,
+  type TaskKind,
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { type DocWritePort } from "./corpus-service.js";
 import {
   compileDoneContract,
   contractAlreadyStored,
   liveScriptCriteriaOf,
   redWaiverNotCode,
+  uncompilableCausesOf,
   type DoneContractBase,
+  type DoneContractCompileInput,
   type DoneContractConfigCommands,
+  type UncompilableCause,
 } from "./done-contract-compile.js";
 
 /** The branch every contract falls back to when the plan declares no integration branch, and the one check and corpus tasks use. */
@@ -84,6 +92,80 @@ export function withAddedOracles(contract: DoneContract, additions: readonly Don
     ...contract,
     added_oracles: mergeAddedOracles(contract.added_oracles, additions),
   };
+}
+
+/** What the recompile of `lore start` found: the contract it compiled, or the causes that stop it. */
+export interface DriftRecompile {
+  /** Every falsifier path of the task's live script criteria (the files the drift diff covers besides the anchors). */
+  readonly falsifierPaths: readonly string[];
+  /** Empty when the contract compiled. */
+  readonly causes: readonly UncompilableCause[];
+  readonly contract: DoneContract | undefined;
+}
+
+/**
+ * The stored contract with the recompiled one applied: the old oracles are all kept (an id the recompile no longer lists stays; an id
+ * both list takes the recompiled command), the new oracles are appended, `added_oracles` and the kind stay as stored.
+ * The oracle set never shrinks (D28, D30).
+ *
+ * @param stored - the contract the task holds
+ * @param fresh - the recompiled contract
+ */
+export function mergeRecompiledContract(stored: DoneContract, fresh: DoneContract): DoneContract {
+  const oracles: DoneContractOracle[] = stored.oracles.map((old) => fresh.oracles.find((candidate) => candidate.id === old.id) ?? old);
+  for (const added of fresh.oracles) if (!oracles.some((known) => known.id === added.id)) oracles.push(added);
+  return { ...fresh, kind: stored.kind, oracles, added_oracles: stored.added_oracles };
+}
+
+/** One field or oracle that differs between two contracts. */
+export interface ContractChange {
+  readonly field: string;
+  readonly old: unknown;
+  readonly new: unknown;
+}
+
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).filter((key) => record[key] !== undefined).sort().map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/**
+ * What differs between the stored contract and the merged recompile, with old and new values; `compiled_at_commit` alone is not a
+ * change (a base that moved without touching the contract changes nothing). Empty when the two are the same.
+ *
+ * @param stored - the stored contract
+ * @param next - the merged recompiled contract
+ */
+export function describeContractChanges(stored: DoneContract, next: DoneContract): ContractChange[] {
+  const changes: ContractChange[] = [];
+  const a = stored as unknown as Record<string, unknown>;
+  const b = next as unknown as Record<string, unknown>;
+  for (const field of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    if (field === "compiled_at_commit" || field === "oracles") continue;
+    if (canonical(a[field]) !== canonical(b[field])) changes.push({ field, old: a[field], new: b[field] });
+  }
+  for (const oracle of next.oracles) {
+    const old = stored.oracles.find((candidate) => candidate.id === oracle.id);
+    if (old === undefined) changes.push({ field: `oracles.${oracle.id}`, old: null, new: oracle });
+    else if (canonical(old) !== canonical(oracle)) changes.push({ field: `oracles.${oracle.id}`, old, new: oracle });
+  }
+  return changes;
+}
+
+/**
+ * The `drift` entry for a stored change: `detail` is JSON holding both commits and every change with its old and new value.
+ *
+ * @param at - the write time
+ * @param stored - the contract before
+ * @param next - the contract after
+ * @param changes - {@link describeContractChanges} of the two (non-empty)
+ */
+export function driftLogEntry(at: string, stored: DoneContract, next: DoneContract, changes: readonly ContractChange[]): ExecutionLogEntry {
+  return { kind: "drift", at, detail: JSON.stringify({ from_commit: stored.compiled_at_commit, to_commit: next.compiled_at_commit, changes }) };
 }
 
 /** What {@link deriveWriteSetAdditions} reads. */
@@ -131,6 +213,7 @@ export class DoneContractService implements ApproveContractPort {
     private readonly store: StoreInterface,
     private readonly config: DoneContractConfigCommands,
     private readonly git: DoneContractGitPort,
+    private readonly writer?: DocWritePort,
   ) {}
 
   /**
@@ -155,6 +238,75 @@ export class DoneContractService implements ApproveContractPort {
     }
     if (opts.redWaiverReason !== undefined && kind !== "code") return err(redWaiverNotCode(task.slug, `a ${kind} task`));
 
+    const gathered = await this.gather(task, kind, opts.redWaiverReason);
+    if (!gathered.ok) return gathered;
+    return compileDoneContract(gathered.value.input);
+  }
+
+  /**
+   * Recompiles the contract of a task that already holds one, for the drift check of `lore start` (AC-DCS2-16): the SAME gather and
+   * the SAME pure compile as approve, with the stored kind and red waiver. Reads only; stores nothing.
+   *
+   * @param task - the approved task
+   * @param stored - the contract it holds
+   * @returns the recompiled contract (and the falsifier paths) or the causes that stop it; an error only when the inputs cannot be read
+   */
+  async recompileForStart(task: DocRecord, stored: DoneContract): Promise<Result<DriftRecompile, LoreError>> {
+    const gathered = await this.gather(task, stored.kind, stored.red_required ? undefined : stored.red_waiver_reason);
+    if (!gathered.ok) return gathered;
+    const compiled = compileDoneContract(gathered.value.input);
+    const falsifierPaths = [...gathered.value.input.falsifierFiles.keys()];
+    if (compiled.ok) return ok({ falsifierPaths, causes: [], contract: compiled.value });
+    const causes = uncompilableCausesOf(compiled.error);
+    // reason: any other compile error is not a cause to list; it is a fault and surfaces as itself.
+    if (causes === undefined) return compiled;
+    return ok({ falsifierPaths, causes, contract: undefined });
+  }
+
+  /**
+   * Applies a successful recompile to the stored contract (AC-DCS2-16): merges it (every old oracle kept, `added_oracles` preserved)
+   * and, only when the result differs from the stored contract, stores it together with a `drift` log entry holding the old and new
+   * values in ONE write. A recompile that changes nothing writes nothing.
+   *
+   * @param task - the task as read before the recompile (its version guards the write)
+   * @param stored - the contract the task holds
+   * @param fresh - the recompiled contract
+   * @param nowIso - the write time
+   * @returns whether anything was stored, or the write error (a lost version race is reported, never retried over a changed contract)
+   */
+  async applyRecompile(task: DocRecord, stored: DoneContract, fresh: DoneContract, nowIso: string): Promise<Result<{ readonly stored: boolean }, LoreError>> {
+    const next = mergeRecompiledContract(stored, fresh);
+    const changes = describeContractChanges(stored, next);
+    if (changes.length === 0) return ok({ stored: false });
+    const written = await this.storeDrift(task, next, driftLogEntry(nowIso, stored, next, changes), nowIso);
+    return written.ok ? ok({ stored: true }) : written;
+  }
+
+  private async storeDrift(task: DocRecord, next: DoneContract, entry: ExecutionLogEntry, nowIso: string): Promise<Result<DocRecord, LoreError>> {
+    if (this.writer === undefined) return err({ code: "VALIDATION_ERROR", field: "writer", message: "DoneContractService has no write route: a drifted contract cannot be stored", value: null });
+    let extra: Record<string, unknown>;
+    try {
+      extra = { ...withExecutionLogEntries(task.extra, [entry]), done_contract: next };
+    } catch (cause) {
+      return err({ code: "VALIDATION_ERROR", field: "execution_log", message: `The execution log of "${task.slug}" does not parse: ${cause instanceof Error ? cause.message : String(cause)}`, value: task.extra["execution_log"] });
+    }
+    const written = await this.writer.writeDoc({
+      doc: task,
+      patch: { extra },
+      action: "update",
+      changeSummary: "done contract recompiled at start (drift)",
+      auditAction: "update",
+      auditDetails: { operation: "start-drift", execution_log: "drift" },
+      auditSessionId: `start-drift-${task.id}`,
+      lock: "none",
+      now: nowIso,
+      foreignIntent: readClaimRecord(task)?.worktree !== undefined,
+    });
+    return written.ok ? ok(written.value.doc) : written;
+  }
+
+  /** Every input of the compile, read once (the plan, the criteria, the base tip, the falsifier files). */
+  private async gather(task: DocRecord, kind: TaskKind, redWaiverReason: string | undefined): Promise<Result<{ input: DoneContractCompileInput }, LoreError>> {
     const plan = await this.resolvePlan(task);
     if (!plan.ok) return plan;
     const criteria = await this.resolveCriteria(task, plan.value);
@@ -176,15 +328,7 @@ export class DoneContractService implements ApproveContractPort {
       falsifierFiles.set(path, readCommit === undefined ? undefined : this.git.fileAt(readCommit, path));
     }
 
-    return compileDoneContract({
-      task,
-      kind,
-      redWaiverReason: opts.redWaiverReason,
-      criteria: criteria.value,
-      config: this.config,
-      base,
-      falsifierFiles,
-    });
+    return ok({ input: { task, kind, redWaiverReason, criteria: criteria.value, config: this.config, base, falsifierFiles } });
   }
 
   /**

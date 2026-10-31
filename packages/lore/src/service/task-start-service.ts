@@ -12,8 +12,10 @@
  *   - all or nothing: a failure after the worktree exists (install, claim) removes the worktree and the branch THIS run created,
  *     with plain `git worktree remove` and `git branch -d` (never forced), and stores nothing; a failed removal is named in the error.
  *   - the claim is made by `TaskWorkflowService.claim` (the one claim writer); this module records nothing of its own.
- *   - the drift check of the contract at start belongs to a later task; it enters through {@link TaskStartDeps.checkContractDrift}.
- * Side-effect class: git (worktree, branch), a child process (the install command), one corpus write through the claim.
+ *   - the drift check (AC-DCS2-16) runs after those refusals and before any worktree exists: the contract is recompiled through
+ *     `DoneContractService` (the one compile); a stale falsifier literal or any compile cause refuses with every cause named and
+ *     nothing created or stored; a changed recompile is stored once with a drift entry, and never drops an oracle.
+ * Side-effect class: git (worktree, branch, diff), a child process (the install command), corpus writes (the drift write, the claim).
  *
  * Source: spec-done-contract-compiled-at-approve-task-kinds-write-sets (AC-DCS1-13, AC-DCS1-14), ledger D28, D33.
  */
@@ -21,9 +23,11 @@
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { doneContractSchema, err, ok, type DocRecord, type DoneContract, type LoreError, type Result, type RunId } from "@lore/core";
+import { doneContractSchema, err, extractFileAnchors, ok, type DocRecord, type DoneContract, type LoreError, type Result, type RunId } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
-import { createGitRunner } from "./evidence-binding.js";
+import type { UncompilableCause } from "./done-contract-compile.js";
+import type { DriftRecompile } from "./done-contract-service.js";
+import { createGitRunner, type GitRunner } from "./evidence-binding.js";
 import { resolveDoc } from "./resolve.js";
 import type { ClaimOpts } from "./task-workflow-service.js";
 
@@ -33,6 +37,7 @@ export const START_REFUSALS = [
   "kind-missing",
   "contract-missing",
   "use-finish",
+  "contract-drift",
   "worktree-exists",
   "worktree-path-not-ignored",
   "install-failed",
@@ -54,11 +59,25 @@ export interface TaskStartDeps {
     refuseClaimHeldByAnotherRun(task: DocRecord, party: { by: string; harnessRun?: RunId | null }, nowIso: string): Promise<Result<void, LoreError>>;
     claim(idOrSlug: string, opts: ClaimOpts, now?: () => string): Promise<Result<DocRecord, LoreError>>;
   };
-  /**
-   * The seam of the contract drift check at start (a later task of the plan): called after the refusals that need no git and
-   * before anything is created. Absent, no drift is checked.
-   */
-  readonly checkContractDrift?: (task: DocRecord, contract: DoneContract) => Promise<Result<void, LoreError>>;
+  /** The contract recompile and the one write of a changed contract plus its drift entry (AC-DCS2-16). */
+  readonly contracts: {
+    recompileForStart(task: DocRecord, stored: DoneContract): Promise<Result<DriftRecompile, LoreError>>;
+    applyRecompile(task: DocRecord, stored: DoneContract, fresh: DoneContract, nowIso: string): Promise<Result<{ readonly stored: boolean }, LoreError>>;
+  };
+}
+
+/** What the drift check found and did; printed by the command. */
+export interface StartDrift {
+  /** The commit the stored contract was compiled at. */
+  readonly fromCommit: string;
+  /** The tip of the base branch the start checked against. */
+  readonly toCommit: string;
+  /** `git diff` of the anchored and falsifier files between the two; empty when none changed. */
+  readonly diff: string;
+  /** The files the diff covered. */
+  readonly paths: readonly string[];
+  /** Whether a changed recompile was stored (and a drift entry written). */
+  readonly stored: boolean;
 }
 
 /** What one `lore start` call is given. */
@@ -89,6 +108,7 @@ export interface StartOutcome {
   /** The task as stored after the claim, so the contract printed is the stored one with its persisted additions. */
   readonly task: DocRecord;
   readonly contract: DoneContract;
+  readonly drift: StartDrift;
 }
 
 function refusal(name: StartRefusal, message: string, value?: unknown): LoreError {
@@ -130,10 +150,6 @@ export class TaskStartService {
     if (contract.kind !== "code") {
       return err(refusal("use-finish", `${task.slug} is a ${contract.kind} task: it has no worktree. Run \`lore finish ${task.slug}\` from the shared checkout.`));
     }
-    if (this.deps.checkContractDrift !== undefined) {
-      const drift = await this.deps.checkContractDrift(task, contract);
-      if (!drift.ok) return drift;
-    }
 
     const git = createGitRunner(input.cwd);
     const listed = git(["worktree", "list", "--porcelain"]);
@@ -142,6 +158,11 @@ export class TaskStartService {
       return err(refusal("start-git-failed", `the repository of ${input.cwd} cannot be read (${listed.ok ? "no worktree listed" : listed.reason}); nothing was created.`));
     }
     const repo = createGitRunner(repoRoot);
+
+    // reason: AC-DCS2-16 — the drift since approve is decided before anything exists; a refusal here creates and stores nothing.
+    const checked = await this.checkDrift(task, contract, repo, input.nowIso);
+    if (!checked.ok) return checked;
+    const drift = checked.value;
 
     const branch = `task/${task.slug}`;
     const worktreePath = join(repoRoot, ".claude", "worktrees", task.slug);
@@ -207,6 +228,47 @@ export class TaskStartService {
 
     const after = doneContractSchema.safeParse(claimed.value.extra["done_contract"]);
     if (!after.success) return fail(refusal("contract-missing", `${task.slug} lost its done contract during the claim.`));
-    return ok({ slug: task.slug, worktree: worktreePath, branch, task: claimed.value, contract: after.data });
+    return ok({ slug: task.slug, worktree: worktreePath, branch, task: claimed.value, contract: after.data, drift });
+  }
+
+  /**
+   * The drift check: recompiles the contract (the one compile of approve), refuses a stale falsifier literal or any other cause with
+   * every cause named, otherwise diffs the anchored and falsifier files since `compiled_at_commit` and stores a changed recompile.
+   */
+  private async checkDrift(task: DocRecord, contract: DoneContract, repo: GitRunner, nowIso: string): Promise<Result<StartDrift, LoreError>> {
+    const recompiled = await this.deps.contracts.recompileForStart(task, contract);
+    if (!recompiled.ok) return recompiled;
+    const { causes, falsifierPaths } = recompiled.value;
+    const missingLiterals = causes.filter((cause) => cause.code === "falsifier-literal-absent");
+    const otherCauses = causes.filter((cause) => cause.code !== "falsifier-literal-absent");
+    // reason: every cause is named in ONE refusal, so the refusal of the literals also carries the other causes found.
+    const driftRefusal = (literals: readonly UncompilableCause[]): LoreError => {
+      const all = [...literals, ...otherCauses];
+      const lines = all.map((cause) => `  - ${cause.code}: ${cause.message}`);
+      return refusal(
+        "contract-drift",
+        `the contract of ${task.slug} (compiled at ${contract.compiled_at_commit.slice(0, 12)}) is stale against ${contract.base_branch} (${all.length} cause${all.length === 1 ? "" : "s"}); ` +
+          `no worktree was created and the stored contract is unchanged; fix every cause, then start again:\n${lines.join("\n")}`,
+        all.map((cause) => cause.code),
+      );
+    };
+    if (missingLiterals.length > 0) return err(driftRefusal(missingLiterals));
+    if (otherCauses.length > 0) return err(driftRefusal([]));
+    const fresh = recompiled.value.contract;
+    if (fresh === undefined) return err(refusal("contract-missing", `${task.slug}: the recompile returned neither a contract nor a cause.`));
+
+    const tipRun = repo(["rev-parse", "--verify", "--quiet", `refs/heads/${contract.base_branch}^{commit}`]);
+    if (!tipRun.ok) return err(refusal("start-git-failed", `${tipRun.reason}; nothing was created.`));
+    const toCommit = tipRun.stdout.trim();
+    const paths = [...new Set([...extractFileAnchors(task).map((anchor) => anchor.split("#")[0] ?? anchor), ...falsifierPaths])].filter((path) => path !== "");
+    let diff = "";
+    if (paths.length > 0) {
+      const diffRun = repo(["diff", `${contract.compiled_at_commit}..${toCommit}`, "--", ...paths]);
+      if (!diffRun.ok) return err(refusal("start-git-failed", `${diffRun.reason}; nothing was created.`));
+      diff = diffRun.stdout;
+    }
+    const applied = await this.deps.contracts.applyRecompile(task, contract, fresh, nowIso);
+    if (!applied.ok) return applied;
+    return ok({ fromCommit: contract.compiled_at_commit, toCommit, diff, paths, stored: applied.value.stored });
   }
 }

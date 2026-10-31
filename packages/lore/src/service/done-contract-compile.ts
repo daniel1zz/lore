@@ -5,7 +5,7 @@
  *   `workflow.done_contract.*` commands, the base branch and its tip, the falsifier files at that commit) into the stored
  *   {@link DoneContract}, or into one refusal that names EVERY cause that stops it (invariant I3: no partial contract).
  * Public surface: {@link compileDoneContract}, {@link liveScriptCriteriaOf}, {@link DoneContractCompileInput},
- *   {@link DoneContractConfigCommands}, {@link UncompilableCause}, {@link DONE_CONTRACT_UNCOMPILABLE}, {@link contractAlreadyStored}, {@link RED_WAIVER_NOT_CODE}, {@link redWaiverNotCode}.
+ *   {@link DoneContractConfigCommands}, {@link UncompilableCause}, {@link uncompilableCausesOf}, {@link DONE_CONTRACT_UNCOMPILABLE}, {@link contractAlreadyStored}, {@link RED_WAIVER_NOT_CODE}, {@link redWaiverNotCode}.
  * Invariants:
  *   - one copy of each done predicate (I1): the anchored test files and the live script-mode ACs come from `definitionOfDone`
  *     (`task-workflow-service.ts`) by import; this module re-derives neither.
@@ -116,8 +116,22 @@ function buildUncompilable(slug: string, causes: readonly UncompilableCause[]): 
     message:
       `${DONE_CONTRACT_UNCOMPILABLE}: the done contract of ${slug} cannot be compiled (${causes.length} cause${causes.length === 1 ? "" : "s"}); ` +
       `nothing was written, fix every cause and approve again:\n${lines.join("\n")}`,
-    value: { refusal: DONE_CONTRACT_UNCOMPILABLE, causes: causes.map((cause) => cause.code) },
+    // reason: `causeDetails` lets the drift check at `lore start` read each cause (code and message) without parsing the message text.
+    value: { refusal: DONE_CONTRACT_UNCOMPILABLE, causes: causes.map((cause) => cause.code), causeDetails: causes },
   };
+}
+
+/**
+ * The causes carried by a {@link DONE_CONTRACT_UNCOMPILABLE} refusal.
+ *
+ * @param error - an error returned by {@link compileDoneContract}
+ * @returns the causes, or `undefined` when `error` is not an uncompilable-contract refusal
+ */
+export function uncompilableCausesOf(error: LoreError): readonly UncompilableCause[] | undefined {
+  if (error.code !== "VALIDATION_ERROR") return undefined;
+  const value = error.value as { refusal?: unknown; causeDetails?: unknown } | null | undefined;
+  if (value === null || typeof value !== "object" || value.refusal !== DONE_CONTRACT_UNCOMPILABLE || !Array.isArray(value.causeDetails)) return undefined;
+  return value.causeDetails as UncompilableCause[];
 }
 
 /**

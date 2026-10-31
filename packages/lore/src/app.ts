@@ -1847,7 +1847,7 @@ function buildMainRedLedger(store: StoreInterface, corpusService: CorpusService)
  */
 function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | undefined, repoRoot: string, ambient: AppAmbient): void {
   const commands = config?.workflow?.done_contract ?? {};
-  const contracts = new DoneContractService(store, commands, createRealDoneContractGit(repoRoot));
+  const contracts = new DoneContractService(store, commands, createRealDoneContractGit(repoRoot), app.corpusService);
   app.reviewService.setDoneContractPort(contracts);
   // reason: AC-DCS2-15 — a task past done is reviewed by the contract check of the workflow service, never by the AI judge.
   app.reviewService.setContractCheckPort(app.taskWorkflowService);
@@ -1894,7 +1894,8 @@ function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | 
   const logWriter = app.executionLogService;
   app.createLandService = (ports) => new LandService({ ...ports, store, log: logWriter });
   // reason: AC-DCS1-13 — start composes the workflow service (the lease check and the one claim write).
-  app.taskStartService = new TaskStartService({ store, workflow: app.taskWorkflowService });
+  // reason: AC-DCS2-16 — start recompiles through the SAME service approve uses and stores a changed contract through the one write route.
+  app.taskStartService = new TaskStartService({ store, workflow: app.taskWorkflowService, contracts });
 }
 
 /**

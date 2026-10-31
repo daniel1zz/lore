@@ -4,7 +4,10 @@
  * contract's base branch (the plan's integration branch, else main), runs the contract's install command there, claims the task with
  * that worktree and branch, and prints the stored contract. A failure after the worktree exists removes it and stores nothing.
  *
- * Exit codes: 0 started, 4 refused (not-approved, use-finish, worktree-exists, worktree-path-not-ignored, install-failed, or a claim
+ * Before anything is created it checks the drift since approve (AC-DCS2-16): a stale falsifier literal or any compile cause exits 4
+ * (contract-drift); otherwise the diff of the anchored and falsifier files is printed and a changed recompile is stored.
+ *
+ * Exit codes: 0 started, 4 refused (not-approved, use-finish, contract-drift, worktree-exists, worktree-path-not-ignored, install-failed, or a claim
  * refusal), 5 the task is held by a fresh claim of another run (checked first).
  *
  * Source: spec-done-contract-compiled-at-approve-task-kinds-write-sets (AC-DCS1-13, AC-DCS1-14).
@@ -65,9 +68,12 @@ export default defineLoreCommand({
       // reason: the edit-time anchor gate reads this working copy's scope file instead of spawning lore per edit (as `lore claim`).
       await refreshScopeFilesOf(app, outcome.slug, await scopeCandidatesOf(app, outcome.slug, inv.cwd, [outcome.worktree]));
       if (args.json) {
-        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: outcome.slug, worktree: outcome.worktree, branch: outcome.branch, done_contract: outcome.contract } }, null, 2));
+        printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: outcome.slug, worktree: outcome.worktree, branch: outcome.branch, done_contract: outcome.contract, drift: outcome.drift } }, null, 2));
         return 0;
       }
+      const { drift } = outcome;
+      printLine(inv.io.stdout, `Drift since approve (${drift.fromCommit.slice(0, 12)}..${drift.toCommit.slice(0, 12)}): ${drift.paths.length === 0 ? "no anchored or falsifier files" : drift.diff === "" ? "no changes to anchored and falsifier files" : "anchored and falsifier files changed"}${drift.stored ? "; the recompiled contract was stored and a drift entry logged" : ""}`);
+      if (drift.diff !== "") printLine(inv.io.stdout, drift.diff.trimEnd());
       printLine(inv.io.stdout, `Started ${outcome.slug} by ${by} in ${outcome.worktree} on branch ${outcome.branch} (v${outcome.task.version})`);
       for (const line of renderDoneContract(outcome.contract)) printLine(inv.io.stdout, line);
       printLine(inv.io.stdout, `Next: work in ${outcome.worktree}, then \`lore finish ${outcome.slug}\` from it`);
