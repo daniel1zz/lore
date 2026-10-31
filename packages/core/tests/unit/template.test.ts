@@ -316,11 +316,29 @@ describe("cross-field check library", () => {
     expect(run("refs-resolve", props, { refs: ["AC-1"] })).toEqual([]);
   });
 
-  it("refusal-has-ac: flags an uncited refusal (string and object entries); passes a cited one", () => {
+  it("refusal-has-ac: each refusal carries its own acs; flags an entry with none, with only unknown AC ids, or a bare string; passes one naming a declared AC", () => {
     const props = { refusals: { type: "array", "x-refusal-list": true } } as Record<string, JsonSchemaNode>;
-    const findings = run("refusal-has-ac", props, { refusals: ["R-1", "R-2", { id: "R-3", text: "x" }] });
-    expect(findings.map((f) => f.entry)).toEqual(["refusals: R-2", "refusals: R-3"]);
-    expect(run("refusal-has-ac", props, { refusals: ["R-1"] })).toEqual([]);
+    const findings = run("refusal-has-ac", props, {
+      refusals: [
+        { id: "R-1", acs: ["AC-404", "AC-1"] },
+        { id: "R-2" },
+        { id: "R-3", acs: ["AC-404"] },
+        { id: "R-4", acs: [] },
+        { id: "R-5", acs: "AC-1" },
+        "R-6",
+      ],
+    });
+    expect(findings.map((f) => f.entry)).toEqual(["refusals: R-2", "refusals: R-3", "refusals: R-4", "refusals: R-5", "refusals: R-6"]);
+    expect(findings.every((f) => f.check === "refusal-has-ac")).toBe(true);
+    expect(findings.find((f) => f.entry === "refusals: R-3")?.problem).toContain("AC-404");
+    expect(findings.find((f) => f.entry === "refusals: R-2")?.problem).toContain("acs");
+    expect(run("refusal-has-ac", props, { refusals: [{ id: "R-1", acs: ["AC-1"] }] })).toEqual([]);
+  });
+
+  it("refusal-has-ac: an AC that merely cites the refusal key (the retired shape) does not cover it", () => {
+    const props = { refusals: { type: "array", "x-refusal-list": true } } as Record<string, JsonSchemaNode>;
+    const findings = run("refusal-has-ac", props, { refusals: [{ id: "R-1" }] });
+    expect(findings).toHaveLength(1);
   });
 
   it("rule-change-has-ac: flags an uncited rule change; passes a cited one", () => {

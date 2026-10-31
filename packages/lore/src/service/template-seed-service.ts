@@ -5,8 +5,10 @@
  *   `lore migrate templates` runs this; it NEVER overwrites an approved corpus template.
  * Public surface: {@link TemplateSeedService} (`preview`, `apply`), {@link TemplateSeed}, {@link seedSlugOf}.
  * Invariants:
- *   - A slot (doc_type, kind) that already resolves to an approved corpus template is skipped, whatever its content;
- *     a seed never revises, replaces or re-versions it.
+ *   - A slot (doc_type, kind) that already resolves to an approved corpus template is skipped when the seed's version is
+ *     not higher; a seed with a HIGHER version is written as a draft revision of that template document (a new
+ *     template version awaiting review), never in place of the approved one: the approved version keeps resolving
+ *     until a person approves the revision.
  *   - A slot with no approved template but whose seed slug is already held (a draft or deprecated template) is
  *     reported `blocked` and untouched; seeding never edits an existing document.
  *   - A seeded template is created at version 1 by the same `CorpusService` write path as any template and then
@@ -29,12 +31,17 @@ export interface TemplateSeed {
 export type SeedOutcome =
   | { readonly slot: string; readonly action: "seeded"; readonly slug: string }
   | { readonly slot: string; readonly action: "present"; readonly ref: string }
+  | { readonly slot: string; readonly action: "revise"; readonly slug: string; readonly from: number; readonly to: number }
   | { readonly slot: string; readonly action: "blocked"; readonly slug: string; readonly reason: string };
 
 /** The write ports this service needs of the corpus (structural, so no service imports another). */
 export interface TemplateSeedWriter {
   create(input: { type: "template"; title: string; slug: string; extra: Record<string, unknown> }, opts?: { by?: string }): Promise<Result<DocRecord, LoreError>>;
-  set(id: string, patch: { status: "approved" }, opts?: { by?: string; expectedVersion?: number }): Promise<Result<unknown, LoreError>>;
+  set(
+    id: string,
+    patch: { status: "approved" } | { extra: Record<string, unknown> },
+    opts?: { by?: string; expectedVersion?: number },
+  ): Promise<Result<unknown, LoreError>>;
   get(idOrSlug: string): Promise<Result<{ doc: DocRecord }, LoreError>>;
 }
 
@@ -88,6 +95,12 @@ export class TemplateSeedService {
     for (const seed of seeds) {
       const classified = await this.classify(seed);
       if (!classified.ok) return classified;
+      if (classified.value.action === "revise") {
+        const proposed = await this.proposeRevision(seed, classified.value.slug, opts.by);
+        if (!proposed.ok) return proposed;
+        outcomes.push(classified.value);
+        continue;
+      }
       if (classified.value.action !== "seeded") {
         outcomes.push(classified.value);
         continue;
@@ -115,7 +128,7 @@ export class TemplateSeedService {
   private async classify(seed: TemplateSeed): Promise<Result<SeedOutcome, LoreError>> {
     const slot = slotOf(seed.template);
     const resolved = await this.templates.resolveTemplate(seed.template.doc_type, seed.template.kind);
-    if (resolved.ok) return ok({ slot, action: "present", ref: resolved.value.ref });
+    if (resolved.ok) return await this.classifyAgainstApproved(seed, slot, resolved.value);
     // reason: "no approved template" is the one expected refusal (VALIDATION_ERROR naming the slot); any other failure
     // (a store error) must surface, never read as "missing".
     if (resolved.error.code !== "VALIDATION_ERROR") return resolved;
@@ -128,12 +141,53 @@ export class TemplateSeedService {
     return ok({ slot, action: "seeded", slug });
   }
 
+  /**
+   * The slot already has an approved template. A seed at that version or older leaves it; a NEWER seed is a proposed
+   * revision unless the template document already carries that version (or newer) as an unapproved draft, or holds some
+   * other unreviewed edit (then it is `blocked`: a revision is proposed into a clean approved document only).
+   */
+  private async classifyAgainstApproved(
+    seed: TemplateSeed,
+    slot: string,
+    approved: { slug: string; version: number; ref: string },
+  ): Promise<Result<SeedOutcome, LoreError>> {
+    const present: SeedOutcome = { slot, action: "present", ref: approved.ref };
+    if (seed.template.version <= approved.version) return ok(present);
+    const held = await this.writer.get(approved.slug);
+    if (!held.ok) return held;
+    const doc = held.value.doc;
+    const body: unknown = doc.extra["template"];
+    const pendingVersion = isRecordWithVersion(body) ? body.version : undefined;
+    if (doc.status !== "approved") {
+      if (pendingVersion !== undefined && pendingVersion >= seed.template.version) return ok(present);
+      return ok({ slot, action: "blocked", slug: approved.slug, reason: `it holds an unreviewed revision (status ${doc.status}) other than seed version ${String(seed.template.version)}; review or reject it first` });
+    }
+    return ok({ slot, action: "revise", slug: approved.slug, from: approved.version, to: seed.template.version });
+  }
+
+  /** Writes the seed as the next revision of the approved template document; it stays a draft until a person approves it. */
+  private async proposeRevision(seed: TemplateSeed, slug: string, by: string | undefined): Promise<Result<unknown, LoreError>> {
+    const held = await this.writer.get(slug);
+    if (!held.ok) return held;
+    const doc = held.value.doc;
+    // reason: `extra` is replaced wholesale by `set`, so the document's other extra keys are carried over.
+    return await this.writer.set(
+      doc.id,
+      { extra: { ...doc.extra, template: seed.template } },
+      { ...(by === undefined ? {} : { by }), expectedVersion: doc.version },
+    );
+  }
+
   private async holderOf(slug: string): Promise<Result<Pick<DocRecord, "type" | "status"> | undefined, LoreError>> {
     const found = await this.writer.get(slug);
     if (found.ok) return ok(found.value.doc);
     if (found.error.code === "DOC_NOT_FOUND" || found.error.code === "SLUG_NOT_FOUND") return ok(undefined);
     return found;
   }
+}
+
+function isRecordWithVersion(value: unknown): value is { version: number } {
+  return typeof value === "object" && value !== null && typeof (value as { version?: unknown }).version === "number";
 }
 
 function titleOf(template: Template): string {

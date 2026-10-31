@@ -55,9 +55,11 @@
  *                      row per plan carrying the removed value; a second `--apply` writes nothing. Thin
  *                      pipe over `PlanOutlineExemptMigrationService`.
  *   templates [--apply] Seed every shipped template (`assets/templates/*.json`) whose document type/kind has no
- *                      approved corpus template, as an approved template document (BR-1528). Never overwrites or
- *                      revises an approved template; a slug held by a draft template is reported BLOCKED (exit 4) and
- *                      left alone. Preview is the DEFAULT; a second `--apply` writes nothing.
+ *                      approved corpus template, as an approved template document (BR-1528). Never overwrites an
+ *                      approved template: a shipped seed with a HIGHER version than the approved corpus template is
+ *                      written as a draft revision of that template document (the approved version keeps applying
+ *                      until a person reviews and approves it); a slug held by a draft template is reported BLOCKED
+ *                      (exit 4) and left alone. Preview is the DEFAULT; a second `--apply` writes nothing.
  *   outline-sections [--apply] Remove the stored outline (`extra.outline`) from every PRD, now that the
  *                      outline command family is gone. Preview is the DEFAULT; `--apply` writes one version
  *                      and one audit row per PRD (the previous version and the row's `details.removed` keep
@@ -409,11 +411,25 @@ export default defineLoreCommand({
         printLine(inv.io.stdout, apply ? "Template seeding complete" : "Template seeding (preview)");
         printLine(inv.io.stdout, "─".repeat(40));
         for (const outcome of result.value) {
-          const detail = outcome.action === "seeded" ? outcome.slug : outcome.action === "present" ? `approved ${outcome.ref}, left as is` : `${outcome.slug}: ${outcome.reason}`;
-          const verb = outcome.action === "seeded" ? (apply ? "seeded " : "would seed") : outcome.action === "present" ? "present" : "BLOCKED";
+          const detail =
+            outcome.action === "seeded"
+              ? outcome.slug
+              : outcome.action === "present"
+                ? `approved ${outcome.ref}, left as is`
+                : outcome.action === "revise"
+                  ? `${outcome.slug}: version ${String(outcome.from)} -> ${String(outcome.to)} as a draft revision (review and approve it; the approved version keeps applying until then)`
+                  : `${outcome.slug}: ${outcome.reason}`;
+          const verb =
+            outcome.action === "seeded"
+              ? apply ? "seeded " : "would seed"
+              : outcome.action === "present"
+                ? "present"
+                : outcome.action === "revise"
+                  ? apply ? "proposed" : "would propose"
+                  : "BLOCKED";
           printLine(inv.io.stdout, `  ${verb.padEnd(10)} ${outcome.slot.padEnd(28)} ${detail}`);
         }
-        if (!apply && result.value.some((outcome) => outcome.action === "seeded")) printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
+        if (!apply && result.value.some((outcome) => outcome.action === "seeded" || outcome.action === "revise")) printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
         return blocked.length === 0 ? 0 : 4;
       } finally {
         app.close();
