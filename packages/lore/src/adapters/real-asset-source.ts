@@ -177,7 +177,7 @@ export const RETIRED_FROM_INSTALL_PATHS = new Set<string>(
  * (also used by `setup-check.ts`'s `buildCheckEmbeddedManifest`) and
  * {@link listBinaryReadAssetPaths} (npm assembly in `scripts/publish-npm.ts`).
  */
-export const BINARY_READ_ONLY_TOP_DIRS: readonly string[] = ["context", "project"];
+export const BINARY_READ_ONLY_TOP_DIRS: readonly string[] = ["context", "project", "templates"];
 
 /**
  * Predicate form of {@link RETIRED_FROM_INSTALL_PATHS} — `path` is the FULL
