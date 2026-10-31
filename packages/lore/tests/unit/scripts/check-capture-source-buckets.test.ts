@@ -413,7 +413,6 @@ const PINNED_REAL_SITES: readonly string[] = [
   "classifier-file|stamp_verdict|raw-field-read|packages/core/src/stamp-binding.ts|stampCurrencyOf",
   "classifier-input|capture_source|raw-field-read|packages/lore/src/adapters/cli/commands/status.ts|collectCaptureSourceMembers>(anonymous)",
   "exempt-by-shape|capture_source|literal-comparison|packages/lore/src/service/task-workflow-service.ts|rejectMissingPassOutputTail",
-  "exempt-by-shape|capture_source|raw-field-read|packages/lore/src/adapters/cli/commands/done.ts|resolveEvidenceCitation",
   "exempt-by-shape|capture_source|raw-field-read|packages/lore/src/service/phase-workflow-service.ts|_addEvidenceImpl",
   "exempt-by-shape|capture_source|raw-field-read|packages/lore/src/service/task-workflow-service.ts|_addEvidenceImpl",
   "exempt-by-shape|capture_source|raw-field-read|packages/lore/src/service/task-workflow-service.ts|isRunnerCaptured",

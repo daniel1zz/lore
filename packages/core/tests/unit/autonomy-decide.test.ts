@@ -239,7 +239,7 @@ describe("AC-AU-1 seeded registry (spec class table)", () => {
         expect(c.usesJudge).toBe(false);
       }
     }
-    expect(Object.keys(r)).toHaveLength(11);
+    expect(Object.keys(r)).toHaveLength(10);
   });
 
   it("stash-drop with measured stash facts -> auto at 0.9; override-judgment (milestone class) -> milestone", () => {

@@ -1,5 +1,6 @@
+// @reads assets/project/lore-config-template.yaml
 /**
- * `lore done --override-attestation` / `--override-attestation-cite` are RETIRED (decision D45, spec
+ * `lore done --override-attestation` /`--override-attestation-cite` are RETIRED (decision D45, spec
  * spec-done-contract-compiled-at-approve-task-kinds-write-sets AC-DCS1-*): under the done contract the contract's oracles are the
  * only proof of done, so a flag that waived only the attested-pass floor goes. A caller meets the contract's oracles, or amends
  * the contract.
