@@ -300,6 +300,7 @@ export type {
   CheckOutcomeStat,
   LeaseAcquisition,
   LeaseRecord,
+  LeaseTakeover,
   PendingAskInput,
   PendingAskRecord,
   TraceDenyByCheckpoint,
@@ -317,6 +318,7 @@ import type {
   CheckOutcomeStat,
   LeaseAcquisition,
   LeaseRecord,
+  LeaseTakeover,
   PendingAskInput,
   PendingAskRecord,
   ReadDayCount,
@@ -1433,6 +1435,14 @@ export interface StoreInterface {
    * true when an expired row of another holder was replaced. A live lease of another holder is `acquired: false`.
    */
   acquireLease(name: string, holder: string, nowIso: string, expiresAtIso: string): Promise<Result<LeaseAcquisition, LoreError>>;
+
+  /**
+   * Compare-and-set takeover (BR-1514): ONE conditional UPDATE `WHERE name = ? AND holder = expectedHolder` that makes
+   * `newHolder` the holder with `expiresAtIso`, whether or not the row has expired. Of two takers of one dead holder,
+   * exactly one matches; the other gets `acquired: false` with the row now stored. The caller decides the expected
+   * holder is dead; the store only guarantees the swap is atomic against that exact name.
+   */
+  takeOverLease(name: string, expectedHolder: string, newHolder: string, expiresAtIso: string): Promise<Result<LeaseTakeover, LoreError>>;
 
   /** Moves `holder`'s lease expiry forward; `ok(false)` when the row is no longer `holder`'s (it expired and was taken over). */
   renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>>;

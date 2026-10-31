@@ -562,6 +562,11 @@ export type LeaseAcquisition =
   | { readonly acquired: true; readonly tookOver: boolean }
   | { readonly acquired: false; readonly holder: string; readonly expires_at: string };
 
+/** Outcome of `takeOverLease`: taken, or not because the row is no longer the expected holder's (`current` is the row now, `null` when it is gone). */
+export type LeaseTakeover =
+  | { readonly acquired: true }
+  | { readonly acquired: false; readonly current: LeaseRecord | null };
+
 /** One UTC day's read count (`trace_read_counts`, migration-031, BR-1373). */
 export interface ReadDayCount {
   /** `YYYY-MM-DD`, UTC. */

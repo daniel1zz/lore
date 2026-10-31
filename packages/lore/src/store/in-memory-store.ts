@@ -57,6 +57,7 @@ import type {
   PendingAskInput,
   PendingAskRecord,
   LeaseAcquisition,
+  LeaseTakeover,
   LeaseRecord,
   ReadDayCount,
   TraceEventInput,
@@ -1849,6 +1850,13 @@ export class InMemoryStore implements StoreInterface {
     }
     this.leases.set(name, { name, holder, expires_at: expiresAtIso });
     return ok({ acquired: true, tookOver: prior !== undefined && prior.holder !== holder });
+  }
+
+  async takeOverLease(name: string, expectedHolder: string, newHolder: string, expiresAtIso: string): Promise<Result<LeaseTakeover, LoreError>> {
+    const prior = this.leases.get(name);
+    if (prior === undefined || prior.holder !== expectedHolder) return ok({ acquired: false, current: prior ?? null });
+    this.leases.set(name, { name, holder: newHolder, expires_at: expiresAtIso });
+    return ok({ acquired: true });
   }
 
   async renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>> {
