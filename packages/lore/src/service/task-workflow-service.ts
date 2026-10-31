@@ -271,7 +271,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute, relative } from "node:path";
 import { z } from "zod";
-import { err, ok, checkScopeDeclaredOnSpec, extractGoverningSpecRef, governingSpecMissingError, classifyEvidenceStamps, readStampVerdict, stampCurrencyOf, type StampAxisReading, findMissingOracleFiles, hasPassOnRecord, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result, readClaimRecord } from "@lore/core";
+import { err, ok, checkScopeDeclaredOnSpec, extractGoverningSpecRef, governingSpecMissingError, classifyEvidenceStamps, unboundReasonOfReading, findMissingOracleFiles, hasPassOnRecord, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result, readClaimRecord } from "@lore/core";
 import type { AuditEntry, LoreError } from "@lore/core";
 import {
   evidenceEntrySchema,
@@ -2467,16 +2467,6 @@ function isSameWorkingCopy(a: ClaimedWorkingCopy, b: ClaimedWorkingCopy): boolea
   return false;
 }
 
-/**
- * The reason one evidence row's stamp verdict is `unbound`, or `undefined` for any other verdict (or an unattested row). The verdict
- * comes from `readStampVerdict` (the single reader); the stamp axis is read first, so the `unmeasured` radius placeholder is exact.
- */
-function unboundReasonOf(reading: StampAxisReading | null | undefined): string | undefined {
-  if (reading === null || reading === undefined) return undefined;
-  const currency = stampCurrencyOf(reading, { status: "unmeasured" });
-  return readStampVerdict(currency) === "unbound" ? currency.reason : undefined;
-}
-
 export class TaskWorkflowService {
   private readonly telemetry: Telemetry;
   /**
@@ -4281,13 +4271,13 @@ export class TaskWorkflowService {
     // floor. `legacy_unbound` and every row of an UNARMED corpus still do, so arming refuses
     // nothing retroactively.
     const stampReadings = classifyEvidenceStamps(task.id, evidence, stampBinding);
-    const attestedRows = evidence.filter((e, index) => e.result === "pass" && e.attestation !== undefined && unboundReasonOf(stampReadings[index]) === undefined);
+    const attestedRows = evidence.filter((e, index) => e.result === "pass" && e.attestation !== undefined && unboundReasonOfReading(stampReadings[index]) === undefined);
     // reason: AC-DCS1-27 — a pass counts only when it is bound to the code the task lands (a code task: the same git tree as the
     // landed commit; a check or corpus task: a main commit containing the compile commit). `binding` holds that verdict per row.
     const hasAttestedPass = attestedRows.some((e) => binding.get(e)?.counts === true);
     const excludedByLanding = !hasAttestedPass && attestedRows.length > 0;
     const unboundPassReasons = evidence.flatMap((e, index) => {
-      const reason = unboundReasonOf(stampReadings[index]);
+      const reason = unboundReasonOfReading(stampReadings[index]);
       return e.result === "pass" && reason !== undefined ? [reason] : [];
     });
     const attestedPassFloor = (): FloorStep => {
@@ -4320,7 +4310,7 @@ export class TaskWorkflowService {
           value: evidence.map((e, index) => ({
             result: e.result,
             attested: e.attestation !== undefined,
-            ...(unboundReasonOf(stampReadings[index]) !== undefined ? { unbound: true } : {}),
+            ...(unboundReasonOfReading(stampReadings[index]) !== undefined ? { unbound: true } : {}),
           })),
         });
       }
@@ -4617,7 +4607,7 @@ export class TaskWorkflowService {
     const landedCommit = readTaskLanding(task.extra)?.landing_commit;
     const bindings = new Map<EvidenceEntry, RowBinding>();
     for (const [index, row] of evidence.entries()) {
-      if (row.result === "pass" && row.attestation !== undefined && unboundReasonOf(readings[index]) === undefined) bindings.set(row, this.bindRow(git, contract, row, landedCommit));
+      if (row.result === "pass" && row.attestation !== undefined && unboundReasonOfReading(readings[index]) === undefined) bindings.set(row, this.bindRow(git, contract, row, landedCommit));
     }
     const met: string[] = [];
     const unmet: { id: string; reason: string }[] = [];

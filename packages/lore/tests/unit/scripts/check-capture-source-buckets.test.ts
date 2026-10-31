@@ -414,7 +414,8 @@ const PINNED_REAL_SITES: readonly string[] = [
   "classifier-input|capture_source|raw-field-read|packages/lore/src/adapters/cli/commands/status.ts|collectCaptureSourceMembers>(anonymous)",
   "exempt-by-shape|capture_source|literal-comparison|packages/lore/src/service/task-workflow-service.ts|rejectMissingPassOutputTail",
   "exempt-by-shape|capture_source|raw-field-read|packages/lore/src/service/phase-workflow-service.ts|_addEvidenceImpl",
-  "exempt-by-shape|capture_source|raw-field-read|packages/lore/src/service/task-finish-service.ts|hasRedRow>(anonymous)",
+  "classifier-input|capture_source|raw-field-read|packages/lore/src/service/task-finish-service.ts|hasRedRow>(anonymous)",
+  "sanctioned-consumer|capture_source|literal-comparison|packages/lore/src/service/task-finish-service.ts|hasRedRow>(anonymous)",
   "exempt-by-shape|capture_source|raw-field-read|packages/lore/src/service/task-workflow-service.ts|_addEvidenceImpl",
   "exempt-by-shape|capture_source|raw-field-read|packages/lore/src/service/task-workflow-service.ts|isRunnerCaptured",
   "exempt-by-shape|capture_source|raw-field-read|packages/lore/src/service/task-workflow-service.ts|isRunnerProducedRow",
@@ -427,7 +428,7 @@ const PINNED_REAL_SITES: readonly string[] = [
   "sanctioned-consumer|capture_source|case-literal|packages/lore/src/adapters/cli/commands/status.ts|collectCaptureSourceMembers>(anonymous)",
   "sanctioned-consumer|stamp_verdict|case-literal|packages/core/src/stamp-binding.ts|tallyStampReadings",
   "sanctioned-consumer|stamp_verdict|literal-comparison|packages/lore/src/service/gate-predicates.ts|stampVerdictDistribution",
-  "sanctioned-consumer|stamp_verdict|literal-comparison|packages/lore/src/service/task-workflow-service.ts|unboundReasonOf",
+  "sanctioned-consumer|stamp_verdict|literal-comparison|packages/core/src/stamp-binding.ts|unboundReasonOfReading",
 ];
 
 describe("AC-CT-10 the real tree", () => {
