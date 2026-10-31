@@ -31,8 +31,9 @@ export const knownDefectEntrySchema = z.object({
   dimension: z.enum(MILESTONE_DIMENSIONS),
   fingerprint: z.string().min(1),
   /**
-   * HISTORY ONLY: what `lore assess --accept-gate` wrote before an acceptance came from the decision log (#538). No reader
-   * gives it any authority: a gate is accepted only when the decision log holds an effective human accept for it.
+   * A RECORD ONLY: `lore assess --accept-gate` flags the known defect once the decision log holds the human accept (BR-1500,
+   * "recorded on the plan"). No reader gives it any authority (#538): a gate is accepted only when the decision log holds an
+   * effective human accept for it, so a flag planted by a direct write of `extra` closes nothing.
    */
   gate_accepted: z.literal(true).optional(),
 });

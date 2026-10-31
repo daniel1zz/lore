@@ -26,6 +26,8 @@ import { parseDecisionFlags } from "../../../src/adapters/cli/decision-flags.js"
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { DecisionGate, type DecisionDraft } from "../../../src/service/decision-gate.js";
 import { DecisionService } from "../../../src/service/decision-service.js";
+import { DecisionOutcomeService } from "../../../src/service/decision-outcome-service.js";
+import { selectPlanDecisions } from "../../../src/service/decision-recheck.js";
 import { GateAcceptanceService, createGateAcceptanceLog } from "../../../src/service/gate-acceptance-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { IssueFilingService } from "../../../src/service/issue-filing-service.js";
@@ -254,6 +256,8 @@ async function worldWith(
         listReviewDocs: (planId) => corpus.listMilestoneReviewDocs(planId),
         gate,
         filing: opts?.tracker === false ? undefined : new IssueFilingService(counting),
+        writer: corpus,
+        by: "t",
         // reason: #538 — an agent's acceptance waits for a human; these AC-AF-7 tests are about the acceptance's content, so the writer is a human party (its direct call appends its human decision to the log at once).
         writerSource: "human",
         decisions: new DecisionService({ store, executorRun: null }),
@@ -321,9 +325,12 @@ describe("AC-AF-7 accepting a gate records the decision and a known defect, and 
     const accepted = await w.service().acceptGate(w.plan.slug, "security", FULL_DECISION);
     expect(accepted).toMatchObject({ ok: true, value: { dimension: "security", issue: ISSUE } });
     const stored = await w.reload();
-    // the issue is linked as a plain known defect; the acceptance itself lives in the decision log (#538)
-    expect(readKnownDefects(stored.extra)).toEqual([expect.objectContaining({ repo_id: REPO_ID, number: ISSUE, dimension: "security" })]);
-    expect(readKnownDefects(stored.extra).some((e) => e.gate_accepted === true)).toBe(false);
+    // the plan records the acceptance (a flagged known defect and the decision on its version row); the authority is the decision log (#538)
+    expect(readKnownDefects(stored.extra)).toEqual([expect.objectContaining({ repo_id: REPO_ID, number: ISSUE, dimension: "security", gate_accepted: true })]);
+    expect(await decisionVersionsOf(w)).toBe(1);
+    const versions = await w.store.listAllVersions();
+    const decided = versions.ok ? versions.value.find((v) => v.doc_id === w.plan.id && v.decision !== undefined) : undefined;
+    expect(decided?.decision?.reason).toBe("the finding is a false positive");
 
     const closed = await w.runBatch();
     expect(closed.outcome).toBe("accepted-with-known-defects");
@@ -454,7 +461,7 @@ describe("AC-AF-7 the acceptance is bound to the failure it accepted", () => {
     const w = await worldWith({ security: "fail" });
     expect((await w.service().acceptGate(w.plan.slug, "security", FULL_DECISION)).ok).toBe(true);
     const accepted = readKnownDefects((await w.reload()).extra)[0];
-    expect(accepted).toMatchObject({ dimension: "security" });
+    expect(accepted).toMatchObject({ dimension: "security", gate_accepted: true });
 
     await reReviewWithOtherCause(w, "security", "src/another-flaw.ts");
     const hand = await w.corpus.set(w.plan.id, { status: "archived" }, { by: "t" });
@@ -488,8 +495,23 @@ describe("AC-AF-7 the acceptance is bound to the failure it accepted", () => {
     expect(accepted.ok && accepted.value.decision_record).toBe(human[0]?.id);
     const asked = rows.value.find((r) => r.channel === "machine" && r.subject_id === `${w.plan.id}:security`);
     expect(asked?.detail ?? "").toContain("the finding is a false positive");
-    // no plan field carries the acceptance: filing links the issue as a plain known defect, which holds no `gate_accepted`
+    // the plan RECORDS it: a flagged known defect, and the decision on the plan's version row where `lore decision rates` and the re-check read it
     const stored = await w.reload();
-    expect(readKnownDefects(stored.extra).some((e) => e.gate_accepted === true)).toBe(false);
+    expect(readKnownDefects(stored.extra).some((e) => e.gate_accepted === true)).toBe(true);
+    const bundle = await w.corpus.getPlanBundle(w.plan.id);
+    if (!bundle.ok) throw new Error(JSON.stringify(bundle.error));
+    const selected = await selectPlanDecisions({ store: w.store }, bundle.value);
+    expect(selected).toMatchObject({ ok: true });
+    if (!selected.ok) return;
+    expect(selected.value.map((d) => d.address)).toEqual([`${w.plan.slug}@${String(stored.version)}`]);
+
+    const outcome = new DecisionOutcomeService({
+      store: w.store,
+      writer: w.corpus,
+      listMilestoneReviewDocs: (planId) => w.corpus.listMilestoneReviewDocs(planId),
+      getPlanBundle: (planId) => w.corpus.getPlanBundle(planId),
+    });
+    const rates = await outcome.rates({ kind: "document revision" });
+    expect(rates).toMatchObject({ ok: true, value: { decisions: 1, decisionsInNoPlan: 0 } });
   });
 });

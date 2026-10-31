@@ -155,6 +155,8 @@ async function worldWithFailedSecurity(onStore?: InMemoryStore | SQLiteStore): P
         listReviewDocs: (planId) => corpus.listMilestoneReviewDocs(planId),
         gate,
         filing: new IssueFilingService(counting),
+        writer: corpus,
+        by: "t",
         writerSource,
         decisions: opts?.decisions === false ? undefined : decisions,
         log,
@@ -292,8 +294,8 @@ describe("AC-HG-2 a human's answer applies to its own root-cause fingerprint onl
     // the CLI's exit code for this result: 0 for a success, `exitCode(error)` for a refusal
     expect(accepted.ok ? 0 : exitCode(accepted.error)).toBe(0);
     expect(accepted).toMatchObject({ ok: true, value: { dimension: "security", issue: ISSUE, decision_record: humanRecord } });
-    // the acceptance is the human record in the log; the plan carries no `gate_accepted`
-    expect(readKnownDefects((await w.reload()).extra).some((e) => e.gate_accepted === true)).toBe(false);
+    // the plan RECORDS the acceptance (a flagged known defect); the authority is the human record in the log
+    expect(readKnownDefects((await w.reload()).extra).some((e) => e.gate_accepted === true)).toBe(true);
 
     const closed = await w.runBatch();
     expect(closed.outcome).toBe("accepted-with-known-defects");
@@ -386,14 +388,14 @@ describe("AC-HG-3 only a human-backed acceptance counts", () => {
     expect(accepted.ok ? 0 : exitCode(accepted.error)).toBe(0);
     expect(accepted).toMatchObject({ ok: true, value: { dimension: "security" } });
     expect(await w.pendingGateDecisions()).toEqual([]);
-    // it appended its human decision to the log (class, subject, fingerprint), and wrote no flag on the plan
+    // it appended its human decision to the log (class, subject, fingerprint), and the plan records it (a flagged known defect)
     const rows = await w.store.listDecisionLog();
     if (!rows.ok) throw new Error(JSON.stringify(rows.error));
     const human = rows.value.filter((r) => r.channel === "human-tty");
     expect(human).toHaveLength(1);
     expect(human[0]).toMatchObject({ class: "governance-loosen", subject_id: `${w.plan.id}:security`, verdict: "auto" });
     expect(accepted.ok && accepted.value.decision_record).toBe(human[0]?.id);
-    expect(readKnownDefects((await w.reload()).extra).some((e) => e.gate_accepted === true)).toBe(false);
+    expect(readKnownDefects((await w.reload()).extra).some((e) => e.gate_accepted === true)).toBe(true);
     expect((await w.runBatch()).outcome).toBe("accepted-with-known-defects");
     expect((await w.reload()).status).toBe("archived");
   });

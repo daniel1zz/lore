@@ -695,6 +695,8 @@ async function runAcceptGate(context: Parameters<typeof invocationOf>[0], positi
       // this verb takes no scores, so a decision naming scores or a table is refused rather than passed unchecked.
       gate: new DecisionGate(new SpawnDecisionGitPort(inv.cwd)),
       filing,
+      writer: app.corpusService,
+      by: actor,
       writerSource: inv.identity.claimedSource,
       decisions: app.decisionReadService,
       log: gateAcceptanceLogOf(app),
