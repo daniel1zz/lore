@@ -436,8 +436,11 @@ export interface SuiteResultRecord {
  */
 export type FileRunClassification = "red" | "green" | "inconclusive";
 
-/** Why a run is inconclusive: its tests timed out, or it is an old failing run classified once by migration 047. */
-export type InconclusiveCause = "timeout" | "unclassified";
+/**
+ * Why a run is inconclusive: its tests timed out, the run wrote no readable outcome report (its console says nothing reliable),
+ * or it is an old failing run classified once by migration 047.
+ */
+export type InconclusiveCause = "timeout" | "no-report" | "unclassified";
 
 /** One named test file re-run at a commit, attached to a suite result (`suite_file_runs`). */
 export interface SuiteFileRunRecord {
@@ -526,7 +529,7 @@ export function rowToSuiteFileRun(row: SuiteFileRunRow): SuiteFileRunRecord {
   if (row.classification !== "red" && row.classification !== "green" && row.classification !== "inconclusive") {
     throw new Error(`suite_file_runs ${row.suite_result_id} ${row.file}: unknown classification "${row.classification}"`);
   }
-  if (row.inconclusive_cause !== null && row.inconclusive_cause !== "timeout" && row.inconclusive_cause !== "unclassified") {
+  if (row.inconclusive_cause !== null && row.inconclusive_cause !== "timeout" && row.inconclusive_cause !== "no-report" && row.inconclusive_cause !== "unclassified") {
     throw new Error(`suite_file_runs ${row.suite_result_id} ${row.file}: unknown inconclusive cause "${row.inconclusive_cause}"`);
   }
   return {

@@ -37,8 +37,8 @@ export interface FileRunOutcome {
    * (0 = green, 1 = red), which a stub runner without a report relies on. `inconclusive` wins over `incomplete`: the run is stored.
    */
   readonly classification?: FileRunClassification;
-  /** Set with `classification: "inconclusive"`: always `timeout` from a runner (the other cause is written only by the store migration). */
-  readonly inconclusive_cause?: "timeout";
+  /** Set with `classification: "inconclusive"`: `timeout` or `no-report` from a runner (the remaining cause is written only by the store migration). */
+  readonly inconclusive_cause?: "timeout" | "no-report";
 }
 
 /** The classification a stored row gets for an outcome: the runner's, else the exit code's. */

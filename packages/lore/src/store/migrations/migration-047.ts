@@ -29,7 +29,7 @@ BEGIN IMMEDIATE;
 ALTER TABLE suite_file_runs ADD COLUMN classification TEXT NOT NULL DEFAULT 'green'
   CHECK (classification IN ('red', 'green', 'inconclusive'));
 ALTER TABLE suite_file_runs ADD COLUMN inconclusive_cause TEXT
-  CHECK (inconclusive_cause IS NULL OR inconclusive_cause IN ('timeout', 'unclassified'));
+  CHECK (inconclusive_cause IS NULL OR inconclusive_cause IN ('timeout', 'no-report', 'unclassified'));
 
 UPDATE suite_file_runs SET classification = 'inconclusive', inconclusive_cause = 'unclassified' WHERE exit_code <> 0;
 

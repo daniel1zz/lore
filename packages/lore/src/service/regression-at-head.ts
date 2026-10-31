@@ -171,9 +171,15 @@ type Step<T> = { readonly ok: true; readonly value: T } | StepStop;
 
 const stop = (reason: string, cause?: RegressionNotMeasuredCause): StepStop => (cause === undefined ? { ok: false, reason } : { ok: false, reason, cause });
 const reasonOf = (what: string, error: LoreError): StepStop => stop(`${what}: ${loreErrorText(error)}`);
-/** The stop of a run that only timed out: it decides nothing at its point (BR-1533), so the file is not measured, never charged. */
-const inconclusiveStop = (file: string, commit: string, kind: string): StepStop =>
-  stop(`${file} has no conclusive ${kind} run at ${commit}: its run ended only in test or hook timeouts (inconclusive, not charged; the next review runs it again)`, "timeout");
+/**
+ * The stop of a run that decided nothing at its point (BR-1533): it only timed out, or wrote no readable outcome report. The file is not
+ * measured (cause `timeout` or `no-report`, named), never charged.
+ */
+const inconclusiveStop = (file: string, commit: string, kind: string, row?: { readonly inconclusive_cause: string | null }): StepStop => {
+  const cause = row?.inconclusive_cause === "no-report" ? "no-report" : "timeout";
+  const why = cause === "no-report" ? "its run wrote no readable outcome report" : "its run ended only in test or hook timeouts";
+  return stop(`${file} has no conclusive ${kind} run at ${commit}: ${why} (inconclusive, not charged; the next review runs it again)`, cause);
+};
 /** The state a CONCLUSIVE stored row shows; an inconclusive row is never passed here (callers filter with `decidingRun` or check first). */
 const stateOfRow = (row: SuiteFileRunRecord): FileState => (row.classification === "red" ? "red" : "green");
 const runIdOf = (row: SuiteFileRunRecord): string => `${row.measured_at}#${String(row.exit_code)}`;
@@ -268,7 +274,7 @@ class FileProbe {
     const ran = await this.ports.suites.runSingleFile(commit, this.file, kind, this.ports.runner);
     if (!ran.ok) return reasonOf(`${this.file} could not be run at ${commit}`, ran.error);
     // reason: BR-1533 — one run per point per review: an inconclusive run is not retried here; the file is not measured and the next review runs the point again.
-    if (ran.value.classification === "inconclusive") return inconclusiveStop(this.file, commit, kind);
+    if (ran.value.classification === "inconclusive") return inconclusiveStop(this.file, commit, kind, ran.value);
     this.consulted.push({ key: `${this.file}@${commit}:${kind}`, id: runIdOf(ran.value) });
     return { ok: true, value: stateOfRow(ran.value) };
   }
@@ -415,7 +421,7 @@ async function recheckAtHead(
     }
     // reason: BR-1533 — a file whose recheck run only timed out has no state at head: not measured, never dropped as green and never kept as red.
     if (row.classification === "inconclusive") {
-      const stopped = inconclusiveStop(file, headCommit, "head recheck");
+      const stopped = inconclusiveStop(file, headCommit, "head recheck", row);
       notMeasured(file, stopped.reason, stopped.cause);
       continue;
     }
@@ -544,7 +550,7 @@ async function searchTogether(
         if (row === undefined) fail(member, `the batched run at ${commit} returned no row for ${member.file}`);
         // reason: BR-1533 — a step that only timed out is no step: the file is not measured (cause timeout) and is not retried within this review.
         else if (row.classification === "inconclusive") {
-          const stopped = inconclusiveStop(member.file, commit, "batched");
+          const stopped = inconclusiveStop(member.file, commit, "batched", row);
           fail(member, stopped.reason, stopped.cause);
         } else apply(member, index, stateOfRow(row));
       }
@@ -677,9 +683,9 @@ export async function regressionAtHead(
   const singleFileRunIds: { key: string; id: string }[] = chunked.value.rows.map((stored) => ({ key: `${stored.row.file}@${selectionCommit}:${stored.kind}`, id: runIdOf(stored.row) }));
   const redFiles = chunked.value.rows.filter((stored) => stateOfRow(stored.row) === "red").map((stored) => stored.row.file).sort();
   // reason: BR-1533 — a selected file whose run at L only timed out has no state there: named, not measured (cause timeout), never charged; the others are still measured.
-  const timedOutAtSelection = chunked.value.inconclusive.map((file): FileRegression => {
-    const stopped = inconclusiveStop(file, selectionCommit, "batched");
-    return { file, outcome: "not-measured", reason: stopped.reason, cause: "timeout" };
+  const timedOutAtSelection = chunked.value.inconclusive.map(({ file, cause }): FileRegression => {
+    const stopped = inconclusiveStop(file, selectionCommit, "batched", { inconclusive_cause: cause });
+    return { file, outcome: "not-measured", reason: stopped.reason, cause };
   });
   const selectionRow: MilestoneFactRow = {
     subject: `selection@${selectionCommit}`,

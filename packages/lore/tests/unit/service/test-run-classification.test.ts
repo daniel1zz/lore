@@ -54,10 +54,10 @@ describe("outcomesOfTogetherRun with an outcome report", () => {
     ]);
   });
 
-  it("a report that shows no failing file for an exit-1 run is still incomplete, never green", () => {
-    const onlyGreen = parseOutcomeReports([JSON.stringify({ files: [entry("pass", [], "/repo/p/ok.test.ts")] })]).files;
-    const outcomes = outcomesOfTogetherRun(["p/ok.test.ts"], { status: 1, output: "", durationMs: 1, reported: onlyGreen });
-    expect(outcomes[0]?.incomplete).toBeDefined();
+  it("a file missing from a readable report, or shown only as skipped, is inconclusive no-report; a FAIL line in the console changes nothing", () => {
+    const onlyOk = parseOutcomeReports([JSON.stringify({ files: [entry("pass", [], "/repo/p/ok.test.ts"), entry("other", [], "/repo/p/skipped.test.ts")] })]).files;
+    const outcomes = outcomesOfTogetherRun(["p/ok.test.ts", "p/skipped.test.ts", "p/absent.test.ts"], { status: 1, output: " FAIL  p/absent.test.ts > x\n", durationMs: 1, reported: onlyOk });
+    expect(outcomes.map((o) => [o.classification, o.inconclusive_cause])).toEqual([["green", undefined], ["inconclusive", "no-report"], ["inconclusive", "no-report"]]);
   });
 
   it("an invocation its own limit ended makes every unfinished file inconclusive; any other incompleteness stays incomplete", () => {

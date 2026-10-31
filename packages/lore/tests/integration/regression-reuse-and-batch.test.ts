@@ -336,13 +336,13 @@ describe("batched attribution: the production batched invocation against a real 
     }
   });
 
-  it("AC-AC-2 a batched run that exits 1 with no readable failing file is incomplete for every file, never all green or all red", () => {
+  it("AC-AC-2 a batched run that exits 1 with no outcome report is inconclusive (no-report) for every file, never all green or all red, whatever its console shows", () => {
     const outcomes = outcomesOfTogetherRun([A, B], { status: 1, output: "something broke before any test ran", durationMs: 1 });
-    expect(outcomes.map((o) => [o.exit_code, o.incomplete !== undefined])).toEqual([[1, true], [1, true]]);
-    // coloured output (FORCE_COLOR) is read the same as plain output
+    expect(outcomes.map((o) => [o.classification, o.inconclusive_cause])).toEqual([["inconclusive", "no-report"], ["inconclusive", "no-report"]]);
+    // a FAIL line naming a file (coloured or not) is not a report: it classifies nothing
     const esc = String.fromCharCode(27);
     const coloured = outcomesOfTogetherRun([A, B], { status: 1, output: ` ${esc}[41m${esc}[1m FAIL ${esc}[22m${esc}[49m  ${B} > case\n`, durationMs: 1 });
-    expect(coloured.map((o) => o.exit_code)).toEqual([0, 1]);
+    expect(coloured.map((o) => [o.classification, o.inconclusive_cause])).toEqual([["inconclusive", "no-report"], ["inconclusive", "no-report"]]);
   });
 });
 

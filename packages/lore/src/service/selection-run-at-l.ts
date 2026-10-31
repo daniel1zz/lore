@@ -68,7 +68,7 @@ export interface SelectionRun {
    * Files this call ran whose run was inconclusive (only timeouts, BR-1533): stored, not a result, never retried inside this call.
    * They are not in `rows` and not in `remaining`; the caller reports each as not measured (cause timeout).
    */
-  readonly inconclusive: readonly string[];
+  readonly inconclusive: readonly { readonly file: string; readonly cause: "timeout" | "no-report" }[];
   /** Files that already had a result when the run started (not run again). */
   readonly reused: number;
 }
@@ -150,7 +150,7 @@ export async function runSelectionAtL(
   if (!before.ok) return err({ code: "STORE_ERROR", message: `stored results at ${commit} could not be read: ${loreErrorText(before.error)}` });
   const missing = selected.filter((f) => !before.value.has(f.path));
   const failures: string[] = [];
-  const inconclusive: string[] = [];
+  const inconclusive = new Map<string, "timeout" | "no-report">();
   if (missing.length > 0) {
     const durationCommits = [...history.slice(-DURATION_HISTORY_COMMITS).filter((c) => c !== commit), commit];
     const durations = await storedDurations(missing.map((f) => f.path), durationCommits, ports.listFileRuns);
@@ -163,7 +163,7 @@ export async function runSelectionAtL(
       const ran = await ports.runBatch(commit, chunk.map((f) => f.path), ports.runner, { buildFirst });
       if (ran.ok) {
         const timedOut = ran.value.filter((row) => row.classification === "inconclusive");
-        for (const row of timedOut) inconclusive.push(row.file);
+        for (const row of timedOut) inconclusive.set(row.file, row.inconclusive_cause === "no-report" ? "no-report" : "timeout");
         // reason: a chunk in which EVERY file timed out is a failed chunk for the stop rule (a machine that times out every chunk would
         // otherwise spend the full limit on each remaining chunk); a chunk with some conclusive file made progress.
         if (timedOut.length < ran.value.length) {
@@ -171,7 +171,7 @@ export async function runSelectionAtL(
           if (buildFirst) built = true;
           continue;
         }
-        failures.push(`chunk ${String(index + 1)} of ${String(chunks.length)} (${String(chunk.length)} files): every file timed out`);
+        failures.push(`chunk ${String(index + 1)} of ${String(chunks.length)} (${String(chunk.length)} files): no file concluded (timeouts or no outcome report)`);
         failedInARow += 1;
         if (failedInARow >= MAX_CONSECUTIVE_FAILED_CHUNKS && index + 1 < chunks.length) {
           failures.push(`${String(chunks.length - index - 1)} later chunk(s) not tried after ${String(failedInARow)} failed chunks in a row`);
@@ -193,12 +193,14 @@ export async function runSelectionAtL(
     const stored = after.value.get(path);
     return stored === undefined ? [] : [stored];
   });
-  const inconclusiveSet = new Set(inconclusive);
   return ok({
     rows,
-    remaining: paths.filter((path) => !after.value.has(path) && !inconclusiveSet.has(path)),
+    remaining: paths.filter((path) => !after.value.has(path) && !inconclusive.has(path)),
     failures,
-    inconclusive: paths.filter((path) => !after.value.has(path) && inconclusiveSet.has(path)),
+    inconclusive: paths.flatMap((path) => {
+      const cause = inconclusive.get(path);
+      return after.value.has(path) || cause === undefined ? [] : [{ file: path, cause }];
+    }),
     reused: before.value.size,
   });
 }

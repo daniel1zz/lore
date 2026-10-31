@@ -12,7 +12,8 @@
  *     is usable; the structured error objects the reporter reads are).
  *   - A failed file is `inconclusive` only when it has at least one error and EVERY error is a timeout; one assertion or import error
  *     makes it `red`; a failed file with no error named is `red` (never inconclusive without proof).
- *   - A file the report does not show as passed or failed is not classified here (`undefined`): the caller falls back to the exit code.
+ *   - A file the report does not show as passed or failed is not classified here (`undefined`): the caller makes it inconclusive
+ *     `no-report`. There is NO console-text or exit-code fallback anywhere: the console cannot tell a timeout from an assertion (spec D4).
  * Side-effect class: pure.
  *
  * @spec_ref spec-review-test-runs-are-capped-per-machine-and-a-run-that (AC-MC-3, BR-1533)
@@ -40,7 +41,13 @@ export type ReportedFile = OutcomeReport["files"][number];
 export type ClassifiedRun =
   | { readonly classification: "red" }
   | { readonly classification: "green" }
-  | { readonly classification: "inconclusive"; readonly inconclusive_cause: "timeout" };
+  | { readonly classification: "inconclusive"; readonly inconclusive_cause: "timeout" | "no-report" };
+
+/** A run (or file) with no usable report entry: nothing reliable says how it went, so it decides nothing. */
+export const NO_REPORT_RUN: ClassifiedRun = { classification: "inconclusive", inconclusive_cause: "no-report" };
+
+/** A run the invocation's own time limit ended: its unfinished files decide nothing. */
+export const TIMED_OUT_RUN: ClassifiedRun = { classification: "inconclusive", inconclusive_cause: "timeout" };
 
 const TIMEOUT_MESSAGE = /^(?:Test|Hook) timed out in \d+ms\b/;
 
@@ -53,7 +60,7 @@ export function isTimeoutError(error: { readonly name: string; readonly message:
  * Classifies a file from its reported state and errors.
  *
  * @param file - the file's entry of the outcome report
- * @returns the classification; `undefined` when the report shows the file neither passed nor failed (skipped only)
+ * @returns the classification; `undefined` when the report shows the file neither passed nor failed (skipped only): the caller treats that as no report
  */
 export function classifyReportedFile(file: ReportedFile): ClassifiedRun | undefined {
   if (file.state === "pass") return { classification: "green" };
