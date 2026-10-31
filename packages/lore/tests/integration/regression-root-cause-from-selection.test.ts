@@ -1,5 +1,5 @@
 /**
- * @spec_ref spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach (AC-SC-3, BR-1379, BR-1496)
+ * @spec_ref spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach (BR-1379, BR-1496)
  *
  * A regression found by the close's SELECTION (the red files charged to a landing at L, never a full-suite run) is filed
  * as an issue: the review stores the charged files as its root cause, the batch does not classify it unfileable, the
