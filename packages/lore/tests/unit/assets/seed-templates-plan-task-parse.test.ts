@@ -9,7 +9,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { parseTemplate, renderDocument, validateDocument, type Template } from "@lore/core";
 
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -27,7 +27,7 @@ const required = (t: Template): string[] => (t.fields as { required?: string[] }
 
 describe("seed template plan", () => {
   let plan: Template;
-  beforeAll(() => {
+  beforeEach(() => {
     plan = load("plan");
   });
   it("HAPPY: parses as doc_type plan v1 with the two required checks", () => {
@@ -66,7 +66,7 @@ describe("seed template plan", () => {
 
 describe("seed template task", () => {
   let task: Template;
-  beforeAll(() => {
+  beforeEach(() => {
     task = load("task");
   });
   it("HAPPY: parses as doc_type task v1 with refs-resolve", () => {
