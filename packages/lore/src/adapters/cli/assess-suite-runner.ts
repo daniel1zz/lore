@@ -5,7 +5,7 @@
  * Purpose: give every plan's regression dimension the same measured run, without ever running the suite in the shared
  *   checkout and without writing the repo's `.lore`.
  * Public surface: createGitSuiteRunner (main's HEAD), createGitCommitSuiteRunner (any commit: resolve, run the suite,
- *   re-run named test files; BR-1497), suiteChildEnv, PLAN_CLOSE_SCRIPT, FULL_TEST_SCRIPT, FILE_TEST_SCRIPT, resolveDirectImports.
+ *   re-run named test files one by one or together in one invocation, `disposeWorktrees`; BR-1497), outcomesOfTogetherRun, suiteChildEnv, PLAN_CLOSE_SCRIPT, FULL_TEST_SCRIPT, FILE_TEST_SCRIPT, resolveDirectImports.
  * Invariants:
  *   - The commands are the project's own package.json scripts (`check:plan-close`, `test`) run with `bun run`; a script
  *     the project does not define is reported as skipped with that reason, never invented.
@@ -26,6 +26,8 @@
  *     throwaway one). A run that finds it held exits 5 without running a test: the runner waits for the lock (poll
  *     `lockPollMs`, bounded by the suite timeout) and retries; if it is still held at the limit the run is `not_measured`
  *     naming the lock. It never runs without the lock and never reports the non-run as a result.
+ *   - File runs (`runFiles`, `runFilesTogether`) share ONE prepared worktree per commit for the life of the runner (the review);
+ *     the caller ends it with `disposeWorktrees` on every exit path (`PreparedWorktreeCache`). Suite runs and `withWorktree` keep a throwaway worktree each.
  *   - A run that cannot be set up (no `main`, no git, install failure) is `not_measured` with the reason, never a pass.
  *   - Failing test files carry their direct relative imports as read at the measured commit, so attribution to a plan
  *     needs no second checkout.
@@ -49,6 +51,7 @@ import {
 } from "../../service/milestone-review-inputs.js";
 import { loreErrorText, type CommitSuiteRunnerPort, type FileRunOutcome } from "../../service/suite-result-service.js";
 import { assessWorktreeDirPrefix, pruneStaleAssessWorktrees, type StaleWorktreePorts } from "./assess-stale-worktrees.js";
+import { PreparedWorktreeCache, type PreparedWorktree } from "./assess-worktree-cache.js";
 
 /** The plan-close chain script (`bun run check:plan-close`). */
 export const PLAN_CLOSE_SCRIPT = "check:plan-close";
@@ -63,7 +66,9 @@ const SUITE_TIMEOUT_MS = 60 * 60 * 1000;
 const KILL_GRACE_MS = 10 * 1000;
 /** After the child exited or the group was killed, how long to wait for the stdio pipes before closing them ourselves. */
 const PIPE_DRAIN_MS = 2000;
-const SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"] as const;
+/** ANSI colour escape sequences (`ESC [ ... m`). */
+const ANSI_COLOR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
+const SOURCE_EXTENSIONS =[".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"] as const;
 
 /** Time limits of one spawned command; the defaults are the production values. */
 export interface ProcessLimits {
@@ -393,6 +398,37 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv, 
   const inThrowawayWorktree = <T>(commit: string, work: (root: string) => Promise<T>): Promise<Result<T, LoreError>> =>
     runInThrowawayWorktree(cwd, env, commit, work);
 
+  /** One worktree per commit for the file runs of this runner's review: prepared on first use, held until `disposeWorktrees`. */
+  const worktrees = new PreparedWorktreeCache(
+    (commit) =>
+      new Promise<Result<PreparedWorktree, LoreError>>((resolve) => {
+        let release: () => void = () => undefined;
+        const held = new Promise<void>((done) => {
+          release = done;
+        });
+        // reason: `runInThrowawayWorktree` removes the worktree when its callback returns; the callback therefore parks on `held`
+        // until `dispose`, which makes the shared mechanic (stale-worktree pruning, owner-pid naming, removal on every path) hold for a long-lived worktree too.
+        const finished: Promise<Result<void, LoreError>> = runInThrowawayWorktree(cwd, env, commit, async (root) => {
+          const prepared = await prepareDependencies(root, suiteChildEnv(env), limits);
+          if (prepared !== undefined) throw new Error(prepared);
+          resolve(
+            ok({
+              root,
+              dispose: async () => {
+                release();
+                return finished;
+              },
+            }),
+          );
+          await held;
+        });
+        void finished.then((outcome) => {
+          // a preparation that failed never resolved above; a resolved promise ignores this second resolve
+          if (!outcome.ok) resolve(outcome);
+        });
+      }),
+  );
+
   return {
     resolveCommit: async (ref) => {
       const repo = await repoRootOf();
@@ -427,16 +463,12 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv, 
       return ran.ok ? ok(undefined) : ran;
     },
 
+    // reason: #535 — every file run at a commit shares ONE prepared worktree (checkout + install once per commit per review);
+    // `disposeWorktrees` removes them when the review ends. Nothing else in this runner uses the cache.
     runFiles: async (commit, files) =>
-      inThrowawayWorktree(commit, async (root) => {
+      worktrees.use(commit, async (root) => {
         const childEnv = suiteChildEnv(env);
-        const prepared = await prepareDependencies(root, childEnv, limits);
-        if (prepared !== undefined) throw new Error(prepared);
-        const manifestPath = join(root, "package.json");
-        const manifest = existsSync(manifestPath) ? (JSON.parse(readFileSync(manifestPath, "utf8")) as { scripts?: Record<string, string> }) : {};
-        if (manifest.scripts?.[FILE_TEST_SCRIPT] === undefined) {
-          throw new Error(`package.json at ${commit} defines no "${FILE_TEST_SCRIPT}" script, so single test files cannot be re-run`);
-        }
+        requireFileScript(root, commit);
         const outcomes: FileRunOutcome[] = [];
         for (const file of files) {
           const startedMs = Date.now();
@@ -448,7 +480,81 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv, 
         }
         return outcomes;
       }),
+
+    runFilesTogether: async (commit, files) =>
+      worktrees.use(commit, (root) => runTestFilesTogether(root, commit, files, env, limits)),
+
+    disposeWorktrees: () => worktrees.disposeAll(),
   };
+}
+
+/** Throws (inside a cache `use`, so it surfaces as an `err`) when the checkout's package.json has no per-file script. */
+function requireFileScript(root: string, commit: string): void {
+  const manifestPath = join(root, "package.json");
+  const manifest = existsSync(manifestPath) ? (JSON.parse(readFileSync(manifestPath, "utf8")) as { scripts?: Record<string, string> }) : {};
+  if (manifest.scripts?.[FILE_TEST_SCRIPT] === undefined) {
+    throw new Error(`package.json at ${commit} defines no "${FILE_TEST_SCRIPT}" script, so single test files cannot be re-run`);
+  }
+}
+
+/**
+ * Runs `files` together in ONE `bun run test:file f1 f2 ...` invocation inside the prepared checkout `root` and reports one
+ * outcome per file ({@link outcomesOfTogetherRun}). This is the whole production path of `runFilesTogether` after the worktree
+ * exists, exported so it can be driven against a real test runner.
+ *
+ * @param root - a prepared checkout holding the files and a `test:file` script
+ * @param commit - the commit `root` is at (named in the missing-script error)
+ * @param files - repo-relative test files
+ * @param env - the environment (harness variables are removed before the spawn)
+ * @param limits - time limits of the invocation
+ * @throws when the checkout defines no `test:file` script
+ */
+export async function runTestFilesTogether(
+  root: string,
+  commit: string,
+  files: readonly string[],
+  env: NodeJS.ProcessEnv,
+  limits: ProcessLimits = DEFAULT_LIMITS,
+): Promise<FileRunOutcome[]> {
+  requireFileScript(root, commit);
+  const startedMs = Date.now();
+  const ran = await spawn("bun", ["run", FILE_TEST_SCRIPT, ...files], root, suiteChildEnv(env), limits);
+  const incomplete = ran.killFailure ?? (ran.timeout !== undefined ? `timed out after ${String(ran.timeout.elapsedMs)} ms` : undefined);
+  return outcomesOfTogetherRun(files, { status: ran.status, output: ran.output, durationMs: Date.now() - startedMs, ...(incomplete !== undefined ? { incomplete } : {}) });
+}
+
+/**
+ * The per-file outcomes of ONE invocation that ran `files` together (`bun run test:file f1 f2 ...`).
+ *
+ * reason: exit 0 = every file passed; exit 1 = some failed and the failing files are read from the runner's own output
+ * (`parseFailingTestFiles`); an exit-1 run from which no requested file can be read as failing says nothing about any file
+ * and is `incomplete`, never "all green" and never "all red". Any other exit is no test result and is reported as is.
+ *
+ * @param files - the files the invocation was given
+ * @param run - the invocation's exit status, merged output, duration and, when it did not complete, why
+ */
+export function outcomesOfTogetherRun(
+  files: readonly string[],
+  run: { readonly status: number; readonly output: string; readonly durationMs: number; readonly incomplete?: string },
+): FileRunOutcome[] {
+  const outputTail = tail(run.output);
+  const outcome = (file: string, exitCode: number, incomplete?: string): FileRunOutcome => ({
+    file,
+    exit_code: exitCode,
+    output_tail: outputTail,
+    duration_ms: run.durationMs,
+    ...(incomplete !== undefined ? { incomplete } : {}),
+  });
+  if (run.incomplete !== undefined) return files.map((file) => outcome(file, 1, run.incomplete));
+  if (run.status === 0) return files.map((file) => outcome(file, 0));
+  if (run.status !== 1) return files.map((file) => outcome(file, run.status));
+  // reason: a runner that colours its output (FORCE_COLOR) wraps `FAIL` and the path in escape codes; the line pattern needs plain text.
+  const failing = parseFailingTestFiles(run.output.replace(ANSI_COLOR, ""));
+  const isFailing = (file: string): boolean => failing.some((f) => f === file || f.endsWith(`/${file}`) || file.endsWith(`/${f}`));
+  if (!files.some(isFailing)) {
+    return files.map((file) => outcome(file, 1, "the batched run failed (exit 1) but no failing test file could be read from its output"));
+  }
+  return files.map((file) => outcome(file, isFailing(file) ? 1 : 0));
 }
 
 /** Installs dependencies in a fresh worktree when the project has some; returns the failure text, or `undefined` when ready. */

@@ -62,7 +62,6 @@ import { SpawnDecisionGitPort } from "../../../service/decision-git-port.js";
 import { GateAcceptanceService } from "../../../service/gate-acceptance-service.js";
 import type { App } from "../../../app.js";
 import { createGitCommitSuiteRunner } from "../assess-suite-runner.js";
-import { suiteRunOfResult } from "../../../service/suite-result-service.js";
 import { regressionAtHead } from "../../../service/regression-at-head.js";
 import { measurePlanCriteriaAtHead, resolveAssessedCommit, type ListDocsPort } from "../assess-attestation-wiring.js";
 import { createGitHeadCriteriaRunner } from "../assess-landing-attester.js";
@@ -328,12 +327,19 @@ export default defineLoreCommand({
         // run and opens one worktree for this work alone on a stored hit, so criteria run once per review either way.
         const stale = refreshStale === undefined ? ok(false) : await reviewService.hasStaleCitations(suiteRefs);
         if (!stale.ok) return { status: "not_measured", reason: formatErrorFor(inv, stale.error) };
-        if (verifyRunner === undefined) {
-          const looked = await suiteResults.lookupOrRun("main", runner);
-          if (looked.ok) assessedCommit = looked.value.commit_sha;
-          return looked.ok ? suiteRunOfResult(looked.value) : { status: "not_measured", reason: formatErrorFor(inv, looked.error) };
+        // reason: BR-1496 (#534) — the batch no longer runs the full suite at main's head: each plan's regression reads the stored
+        // suite that contains ITS landings (a full suite runs at head only when none is stored or in flight). What the batch still
+        // does once is the head-bound work: the stale cited-rule refresh and the plans' criteria (BR-1498), in one worktree of head.
+        const resolvedHead = await runner.resolveCommit("main");
+        if (!resolvedHead.ok) {
+          criteriaFallbackReason = `main's head could not be resolved: ${formatErrorFor(inv, resolvedHead.error)}`;
+          return { status: "not_measured", reason: formatErrorFor(inv, resolvedHead.error) };
         }
-        const refreshed = await suiteResults.lookupOrRunWith("main", runner, async (root, commit) => {
+        const headCommit = resolvedHead.value.commit;
+        assessedCommit = headCommit;
+        if (verifyRunner === undefined) return undefined;
+        if (runner.withWorktree === undefined) return { status: "not_measured", reason: "the runner cannot open a worktree for the head-bound work" };
+        const worked = await runner.withWorktree(headCommit, async (root) => {
           if (refreshStale !== undefined && stale.value) await refreshStale(root);
           for (const ref of suiteRefs) {
             const bundle = await app.corpusService.getPlanBundle(ref);
@@ -341,25 +347,17 @@ export default defineLoreCommand({
               inv.io.stderr.write(`Warning: criteria not measured for ${ref}: ${formatErrorFor(inv, bundle.error)}\n`);
               continue;
             }
-            criteriaByPlan.set(ref, await measureCriteria(bundle.value, commit, root));
+            criteriaByPlan.set(ref, await measureCriteria(bundle.value, headCommit, root));
           }
         });
-        if (!refreshed.ok) {
-          criteriaFallbackReason = `the suite and its worktree could not be run: ${formatErrorFor(inv, refreshed.error)}`;
-          return { status: "not_measured", reason: formatErrorFor(inv, refreshed.error) };
+        if (!worked.ok) {
+          criteriaFallbackReason = `the head worktree could not be prepared: ${formatErrorFor(inv, worked.error)}`;
+          inv.io.stderr.write(`Warning: the worktree work (stale-rule refresh, criteria) could not run: ${formatErrorFor(inv, worked.error)}\n`);
+          return undefined;
         }
-        if (refreshed.value.workIn === "own") {
-          // reason: a stored head result means no suite worktree exists; the criteria still ran once, in a worktree of their own.
-          for (const [ref, facts] of criteriaByPlan) criteriaByPlan.set(ref, withCriteriaRun(facts, { worktree: "own", reason: "the head's suite result was already stored, so no suite worktree existed" }));
-        } else if (refreshed.value.workIn === "suite") {
-          for (const [ref, facts] of criteriaByPlan) criteriaByPlan.set(ref, withCriteriaRun(facts, { worktree: "suite" }));
-        }
-        if (refreshed.value.workError !== undefined) {
-          criteriaFallbackReason = `the suite worktree's work did not run: ${formatErrorFor(inv, refreshed.value.workError)}`;
-          inv.io.stderr.write(`Warning: the worktree work (stale-rule refresh, criteria) could not run: ${formatErrorFor(inv, refreshed.value.workError)}\n`);
-        }
-        assessedCommit = refreshed.value.result.commit_sha;
-        return suiteRunOfResult(refreshed.value.result);
+        // reason: the review reads a stored suite, so no suite worktree exists at head; the criteria ran once, in a worktree of their own.
+        for (const [ref, facts] of criteriaByPlan) criteriaByPlan.set(ref, withCriteriaRun(facts, { worktree: "own", reason: "the review reads a stored suite, so no suite worktree exists at main's head" }));
+        return undefined;
       };
 
       const filingCtx = {
@@ -380,6 +378,8 @@ export default defineLoreCommand({
         readonly diffSource: DiffSourceRecord;
         readonly facts: MilestoneFacts;
         readonly rerunCriterion: ReturnType<typeof createAppCriterionRerunner> | undefined;
+        /** The stored suite the regression read as M; absent when none was read. */
+        readonly suite: SuiteRun | undefined;
       }
       /** Measures one plan's diff and facts: the one measurement both the hand run and the batch use. */
       const measurePlanFacts = async (ref: string): Promise<Result<MeasuredPlan, LoreError>> => {
@@ -410,6 +410,8 @@ export default defineLoreCommand({
         // the same head runs nothing), each red file confirmed once and bisected alone; without the suite-result store regression
         // stays not-measured, never pass.
         const suiteResults = app.suiteResultService;
+        // reason: the suite the regression read (M) is the one the judge and the main-red ledger see for THIS plan (BR-1496).
+        let reviewSuite: SuiteRun | undefined;
         let regressionFacts: Pick<MilestoneFacts, "regression" | "regression_files" | "head_suite_result_id" | "single_file_run_ids" | "assessed_commit" | "failing_fact_files" | "regression_causes"> = {};
         // reason: BR-1509 — when no task changes code, regression is `na` with no suite to run, so it is measured even without
         // the suite-result store.
@@ -417,16 +419,26 @@ export default defineLoreCommand({
         if (noTaskChangesCode) {
           regressionFacts = { regression: [noCodeRegressionRow(derivation.no_code_tasks)], regression_files: [], regression_causes: [], single_file_run_ids: [], failing_fact_files: [] };
         } else if (suiteResults !== undefined) {
-          const measured = await regressionAtHead(derivation.landings, derivation.unlanded_tasks, {
-            suites: suiteResults,
-            runner: createGitCommitSuiteRunner(inv.cwd, inv.env),
-            // reason: the commit the batch's one suite run measured, so main moving mid-run cannot start a second suite.
-            headRef: assessedCommit ?? "main",
-            firstParentHistory: createGitFirstParentHistory(inv.cwd, inv.env),
-            fileExistsAt: createGitFileExistsAt(inv.cwd, inv.env),
-            firstParentCommitContaining: createGitFirstParentCommitContaining(inv.cwd, inv.env),
-          });
+          // reason: #535 — one runner per review: its file runs share one prepared worktree per commit, removed in `finally` whatever happened.
+          const regressionRunner = createGitCommitSuiteRunner(inv.cwd, inv.env);
+          const measured = await (async () => {
+            try {
+              return await regressionAtHead(derivation.landings, derivation.unlanded_tasks, {
+                suites: suiteResults,
+                runner: regressionRunner,
+                // reason: the head the batch resolved once, so main moving mid-run cannot move the recheck or the history under one review.
+                headRef: assessedCommit ?? "main",
+                firstParentHistory: createGitFirstParentHistory(inv.cwd, inv.env),
+                fileExistsAt: createGitFileExistsAt(inv.cwd, inv.env),
+                firstParentCommitContaining: createGitFirstParentCommitContaining(inv.cwd, inv.env),
+              });
+            } finally {
+              const ended = await regressionRunner.disposeWorktrees?.();
+              if (ended !== undefined && !ended.ok) inv.io.stderr.write(`Warning: a prepared worktree of the regression review could not be removed: ${formatErrorFor(inv, ended.error)}\n`);
+            }
+          })();
           if (measured.ok) {
+            reviewSuite = measured.value.suite;
             const chargedFiles = [...new Set(measured.value.charged.map((c) => c.file))].sort();
             regressionFacts = {
               regression: measured.value.rows,
@@ -476,7 +488,7 @@ export default defineLoreCommand({
           ...(noTaskChangesCode ? { no_task_changes_code: true } : {}),
           not_seen_files: derivation.not_seen_files,
         };
-        return ok({ derivation, diffSource, facts, rerunCriterion });
+        return ok({ derivation, diffSource, facts, rerunCriterion, suite: reviewSuite });
       };
 
       /** Judges one plan from its landed diff: the one review step both the hand run and the batch use. */
@@ -484,13 +496,15 @@ export default defineLoreCommand({
         const measured = await measurePlanFacts(ref);
         if (!measured.ok) return measured;
         const { derivation, diffSource, facts, rerunCriterion } = measured.value;
+        // reason: the plan's own regression suite (M) wins over a batch-level one: reuse means each plan reads the suite that contains its landings.
+        const suiteOfPlan = measured.value.suite ?? suiteForPlan;
         return reviewService.review(ref, {
           facts,
           ...(rerunCriterion !== undefined ? { rerunCriterion } : {}),
           ...(derivation.status === "derived" ? { diffText: derivation.diff_text } : {}),
           diffSource: describeDiffSource(diffSource),
           maxDiffChars: app.aiProviderService.assessMaxDiffChars,
-          ...(suiteForPlan !== undefined ? { suite: suiteForPlan } : {}),
+          ...(suiteOfPlan !== undefined ? { suite: suiteOfPlan } : {}),
         });
       };
 

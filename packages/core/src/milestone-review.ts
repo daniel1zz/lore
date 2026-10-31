@@ -211,9 +211,9 @@ export interface MilestoneFacts {
   readonly not_seen_files?: readonly string[];
   /** AI-mode criteria of the plan's task scopes. */
   readonly ai_criteria?: readonly AiCriterionInput[];
-  /** The stored suite result id at the assessed commit (BR-1497); the review fingerprint hashes it. Absent when the head suite was not run. */
+  /** The stored suite result id of M, the suite the regression read: the newest stored measured suite containing every landing, else the one run at head (BR-1496, BR-1497); the review fingerprint hashes it. Absent when no suite was read. */
   readonly head_suite_result_id?: string;
-  /** Every stored single-file run the regression verdict read or made, keyed `<file>@<commit>:<kind>`; the review fingerprint hashes them (BR-1496). */
+  /** Every stored run the regression verdict read or made, keyed `<file>@<commit>:<kind>` (kinds `bisect`, `confirm`, and `batch` for the head recheck only; none of the recheck's when M is head); the review fingerprint hashes them (BR-1496). */
   readonly single_file_run_ids?: readonly { readonly key: string; readonly id: string }[];
   /** Where the criteria ran and why that worktree; stored on the review so a fallback from the suite's worktree is never silent (BR-1498). */
   readonly criteria_run?: CriteriaRunRecord;
