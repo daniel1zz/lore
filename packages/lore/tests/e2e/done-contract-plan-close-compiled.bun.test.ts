@@ -29,7 +29,7 @@
  * Coverage: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION
  */
 
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Database } from "bun:sqlite";
 import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -736,6 +736,12 @@ describe("AC-DCS2-11: the close runs rule apply for every spec of the plan", () 
 // ───────────────────────────── AC-DCS2-20 ─────────────────────────────
 
 describe("AC-DCS2-20: plan close holds its own plan-scoped lease and never blocks a landing", () => {
+  // reason: the AI double's hold file and the lease directory are shared by every test of this file; a test that fails while it holds the
+  // double must not leave it held, or every later close waits on it and fails for a reason that is not its own
+  afterEach(() => {
+    rmSync(hold, { force: true });
+  });
+
   it("AC-DCS2-20: a landing started while a close holds its plan lease exits 0 at once with no queue wait; a second close of the plan exits 75 plan-close-busy naming the holder; a close of another plan is not blocked", async () => {
     const holdPlan = await approvedPlan("Close hold plan HOLDME");
     const holdTask = await finishedCodeTask(holdPlan, "pc20h");
@@ -749,6 +755,7 @@ describe("AC-DCS2-20: plan close holds its own plan-scoped lease and never block
     expect(lease.start_time).not.toBe("");
     expect(reviewBatchRuns().length).toBe(runsBefore + 1);
     expect(queueTickets(), "the close takes no landing ticket").toEqual([]);
+    const callsAtHold = aiCalls().length;
 
     // a landing meanwhile: exit 0, within seconds, no queue wait, while the close is still held
     const other = await approvedPlan("Close landing meanwhile plan");
@@ -759,7 +766,10 @@ describe("AC-DCS2-20: plan close holds its own plan-scoped lease and never block
     expect(landing.exitCode, landing.text).toBe(0);
     expect(landing.text).not.toMatch(/queued:|queue-wait|queue ticket|timeout/);
     expect(statusOf(otherTask.slug)).toBe("archived");
-    expect(planLeaseFiles(), "the close is still held when the landing returned").toEqual([leaseFile]);
+    // reason: since BR-1511 every landing starts a batch, which takes a plan lease for the landed plan; the AC is about the HELD plan's lease
+    expect(planLeaseFiles(), "the held plan's lease file is still there when the landing returned").toContain(leaseFile);
+    expect(JSON.parse(readFileSync(join(planLeaseDir(), leaseFile), "utf8")), "the held plan's lease still names the original holder").toMatchObject({ pid: lease.pid, start_time: lease.start_time });
+    expect(aiCalls().length, "the held close did not run its assess a second time").toBe(callsAtHold);
     expect(took, "the landing did not wait for the held close").toBeLessThan(240_000);
 
     // a second close of the held plan exits 75 plan-close-busy naming the holder
@@ -769,8 +779,15 @@ describe("AC-DCS2-20: plan close holds its own plan-scoped lease and never block
     expect(busy.stderr).toContain(String(lease.pid));
 
     // a close of another plan is not blocked by the held one
+    const knownRuns = new Set(reviewBatchRuns().map((run) => run.id));
     const free = await closablePlan("Close free plan FREEPASS", "pc20f");
-    expect(planLeaseFiles(), "the first close still holds its lease").toEqual([leaseFile]);
+    // reason: since BR-1511 the landing that made the plan closable starts its own batch (the old live-lease start-nothing path is gone); it
+    // answers FREEPASS at once and leaves the plan open, but it holds the plan's lease while it runs, so the by-hand close waits for it to end
+    await eventually(() => {
+      const started = reviewBatchRuns().filter((run) => !knownRuns.has(run.id));
+      return started.length >= 1 && started.every((run) => run.ended_at !== null);
+    }, "the batch the landing of the free plan started to end");
+    expect(planLeaseFiles(), "the first close still holds its lease").toContain(leaseFile);
     const closedFree = await spawned(fixture.dir, ["plan", "close", free], OWNER, withGh());
     expect(closedFree.exitCode, closedFree.text).toBe(0);
     expect(statusOf(free)).toBe("archived");
@@ -778,8 +795,9 @@ describe("AC-DCS2-20: plan close holds its own plan-scoped lease and never block
     // the holder ends: release the double and the plan closes
     rmSync(hold, { force: true });
     await eventually(() => statusOf(holdPlan) === "archived", "the held plan to archive");
-    await batchesEnded(runsBefore + 1);
-    expect(planLeaseFiles(), "the lease is removed when the close ends").toEqual([]);
+    // two batches ran: the held plan's, and the one the landing that went through meanwhile started
+    await batchesEnded(runsBefore + 2);
+    expect(planLeaseFiles(), "every lease is removed when the closes end").toEqual([]);
 
     // the plan of the landing that went through meanwhile is complete: close it, so no later landing of this file has a plan waiting
     const closedOther = await spawned(fixture.dir, ["plan", "close", other], OWNER, withGh());
