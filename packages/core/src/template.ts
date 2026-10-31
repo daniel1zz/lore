@@ -95,7 +95,9 @@ export const templateSchema = z
     version: z.number().int().min(1),
     fields: z.record(z.unknown()),
     dimensions: z.array(templateDimensionSchema).min(1, "a template needs at least one dimension"),
-    checks: z.array(z.enum(CROSS_FIELD_CHECK_IDS)),
+    // reason: z.string() + refine below, not z.enum — a failed enum stops zod before superRefine, which would
+    // hide the duplicate-dimension / render-path refusals; the meta-schema reports ALL refusals together.
+    checks: z.array(z.string()),
     render: z.array(templateRenderSectionSchema).min(1, "a template needs at least one render section"),
   })
   .superRefine((template, ctx) => {
@@ -118,6 +120,13 @@ export const templateSchema = z
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: `duplicate check id "${check}"`, path: ["checks", index] });
       }
       seenChecks.add(check);
+      if (!(CROSS_FIELD_CHECK_IDS as readonly string[]).includes(check)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `unknown check id "${check}" (library: ${CROSS_FIELD_CHECK_IDS.join(", ")})`,
+          path: ["checks", index],
+        });
+      }
     });
     template.render.forEach((section, sectionIndex) => {
       section.fields.forEach((fieldPath, fieldIndex) => {
@@ -131,7 +140,8 @@ export const templateSchema = z
       });
     });
   });
-export type Template = z.infer<typeof templateSchema>;
+/** A parsed template. `checks` is narrowed to library ids by {@link parseTemplate}. */
+export type Template = Omit<z.infer<typeof templateSchema>, "checks"> & { readonly checks: readonly CrossFieldCheckId[] };
 
 /** One meta-schema refusal: `path` locates it in the template (e.g. `dimensions.1.id`). */
 export interface TemplateIssue {
@@ -148,7 +158,7 @@ export interface TemplateIssue {
  */
 export function parseTemplate(raw: unknown): Result<Template, TemplateIssue[]> {
   const parsed = templateSchema.safeParse(raw);
-  if (parsed.success) return { ok: true, value: parsed.data };
+  if (parsed.success) return { ok: true, value: parsed.data as Template };
   return {
     ok: false,
     error: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), problem: issue.message })),
