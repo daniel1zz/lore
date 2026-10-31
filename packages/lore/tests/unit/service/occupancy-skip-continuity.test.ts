@@ -377,7 +377,7 @@ describe("AC-CT-8 (b)(c): real `lore verify` and `lore status` in a throwaway co
     );
     plan = extractSlug(mustRun(["create", "plan", "--title", "Occupancy Plan", "--parent", spec, "--no-ai", "--content", "body"], dir));
     task = extractSlug(
-      mustRun(["create", "task", "--title", "Occupancy Task", "--parent", plan, "--plan-id", plan, "--ac-scope", AC_ID, "--no-ai", "--content", "body"], dir),
+      mustRun(["create", "task", "--title", "Occupancy Task", "--kind", "code", "--parent", plan, "--plan-id", plan, "--ac-scope", AC_ID, "--no-ai", "--content", "body"], dir),
     );
     execFileSync("git", ["add", "-A"], { cwd: dir });
     execFileSync("git", [...GIT_IDENT, "commit", "-q", "-m", "fixture"], { cwd: dir });

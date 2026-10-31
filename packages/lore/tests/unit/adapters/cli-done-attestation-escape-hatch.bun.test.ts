@@ -1,74 +1,55 @@
 // @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
- * `lore done --override-attestation "<reason>"` — the CLI author→trip
- * end-to-end oracle for adr-lore-done-requires-a-runner-attested-pass-the-
- * sixth-false / task-lore-done-accepts-an-unattested-self-reported-pass-as.
+ * `lore done --override-attestation "<reason>"` — the CLI end-to-end oracle for
+ * adr-lore-done-requires-a-runner-attested-pass-the-sixth-false /
+ * task-lore-done-accepts-an-unattested-self-reported-pass-as, under the done-contract model
+ * (spec-done-contract-compiled-at-approve-task-kinds-write-sets, AC-DCS1-7).
  *
- * Proves the escape hatch actually reaches the COMPILED binary end to end —
- * argv parsing → `TaskWorkflowService.done` → the audit write — not just the
- * service layer (already covered by task-workflow-service.test.ts's own
- * "attested-pass floor" suite). This repo's own measured false-oracle #5 is a
- * CLI flag an oracle passes but never proves took effect (`knowledge-retro-a-
- * silently-inert-cli-flag-is-the-fifth-false`) — every STATE assertion below
- * reads the ACTUAL `.lore` audit table via `lore audit <doc> --json`, plus a
- * CONTROL run proving the audit marker is ABSENT without the flag.
+ * Proves the flag reaches the command end to end — argv parsing → `TaskWorkflowService.done` → the floors — not just the service
+ * layer (covered by task-workflow-service.test.ts's "attested-pass floor" and "escape hatch" suites). `lore done` now judges a task
+ * only by the contract stored at approve, in the fixed floor order of BR-209: the override waives the ATTESTED-PASS floor and
+ * nothing after it, so a task whose contract oracle has no counted pass is still refused, at the first oracle floor
+ * ([floor: unfiltered-test-file] for an anchored test file, then [floor: contract-oracles]).
  *
- * Spawns the COMPILED `dist/lore` binary (Bun.spawnSync) against a THROWAWAY
- * corpus (mkdtemp + `lore init`) — never touches the repo's own `.lore/`
- * corpus (project CLAUDE.md hard rule). Requires `bun run build` first;
- * `assertFreshBinary` fails loud before any test runs if `dist/lore` is
- * missing or older than the newest `.ts` source under
- * `packages/{lore,core}/src`.
+ * Two fixtures, by what each case needs:
+ *   - a planless `--adhoc` code task holding no contract, for the cases the command refuses BEFORE any floor (a usage error);
+ *   - {@link makeOverrideWorld}: a real repository where a code task is approved (red waived), claimed on a branch in a linked
+ *     worktree, committed on and landed on main, for the cases that reach the floors.
+ * Both are throwaway (mkdtemp + `lore init`, HOME outside the repository); this repository's own `.lore/` is never touched.
  *
- * Fixture: a single `--adhoc` task (SPEC-069 D2) — sidesteps the plan→spec→
- * ac-scope chain entirely (this suite's subject is the escape hatch itself,
- * not task-create/task-claim, which have their own dedicated coverage
- * elsewhere) — and is, not incidentally, EXACTLY the shape the ADR calls out
- * as structurally unattestable (`lore verify` has no script-mode AC to bind
- * to for an `--adhoc` task), so it can only ever reach `archived` via this
- * escape hatch, never via a real attested pass.
+ * Retired with the model (spec AC-DCS1-6, named in the commit): the `--declare-no-new-tests` companion flag these cases used to
+ * carry, and every case that archived a task through the override alone. After an override the contract oracles are judged by
+ * counted passes, so no task with a compiled contract is archived by an override; the audit-stamping of an archive through the
+ * override is covered at the service layer by a contract that holds no oracle (task-workflow-service.test.ts).
  *
  * Coverage:
- *   HAPPY:      the flag with a real reason archives an otherwise-blocked
- *               self-reported-only task
- *   NEGATIVE:   a blank/whitespace reason is a CLI usage error (exit 2),
- *               BEFORE the corpus is even touched — no evidence/status change
- *   BOUNDARY:   a reason containing internal whitespace (not merely
- *               non-blank) round-trips byte-for-byte through the audit trail
- *   STATE:      the flag's audit side effect — `lore audit <task> --json`
- *               shows `override_reason`/`attestation_overridden` verbatim —
- *               PLUS a CONTROL run without the flag on an equivalent task
- *               proving those keys are ABSENT (never a coincidental false
- *               green from exit-code-only)
- *   ERROR:      omitting the flag entirely on a self-reported-only task still
- *               refuses with exit 4 (the pre-existing, now-attestation-aware
- *               floor) — the escape hatch is opt-in, never a silent default
- *   REGRESSION: `lore done` on an ALREADY-archived task is still an
- *               idempotent no-op (exit 0) even with a stray
- *               `--override-attestation` flag attached — the terminal
- *               short-circuit stays evaluated before this floor
+ *   NEGATIVE:   a blank/whitespace reason is a CLI usage error (exit 2), BEFORE the corpus is touched
+ *   BOUNDARY:   a reason with internal whitespace is accepted by the parser and reaches the floors, and the oracle floors
+ *               refuse it (exit 4) with nothing written
+ *   STATE:      the override NEVER stamps an audit row when the floors refuse (override_reason / attestation_overridden
+ *               absent), with a control task that never used the flag
+ *   ERROR:      omitting the flag on an unevidenced landed task refuses at attested-pass (exit 4), naming both repairs
+ *   REGRESSION: `lore done` on an ALREADY-archived task is still an idempotent no-op (exit 0) with a stray
+ *               `--override-attestation` attached — the terminal short-circuit stays evaluated before every floor
  *
  * @spec_ref adr-lore-done-requires-a-runner-attested-pass-the-sixth-false
  * @spec_ref task-lore-done-accepts-an-unattested-self-reported-pass-as
+ * @spec_ref spec-done-contract-compiled-at-approve-task-kinds-write-sets
  *
- * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through
- * dist/lore. Wherever the prose above says the compiled binary is spawned or its freshness asserted, that is the
- * history of this file; the assertions and the throwaway-corpus rule are unchanged.
+ * TG-25 (adr-tg-1 option b): the commands run IN-PROCESS through tests/helpers/run-lore-in-process.ts, not through dist/lore.
  */
 
-import { describe, expect, it, beforeAll, beforeEach, afterEach, vi } from "vitest";
+import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms, hookTimeout: ms }); };
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 import { makeCleanTreeRepo } from "../../helpers/clean-tree-repo";
+import { makeOverrideWorld, type OverrideWorld } from "./done-override-world";
 
-setDefaultTimeout(60_000);
-
-// tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
-const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
+setDefaultTimeout(180_000);
 
 interface RunResult {
   readonly stdout: string;
@@ -109,60 +90,22 @@ async function getDoc(slug: string, cwd: string): Promise<DocJson> {
   return (JSON.parse(result.stdout) as { data: { doc: DocJson } }).data.doc;
 }
 
-interface AuditEntryJson {
-  readonly action: string;
-  readonly details?: Record<string, unknown>;
-}
-
-/** Every audit row for `slug`, via the REAL `lore audit <doc> --json` CLI verb. */
-async function getAuditEntries(slug: string, cwd: string): Promise<AuditEntryJson[]> {
-  const result = await mustRun(["audit", slug, "--json"], cwd);
-  return (JSON.parse(result.stdout) as { data: { entries: AuditEntryJson[] } }).data.entries;
-}
-
 /**
- * Creates a planless (`--adhoc`) task and returns its slug.
- *
- * `--ac-scope ""` is REQUIRED on the ad-hoc branch (task-an-ad-hoc-task-can-
- * never-reach-the-attestation-path-that) — an ad-hoc creation without it now
- * exits 4. The EMPTY form keeps this fixture's "structurally unattestable, no
- * declared AC" shape intact, which is exactly what makes
- * `--override-attestation` the only archival route it can take.
- *
- * ⛔ That explicit-empty declaration also ARMS `lore done`'s INDEPENDENT
- * no-new-tests floor (task-the-ac-scope-re-keying-left-the-red-first-floor-
- * unarmed: the floor keys on the declaration's PRESENCE, not the array's
- * length), so every archiving call below carries {@link NO_NEW_TESTS_REASON}
- * alongside `--override-attestation`. The two are DIFFERENT floors with
- * DIFFERENT escapes; needing both here is the correct outcome for a fixture
- * that neither attests a pass nor records a red run, and this suite's subject
- * remains the attestation escape alone.
+ * Creates a planless (`--adhoc`) code task and returns its slug. `--ac-scope ""` is required on the ad-hoc branch; the task holds
+ * no contract (it was never approved), which is all the usage-error cases need.
  */
 async function createAdhocTask(cwd: string, title: string): Promise<string> {
   const created = await mustRun(
-    ["create", "task", "--title", title, "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"],
+    ["create", "task", "--title", title, "--kind", "code", "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"],
     cwd,
   );
   return (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
 }
 
-/**
- * The no-new-tests escape this suite's fixtures need for the reason documented
- * on {@link createAdhocTask} — deliberately a DISTINCT string from every
- * `--override-attestation` reason below, so an assertion about one escape's
- * audit key can never be satisfied by the other's value.
- */
-const NO_NEW_TESTS_REASON = "escape-hatch fixture: no new test, this suite asserts the attestation escape";
-
-/** Records one SELF-REPORTED (never attested — no `lore verify`/`recordVerifiedEvidence`
- *  CLI/MCP surface exists) passing evidence row — the exact shape every `lore evidence`
- *  write produces, and the shape this feature's floor now refuses as insufficient alone. */
+/** Records one SELF-REPORTED (never attested) passing evidence row — the shape every `lore evidence` write without `--capture` produces. */
 async function recordSelfReportedPass(slug: string, cwd: string): Promise<void> {
-  // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-predicate-
-  // to-its-own) — "test" self-report is now refused regardless of tail
-  // content; "manual" is the one oracle that still lets a genuinely
-  // non-empty self-reported tail succeed while staying self-reported
-  // (unattested) for this suite's own attestation-floor assertions.
+  // reason: "manual" is the one oracle whose self-reported pass with a non-empty tail is accepted at write time while staying
+  // unattested, which is what this suite's attestation-floor assertions need.
   await mustRun(
     ["evidence", slug, "--oracle", "manual", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"],
     cwd,
@@ -176,10 +119,7 @@ beforeEach(async () => {
   // a claim's recorded worktree is measured through `git worktree list` (BR-1353), so the fixture is a git repository
   makeCleanTreeRepo(tmpDir);
   await mustRun(["init"], tmpDir);
-  // AU-T7: `--override-attestation` is decided; this suite's subject is the audited escape, so the class is loosened
-  // the documented way (a human-tty governance decision), never by a bypass in product code.
-  // An --adhoc task parents to the corpus root PRD (CorpusService._createImpl) —
-  // one must exist first, mirroring every other --adhoc fixture in this repo.
+  // An --adhoc task parents to the corpus root PRD (CorpusService._createImpl) — one must exist first.
   await mustRun(["create", "prd", "--title", "Escape Hatch Root", "--content", "## Overview\nroot", "--no-ai"], tmpDir);
 });
 
@@ -189,27 +129,6 @@ afterEach(() => {
   } catch {
     /* best-effort cleanup */
   }
-});
-
-describe("HAPPY — --override-attestation archives an otherwise-blocked self-reported-only task", () => {
-  it("a real, non-blank reason reaches exit 0 and the task is archived", async () => {
-    const slug = await createAdhocTask(tmpDir, "Manually Verified Task");
-    await recordSelfReportedPass(slug, tmpDir);
-
-    const result = await mustRun(
-      [
-        "done",
-        slug,
-        "--override-attestation",
-        "manual browser check: verified in staging",
-        "--declare-no-new-tests",
-        NO_NEW_TESTS_REASON,
-      ],
-      tmpDir,
-    );
-    expect(result.exitCode).toBe(0);
-    expect((await getDoc(slug, tmpDir)).status).toBe("archived");
-  });
 });
 
 describe("NEGATIVE — a blank/whitespace reason is a CLI usage error (exit 2), before the corpus is touched", () => {
@@ -237,102 +156,87 @@ describe("NEGATIVE — a blank/whitespace reason is a CLI usage error (exit 2), 
   });
 });
 
-describe("BOUNDARY — a reason with internal whitespace round-trips byte-for-byte", () => {
-  it("a multi-word reason is neither trimmed nor mangled in the audit trail", async () => {
-    const slug = await createAdhocTask(tmpDir, "Multiword Reason Task");
-    await recordSelfReportedPass(slug, tmpDir);
-    const REASON = "manual browser check: verified in staging, screenshot attached to PR #123";
-
-    await mustRun(["done", slug, "--override-attestation", REASON, "--declare-no-new-tests", NO_NEW_TESTS_REASON], tmpDir);
-
-    const doneSteps = (await getAuditEntries(slug, tmpDir)).filter((e) => e.details?.["done"] === true);
-    expect(doneSteps.length).toBeGreaterThan(0);
-    expect(doneSteps.every((e) => e.details?.["override_reason"] === REASON)).toBe(true);
-    // The two escapes stay distinguishable on the SAME row — neither key adopts
-    // the other's value now that this fixture legitimately needs both.
-    expect(doneSteps.every((e) => e.details?.["no_new_tests_reason"] === NO_NEW_TESTS_REASON)).toBe(true);
-  });
-});
-
-describe("STATE — the audit side effect is real, with a CONTROL run proving its absence without the flag", () => {
-  it("using the flag stamps every lifecycle-step audit row with override_reason + attestation_overridden:true", async () => {
-    const slug = await createAdhocTask(tmpDir, "Audited Escape Task");
-    await recordSelfReportedPass(slug, tmpDir);
-    const REASON = "verified via manual QA session 2026-08-01";
-
-    await mustRun(["done", slug, "--override-attestation", REASON, "--declare-no-new-tests", NO_NEW_TESTS_REASON], tmpDir);
-
-    const doneSteps = (await getAuditEntries(slug, tmpDir)).filter((e) => e.details?.["done"] === true);
-    expect(doneSteps.length).toBeGreaterThan(0);
-    expect(doneSteps.every((e) => e.details?.["override_reason"] === REASON)).toBe(true);
-    expect(doneSteps.every((e) => e.details?.["attestation_overridden"] === true)).toBe(true);
-  });
-
-  it("CONTROL — an equivalent task archived WITHOUT the flag (via a genuinely attested evidence set the `red-first` fixture already proves reachable is unavailable here, so this control instead asserts absence is the DEFAULT rather than requiring a successful non-override archive) carries neither key on ANY audit row it does produce", async () => {
-    // reason: this repo's CLI has no attestation-producing surface at all
-    // (recordVerifiedEvidence is VerifyRunnerService-only, never wired to any
-    // CLI/MCP command — see commands/done.ts's own module header) — so the
-    // only CLI-reachable control for "the escape hatch was never used" is a
-    // task that never even attempts `lore done` successfully. The control
-    // therefore asserts on the CLAIM/EVIDENCE audit rows a normal EXECUTE loop
-    // already produces (claim, evidence) — none of which EVER carry
-    // override_reason/attestation_overridden, proving those keys are not
-    // some ambient default the store stamps onto every row regardless of the
-    // flag, but are written ONLY by the done() escape-hatch code path.
+describe("STATE — a task that never used the flag carries no override marker on any audit row (CONTROL)", () => {
+  it("the claim/evidence/release rows of a normal EXECUTE loop never carry override_reason or attestation_overridden", async () => {
+    // reason: those keys are written ONLY by the done() escape-hatch path, never stamped ambiently onto a row. A refused done
+    // writes nothing, so the control asserts on the claim/evidence/release rows a normal loop produces.
     const slug = await createAdhocTask(tmpDir, "Unaudited Control Task");
-    await mustRun(["claim", slug, "--worktree", tmpDir], tmpDir);
+    await mustRun(["claim", slug, "--worktree", "control-branch"], tmpDir);
     await recordSelfReportedPass(slug, tmpDir);
     await mustRun(["release", slug], tmpDir);
 
-    // The done() call itself is refused (no attestation, no override) — exit 4,
-    // never reaching the audit-stamping code path at all.
+    // The done() call is refused (the task holds no contract) — exit 4, never reaching the audit-stamping code path.
     const refusal = await runLore(["done", slug], tmpDir);
     expect(refusal.exitCode).toBe(4);
 
-    const entries = await getAuditEntries(slug, tmpDir);
+    const audit = await mustRun(["audit", slug, "--json"], tmpDir);
+    const entries = (JSON.parse(audit.stdout) as { data: { entries: Array<{ details?: Record<string, unknown> }> } }).data.entries;
     expect(entries.length).toBeGreaterThan(0); // claim/release/evidence rows exist
     expect(entries.every((e) => e.details?.["override_reason"] === undefined)).toBe(true);
     expect(entries.every((e) => e.details?.["attestation_overridden"] === undefined)).toBe(true);
   });
 });
 
-describe("ERROR — omitting the flag on a self-reported-only task still refuses (opt-in, never a silent default)", () => {
-  it("no --override-attestation at all → exit 4, task stays draft", async () => {
-    const slug = await createAdhocTask(tmpDir, "No Escape Hatch Task");
-    await recordSelfReportedPass(slug, tmpDir);
+describe("the escape on a landed code task with a stored contract (real repository, linked worktree)", () => {
+  let world: OverrideWorld;
 
-    const result = await runLore(["done", slug], tmpDir);
+  beforeAll(async () => {
+    world = await makeOverrideWorld();
+  });
+
+  afterAll(() => {
+    world.dispose();
+  });
+
+  it("ERROR: omitting the flag on an unevidenced landed task refuses [floor: attested-pass] (exit 4), naming both repairs, task unchanged", async () => {
+    const slug = await world.landTask("No Escape Hatch Task");
+    const before = await world.readTask(slug);
+
+    const result = await world.run(["done", slug]);
     expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("[floor: attested-pass]");
     expect(result.stderr).toContain("lore verify");
     expect(result.stderr).toContain("--override-attestation");
-    expect((await getDoc(slug, tmpDir)).status).toBe("draft");
+
+    const after = await world.readTask(slug);
+    expect(after.status).toBe(before.status);
+    expect(after.version).toBe(before.version);
   });
-});
 
-describe("REGRESSION — an already-archived task stays an idempotent no-op even with a stray override flag", () => {
-  it("a second `lore done --override-attestation <reason>` on an already-archived task exits 0 without a new audit row", async () => {
-    const slug = await createAdhocTask(tmpDir, "Already Archived Task");
-    await recordSelfReportedPass(slug, tmpDir);
-    await mustRun(
-      [
-        "done",
-        slug,
-        "--override-attestation",
-        "first pass, legitimately overridden",
-        "--declare-no-new-tests",
-        NO_NEW_TESTS_REASON,
-      ],
-      tmpDir,
-    );
-    const auditCountAfterFirst = (await getAuditEntries(slug, tmpDir)).length;
+  it("BOUNDARY: a multi-word reason is accepted by the parser, waives only the attestation floor, and is refused at the next floor ([floor: unfiltered-test-file]) with nothing written", async () => {
+    const slug = await world.landTask("Multiword Reason Task");
+    await world.mustRun(["evidence", slug, "--oracle", "manual", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"]);
+    const before = await world.readTask(slug);
+    const REASON = "manual browser check: verified in staging, screenshot attached to PR #123";
 
-    const second = await runLore(
-      ["done", slug, "--override-attestation", "second call, should be a pure no-op"],
-      tmpDir,
-    );
+    const result = await world.run(["done", slug, "--override-attestation", REASON]);
+    expect(result.exitCode).toBe(4);
+    // the landed task anchors one test file, so its contract holds a `test:` oracle, which is judged right after the red run
+    expect(result.stderr).toContain("[floor: unfiltered-test-file]");
+    expect(result.stderr).toContain("tests/o-");
+    expect(result.stderr).not.toContain("[floor: attested-pass]");
+
+    const after = await world.readTask(slug);
+    expect(after.status).toBe(before.status);
+    expect(after.version).toBe(before.version);
+    // the refusal wrote nothing, so no audit row carries the reason or the override marker
+    const rows = await world.auditRows(slug);
+    expect(rows.every((row) => row.details?.["override_reason"] === undefined)).toBe(true);
+    expect(rows.every((row) => row.details?.["attestation_overridden"] === undefined)).toBe(true);
+  });
+
+  it("REGRESSION: an already-archived task stays an idempotent no-op with a stray override flag (exit 0, no new audit row)", async () => {
+    const slug = await world.landTask("Already Archived Task");
+    await world.attestAllOracles(slug);
+    const first = await world.run(["done", slug]);
+    expect(first.exitCode, `${first.stdout}${first.stderr}`).toBe(0);
+    expect((await world.readTask(slug)).status).toBe("archived");
+    const auditCountAfterFirst = (await world.auditRows(slug)).length;
+
+    const second = await world.run(["done", slug, "--override-attestation", "second call, should be a pure no-op"]);
     expect(second.exitCode).toBe(0);
-    expect((await getDoc(slug, tmpDir)).status).toBe("archived");
+    expect((await world.readTask(slug)).status).toBe("archived");
     // idempotent no-op writes NOTHING — the audit table must not have grown.
-    expect((await getAuditEntries(slug, tmpDir)).length).toBe(auditCountAfterFirst);
+    expect((await world.auditRows(slug)).length).toBe(auditCountAfterFirst);
   });
 });

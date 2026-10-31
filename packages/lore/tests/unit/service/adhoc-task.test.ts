@@ -522,12 +522,13 @@ describe("AC-069-7: readyAdhoc() lists OPEN ad-hoc tasks corpus-wide", () => {
     const created = await corpusService.create({
       type: "task",
       title: "Claimed adhoc",
-      extra: { adhoc: true },
+      extra: { adhoc: true, kind: "code" },
     } as CreateDocInput);
     expect(created.ok).toBe(true);
     if (!created.ok) return;
 
-    await taskWorkflowService.claim(created.value.id, { by: "alice" });
+    const claimed = await taskWorkflowService.claim(created.value.id, { by: "alice", worktree: "wt-adhoc" });
+    expect(claimed.ok).toBe(true);
 
     const result = await taskWorkflowService.readyAdhoc();
     expect(result.ok).toBe(true);
