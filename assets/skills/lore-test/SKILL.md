@@ -232,8 +232,8 @@ If gate fails → fix or document as known issue with justification. Never silen
 
 ### Step 9: PERSIST — lore Integration
 
-- **strategy mode**: `lore create knowledge --parent <spec or prd it concerns> --sub-type reference --title "Test Plan: <feature>" --content ...` + link to PRD/feature-spec via `lore link <test-plan-slug> <spec-slug> --type=relates-to`
-- **Other modes after execution**: update existing test-plan knowledge doc with results section (`lore set <test-plan-slug> --content ...`):
+- **strategy mode**: `lore create knowledge --parent <spec or prd it concerns> --sub-type reference --title "Test Plan: <feature>" --fields-file f.yaml` (skeleton: `lore template show knowledge --kind reference --blank`) + link to PRD/feature-spec via `lore link <test-plan-slug> <spec-slug> --type=relates-to`
+- **Other modes after execution**: update existing test-plan knowledge doc with results section (add the results to its fields, `lore set <test-plan-slug> --fields-file f.yaml`):
   ```
   ## Test Results — {mode} ({date})
   - Pass/Fail: X/Y

@@ -81,7 +81,7 @@ When a leaf's rule is only valid because another leaf's rule holds, declare it: 
 
 | Step | Command |
 |---|---|
-| Create a node | `lore baseline add <parent> --node root\|branch\|leaf --label <l> --title <t> [--content-file <path>]` |
+| Create a node | `lore baseline add <parent> --node root\|branch\|leaf --label <l> --title <t> --fields-file <file>` (skeleton: `lore template show baseline --kind root\|branch\|leaf --blank`) |
 | Rename a label | `lore baseline set-label <node> <label>` |
 | Add a rule | `lore rule add <leaf> --statement "..." --confidence established --enforced-by guaranteed --example "..."` plus `--reason "..." --premise "<claim>|<source>|<tier>" --alt "<option>|<why rejected>"` for an agent on an approved leaf (rule file `decision-records`) |
 | Edit / retire / move a rule that already describes the product (no `deprecated`: a rule is true or it is not) | `lore rule set BR-n [--statement ...] [--lifecycle retired --note ...] [--move-to <leaf>]` plus the decision flags `--reason --premise --alt`; a statement change also `--gate "meaning-unchanged|pass|<evidence>"`; raising confidence is refused (rule file `decision-records`) |
@@ -97,7 +97,7 @@ When a leaf's rule is only valid because another leaf's rule holds, declare it: 
 
 **`baseline sites`, `baseline map` and `baseline coverage` are lore-source-only.** The census analyses lore's own CLI source, so in any consumer project they exit 4 ("not inside a lore source checkout"). A consumer uses instead: rule counts and lifecycle in `lore status`, the criteria that cite a rule via `lore rule impact BR-n`, and `lore baseline tree --states` / `--rule BR-n`.
 
-Node bodies start from `templates/branch.md` and `templates/leaf.md` (pass with `--content-file`). Rules are
+Node content starts from `lore template show baseline --kind branch|leaf --blank` (fill, pass with `--fields-file`; the body is rendered from the fields). Rules are
 never in the body: they go through `lore rule add`.
 
 ## Adopting the gate

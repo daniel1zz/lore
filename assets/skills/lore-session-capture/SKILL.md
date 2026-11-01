@@ -34,7 +34,7 @@ Review the session transcript yourself (no bootstrap tool — reflection is your
 | Research finding / benchmark | `lore create knowledge --parent <spec or prd it concerns> --sub-type research` |
 | SDK gotcha / reusable reference | `lore create knowledge --parent <spec or prd it concerns> --sub-type reference` |
 | Feature requirements discovered | Real spec: `lore feed spec-create` first, then `lore create spec --kind feature` + `lore ac add` |
-| Existing doc now inaccurate | UPDATE it: `lore set <doc> --content ...` (approved doc auto-resets to draft) |
+| Existing doc now inaccurate | UPDATE it: edit its fields and `lore set <doc> --fields-file <file>` (a legacy unconverted doc: `--content`; approved doc auto-resets to draft) |
 | Superseded / disproven knowledge | INVALIDATE — see step 5 |
 
 What is NOT a signal (noise — do not persist): routine command output, restating existing docs, one-off environment quirks, anything a fresh agent could rediscover in <1 min from code. A decision needs a *rejected alternative*; a learning needs a *surprise*.
@@ -51,7 +51,7 @@ Before EVERY create: `lore search "<topic>" [--type adr|knowledge] --json`.
 
 ### 4. Persist
 
-Use the mapping from step 2. Body via `--content "..."` or `--content-file <path>` (mutually exclusive). Keep each doc atomic: one decision / one learning per doc.
+Use the mapping from step 2. Content via fields: `lore template show <type> [--kind <sub-type>] --blank > f.yaml`, fill it, then `lore create <type> ... --fields-file f.yaml` (a supplied body is refused; the text is rendered from the fields). Keep each doc atomic: one decision / one learning per doc.
 
 ### 5. Invalidate — memory hygiene is part of capture
 

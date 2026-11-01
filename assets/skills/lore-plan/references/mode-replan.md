@@ -45,7 +45,7 @@
   ## 4a. Add tasks / phases
   - New phase: lore phase add <plan> "Phase N: {name}" --description "..."
   - New task:  lore create task --title "[Skill:xxx] ..." --parent <plan> --plan-id <plan> \
-                 --phase "Phase N: {name}" --anchor <path> --content-file /tmp/task.md
+                 --phase "Phase N: {name}" --anchor <path> --fields-file /tmp/task.yaml   # skeleton: lore template show task --blank
   - All new tasks must satisfy full INVEST compliance (Estimate, Approach, AC, Scope-Alt, anchors)
   - Wire dependencies: lore link <blocker> <blocked> --type=blocks
 
@@ -67,7 +67,7 @@
   - Split/merge phases: add the new phase, move tasks, rm the emptied phase
 
   ## 4d. Re-estimate
-  - Update task content with revised estimates based on actuals (lore set <task> --content-file ...)
+  - Update task content with revised estimates based on actuals (lore set <task> --fields-file ...)
   - Reference Class Forecasting: if phase 1 tasks averaged 1.5x estimated → apply multiplier to remaining
   - Output: `**[RE_ESTIMATE]** original: {N} session-units → revised: {M} session-units (factor: {x})`
 
@@ -101,7 +101,7 @@
   | {date} | REPLAN: {change description} | {rationale} | Impact: {critical path delta}, {tasks added/removed/modified} |
   ```
 - Also update Risk Register + Estimation Summary + Critical Path sections in the same edit
-- lore set <plan> --content-file /tmp/plan-content.md
+- lore set <plan> --fields-file /tmp/plan-fields.yaml   # changed fields / dimension answers only
 - lore approve <plan>   # edit reset it to draft; re-approval re-fires plan-promote (expected pass)
 
 # 8. User confirmation — only when the change leaves the pre-registered branches

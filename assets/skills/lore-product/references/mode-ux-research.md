@@ -159,7 +159,7 @@ Avoid: happy-path-only, no emotions, generic touchpoints, no data backing
 
 ## lore Protocol (MANDATORY)
 
-1. **Create**: `lore create knowledge --parent <spec or prd it concerns> --sub-type research --title '{topic} UX Research' --content ...`
+1. **Create**: `lore create knowledge --parent <spec or prd it concerns> --sub-type research --title '{topic} UX Research' --fields-file f.yaml` (skeleton: `lore template show knowledge --kind research --blank`)
 2. **Link**: `lore link <research> <prd-or-discovery-doc> --type=relates-to`
 3. **Status flow**: `draft` → `in-review` (peer check methodology) → `approved`
 

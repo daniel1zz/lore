@@ -207,18 +207,18 @@ For each implement task, determine approach source:
   4. **None of above** → **split into two tasks** (an implement task without a known approach will stall during execution):
      - `[Plan] {topic} — research & design approach` (skills: [research/design], AC: output approach)
      - `[Implement] {topic} — execute per approach` (skills: [implement], blocked by the [Plan] task)
-     - The [Plan] task's AC includes: "Update the [Implement] task content with Approach field (lore set <task> --content-file ...)"
+     - The [Plan] task's AC includes: "Update the [Implement] task content with Approach field (lore set <task> --fields-file ...)"
 
 **Rule**: implement task without Approach = not ready for execution. The lore-reader audit (8.3) will flag it.
 
 # 4. Create plan document
 - # NOTE: `lore feed` supports artifact checkpoints only (spec-create etc.) — there is NO plan-promote feed checkpoint (verified 2026-07-19: `unknown checkpoint`). The plan-promote gate's rules are enforced at `lore approve` (step 8.6); nothing to pre-pull here.
-- Write plan content to a temp file (Overview, Invariants, Risk Register, Estimation
+- `lore template show plan --blank > /tmp/plan-fields.yaml`, then fill it (Overview, Invariants, Risk Register, Estimation
   Summary, Critical Path placeholder, Exit Criteria, Phase Descriptions,
   Pre-registered Branches, Decisions Log — see plan-file-format.md)
   - Governance: batched, one flow (`shared/batched-governance.md`) — no mode field.
     Phase Gates auto-proceed; Invariant violations hard-block.
-- lore create plan --title "{title}" --parent <spec-slug> --content-file /tmp/plan-content.md --json
+- lore create plan --title "{title}" --parent <spec-slug> --fields-file /tmp/plan-fields.yaml --json
   → save the returned plan slug
 
 # 5. Declare phases, then create task docs
@@ -235,7 +235,7 @@ For each implement task, determine approach source:
     --parent <plan> --plan-id <plan> --phase "Phase N: {name}" \
     --anchor <repo-relative-path> [--anchor <path> ...] \
     --priority <critical|high|medium|low> \
-    --content-file /tmp/task-content.md --json
+    --fields-file /tmp/task-fields.yaml --json   # skeleton: lore template show task --blank
 - Task creation validates --phase against the plan's declared phases at write time —
   unknown phase → exit 4 VALIDATION_ERROR (fix the name, don't fight it).
 

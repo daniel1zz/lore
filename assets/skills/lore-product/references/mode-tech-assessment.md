@@ -56,7 +56,7 @@ Build gate: Must satisfy ≥2 build conditions.
 - Risks with mitigations
 - Build vs adopt recommendation with reasoning
 - Long-term maintenance implications
-- Artifact: `lore create spec --title ... --kind tech --content ...`
+- Artifact: `lore template show spec --kind tech --blank > f.yaml` → fill → `lore create spec --title ... --kind tech --fields-file f.yaml`
 
 ## Triggers
 "Can we build this", "Technical feasibility", "Build or buy", "Tech assessment", "What library/service should we use"
