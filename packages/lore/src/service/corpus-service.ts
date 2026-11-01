@@ -155,6 +155,7 @@ import {
   type FieldsPatch,
   type StructuredWriteDeps,
 } from "./structured-write.js";
+import { resolveRuleSlice } from "./template-rule-slice.js";
 import { ANCHOR_SCANNED_DOC_TYPES } from "./drift-check-service.js";
 import { findPlanClaimedByWriter } from "./run-claimed-plan.js";
 // reason: NOT a cross-service import — `service/CLAUDE.md`'s "no cross-service imports"
@@ -176,83 +177,6 @@ import {
   type CorpusWriteAuthorityContext,
   type ForeignCorpusWriteContext,
 } from "./foreign-corpus-write-guard.js";
-
-/**
- * `checkpointRegistry`'s `"spec-create"` checkpoint always produces a `"spec"` doc
- * (`flows/feed-flow.ts::CHECKPOINT_PRODUCED_TYPE` is the SSOT map for this fact,
- * mirrored by `gate.ts::SPEC_CREATE_PRODUCED_TYPE`) — reproduced here as a local
- * literal rather than importing from `flows/`, since services never import from the
- * adapter-composition layer (service/CLAUDE.md "no cross-service calls" /
- * `../../CLAUDE.md` layer-stack invariant). Safe because the ONLY call site
- * (`_createImpl`'s spec-create gate context enrichment, SPEC-049 §Design Decisions
- * D3) already runs inside a `data.type === "spec"` branch — this constant just
- * documents WHY `"spec"` is the right `findFeedingSkill` scope there, it is not a
- * second independently-drifting derivation of the checkpoint→type mapping.
- */
-const SPEC_CREATE_FEEDING_SCOPE = "spec";
-
-/**
- * Named source label for {@link FALLBACK_SPEC_CREATE_RULE_MARKDOWN} — spec-
- * governance-visibility-an-armed-gate-that-vacuously-passes §B3. Rendered
- * into `renderFeedingPack`'s `[source: ..., trust: ...]` header exactly like
- * a real corpus doc's slug would be; deliberately NOT the literal string
- * `"unknown"` (that string is `feedSpecCreate`'s OWN `ctx.ruleSource ??
- * "unknown"` fallback for a truly absent field — this constant exists so
- * `ruleSource` is never absent in the first place when the corpus lookup
- * misses).
- */
-const FALLBACK_SPEC_CREATE_RULE_SOURCE = "built-in fallback (no seeded rule doc)";
-
-/**
- * Compiled-in spec-create rule slice — spec-governance-visibility-an-armed-
- * gate-that-vacuously-passes §B3 ("a fresh consumer install receives an
- * empty feeding pack"). `findFeedingSkill(SPEC_CREATE_FEEDING_SCOPE)` below
- * is a CORPUS read: a project that just ran `lore init` has zero `knowledge`
- * docs, so that lookup always misses there, and — pre-this-constant — the
- * feeding pack degraded to a bare `[source: unknown]` discriminator with an
- * EMPTY rule slice, defeating the whole "a denial carries the rule that
- * explains it" design (IoC vertical-slice tech-spec §4.1/§11).
- *
- * This is deliberately a SEPARATE literal from
- * `scripts/seed-write-spec-rule.ts`'s `WRITE_SPEC_RULE_CONTENT` (the doc this
- * repo's OWN corpus is seeded with) rather than an import of it:
- * `scripts/` is dev/CI tooling, never part of any distributed package or the
- * compiled `dist/lore` binary (project CLAUDE.md "distribution-first" rule —
- * a fix must land on a surface that SHIPS). A consumer who has only ever run
- * `lore init` has no `scripts/` directory at all, so that module cannot be
- * this fallback's SSOT; this string ships instead as compiled TypeScript
- * inside `corpus-service.ts` itself, landing in `dist/lore` on every build
- * regardless of corpus state, `lore init` having run, or which binary
- * version most recently ran it.
- *
- * A team that wants richer, editable rules than this trims-for-800-chars
- * fallback seeds their OWN approved `knowledge` doc
- * (`extra.sub_type: "skill"`, `extra.skill.applies_to: "spec"`) — the moment
- * one exists, `findFeedingSkill` finds it and this constant is never
- * consulted again (see the call site below).
- */
-const FALLBACK_SPEC_CREATE_RULE_MARKDOWN = `## Rules a candidate spec must satisfy
-
-1. **No parent.** A spec takes no parent: it belongs to the product trees
-   through its criteria's citations of rules (\`lore ac cite\`). A spec created
-   with a parent is rejected.
-2. **Declared spec_kind.** Declare \`extra.spec_kind\` as one of \`feature\`,
-   \`tech\`, or \`design\` (defaults to \`feature\` when absent).
-3. **Required skeleton sections.** Content must include at minimum:
-   \`## Overview/Goal\`, \`## Scope\`, \`## Acceptance Criteria\`.
-4. **Deterministic, oracle-verifiable acceptance criteria.** Every AC must be
-   checkable by a deterministic oracle (exit code, test assertion, concrete
-   observable outcome) — vague verbs ("works", "support") are rejected.
-5. **Structured AC via \`lore ac add\`.** Once the skeleton exists, add
-   machine-checkable criteria with
-   \`lore ac add <spec> <id> --statement <s> --mode <script|ai|human>\`.
-
-This is a BUILT-IN fallback: no approved \`knowledge\` doc with
-\`extra.sub_type: "skill"\` and \`extra.skill.applies_to: "spec"\` exists in
-this corpus yet. Seed your own team-editable version with
-\`lore create knowledge --sub-type skill --parent <prd-or-spec>\` (title, content, then
-\`extra.skill.applies_to: "spec"\`) to replace this fallback.
-`;
 
 // ─── Local types (mirror SPEC-001 §3.1 interfaces) ────────────────────────
 
@@ -2840,30 +2764,16 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       // identical lookup — skipped entirely when the checkpoint is disabled
       // (`isEnabled` short-circuits BEFORE the read, mirroring `gate.ts`'s own
       // isGateDisabledByConfig-before-runXGate order) so a disabled checkpoint
-      // stays byte-identical to pre-D3 behavior (zero extra IO). A missing/failed
-      // lookup falls back to `FALLBACK_SPEC_CREATE_RULE_SOURCE`/`_MARKDOWN`
-      // (spec-governance-visibility-an-armed-gate-that-vacuously-passes §B3) —
-      // NEVER a bare `[source: unknown]` with an empty rule slice, which is what
-      // EVERY fresh-`lore init` corpus produced before this fallback existed (zero
-      // approved `knowledge/skill` docs to find yet). This still degrades to a
-      // never-thrown, never-differently-shaped Result either way (mirrors
-      // `writeProvenanceLink`'s fail-soft posture elsewhere in this file) — it is
-      // strictly more information than the bare discriminator, on BOTH the
-      // "corpus genuinely empty" and "store read failed" branches below.
+      // stays byte-identical to pre-D3 behavior (zero extra IO).
+      // reason: the rule a spec-create denial quotes is the approved TEMPLATE of the spec's kind
+      // (spec-every-document-is-stored-as-structured-fields-validated-by, "One source"): the spec-rules corpus
+      // document and the compiled-in fallback text are retired. A template that cannot be read is NAMED in the slice
+      // (`resolveRuleSlice`), never replaced by an invented rule. Absent only in a bare unit-test construction.
       let ruleEnrichment: Pick<GateContext, "ruleSource" | "ruleMarkdown"> = {};
-      if (this.gateEnforcer.isEnabled("spec-create")) {
-        const feedingSkillResult = await this.findFeedingSkill(SPEC_CREATE_FEEDING_SCOPE);
-        if (feedingSkillResult.ok && feedingSkillResult.value !== null) {
-          ruleEnrichment = {
-            ruleSource: feedingSkillResult.value.slug,
-            ruleMarkdown: feedingSkillResult.value.content,
-          };
-        } else {
-          ruleEnrichment = {
-            ruleSource: FALLBACK_SPEC_CREATE_RULE_SOURCE,
-            ruleMarkdown: FALLBACK_SPEC_CREATE_RULE_MARKDOWN,
-          };
-        }
+      if (this.gateEnforcer.isEnabled("spec-create") && this.structuredWrite !== undefined) {
+        const specKind = typeof resolvedExtra["spec_kind"] === "string" && (SPEC_KINDS as readonly string[]).includes(resolvedExtra["spec_kind"]) ? resolvedExtra["spec_kind"] : "feature";
+        const slice = await resolveRuleSlice(this.structuredWrite.templates, "spec", specKind);
+        ruleEnrichment = { ruleSource: slice.source, ruleMarkdown: slice.markdown };
       }
       // reason: AC-Quantifiability Gate spec §Design — a spec created with INLINE
       // `extra.acceptance_criteria` (the service-layer create path; `lore ac add`
