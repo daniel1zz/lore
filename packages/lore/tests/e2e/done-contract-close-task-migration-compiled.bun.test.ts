@@ -36,6 +36,7 @@ import { FIXTURE_HOME_OUTSIDE_REPO } from "../helpers/clean-tree-repo";
 import { citeSpecViaAsyncCli } from "../helpers/cli-live-rule";
 import { patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { fileAnswerShellLines, withFilesShell } from "../helpers/ai-double-file-answers";
 import { installShippedGuard } from "../integration/support/main-guard-repo";
 
 vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });
@@ -100,7 +101,8 @@ const gitIn = (cwd: string, args: string[]): string => execFileSync("git", args,
 function writeAiDouble(path: string): void {
   const dimension = `{"verdict":"pass","reason":"pass by the double","reference":"Google engineering code review guide"}`;
   const answer = `{"dimensions":{"spec_conformance":${dimension},"design_necessity":${dimension},"concurrency_safety":${dimension},"security":${dimension}},"criteria":[]}`;
-  writeFileSync(path, ["#!/bin/sh", "cat >/dev/null", `echo "$(date +%s) plain" >> '${aiLog}'`, `cat <<'JSONEOF'`, answer, "JSONEOF", ""].join("\n"), { mode: 0o755 });
+  // reason: BR-1535 — a review call answers per changed file as well (`files`); the double passes every file the prompt marks ASK.
+  writeFileSync(path, ["#!/bin/sh", "prompt=$(cat)", `echo "$(date +%s) plain" >> '${aiLog}'`, ...fileAnswerShellLines(), ...withFilesShell(answer), ""].join("\n"), { mode: 0o755 });
   chmodSync(path, 0o755);
 }
 

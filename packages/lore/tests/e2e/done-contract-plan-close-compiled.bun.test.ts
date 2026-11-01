@@ -42,6 +42,7 @@ import { approveFixtureNodes, citeSpecViaAsyncCli, ensureLiveRuleViaAsyncCli } f
 import { DECIDED_FLAGS, DECIDED_FLAGS_OWN_REASON } from "../helpers/decision-flags";
 import { dropLoreConfigKey, patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { fileAnswerShellLines, withFilesShell } from "../helpers/ai-double-file-answers";
 import { installShippedGuard } from "../integration/support/main-guard-repo";
 
 vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });
@@ -374,18 +375,17 @@ function writeAiDouble(path: string): void {
       `case "$prompt" in *SECFAIL*) marker=secfail;; esac`,
       `case "$prompt" in *DESFAIL*) marker=desfail;; esac`,
       `echo "$(date +%s)$(perl -MTime::HiRes=time -e 'printf("%03d", (time - int(time)) * 1000)') $marker" >> '${aiLog}'`,
+      // reason: BR-1535 — a review call answers per changed file as well (`files`); the double passes every file the prompt marks ASK.
+      ...fileAnswerShellLines(),
       `case "$marker" in`,
-      `  secfail) cat <<'JSONEOF'`,
-      answer("fail", "pass"),
-      "JSONEOF",
+      "  secfail)",
+      ...withFilesShell(answer("fail", "pass")).map((line) => `    ${line}`),
       "  ;;",
-      "  desfail) cat <<'JSONEOF'",
-      answer("pass", "fail"),
-      "JSONEOF",
+      "  desfail)",
+      ...withFilesShell(answer("pass", "fail")).map((line) => `    ${line}`),
       "  ;;",
-      "  *) cat <<'JSONEOF'",
-      answer("pass", "pass"),
-      "JSONEOF",
+      "  *)",
+      ...withFilesShell(answer("pass", "pass")).map((line) => `    ${line}`),
       "  ;;",
       "esac",
       "",
