@@ -183,12 +183,17 @@ describe(`${SPEC}#AC-ST-1 lore migrate templates seeds what is missing and never
       const applied = await seedRig.lore(["migrate", "templates", "--apply", "--json"]);
       expect(applied.exitCode, applied.stdout + applied.stderr).toBe(0);
       const outcomes = (JSON.parse(applied.stdout) as { data: { outcomes: { slot: string; action: string }[] } }).data.outcomes;
-      expect(outcomes.find((o) => o.slot === "spec/tech")?.action).toBe("present");
+      // the shipped spec/tech seed is NEWER than the approved corpus template (v2 vs v1): it becomes a proposed revision
+      // of that template document, never an in-place overwrite
+      expect(outcomes.find((o) => o.slot === "spec/tech")?.action).toBe("revise");
       expect(outcomes.find((o) => o.slot === "task")?.action).toBe("seeded");
 
+      // the approved version 1 keeps resolving (the proposed revision is a draft awaiting review)
       const tech = JSON.parse((await seedRig.lore(["template", "show", "spec", "--kind", "tech", "--json"])).stdout) as { data: { ref: string; dimensions: unknown[] } };
       expect(tech.data.ref).toBe(`${custom.slug}@1`);
       expect(tech.data.dimensions).toHaveLength(3);
+      const revised = JSON.parse((await seedRig.lore(["get", custom.slug, "--json"])).stdout) as { data: { doc: { status: string } } };
+      expect(revised.data.doc.status).toBe("draft");
       const task = await seedRig.lore(["template", "show", "task"]);
       expect(task.exitCode, task.stderr).toBe(0);
 
@@ -196,7 +201,7 @@ describe(`${SPEC}#AC-ST-1 lore migrate templates seeds what is missing and never
       const again = await seedRig.lore(["migrate", "templates", "--apply", "--json"]);
       expect(again.exitCode, again.stderr).toBe(0);
       const secondOutcomes = (JSON.parse(again.stdout) as { data: { outcomes: { action: string }[] } }).data.outcomes;
-      expect(secondOutcomes.some((o) => o.action === "seeded")).toBe(false);
+      expect(secondOutcomes.some((o) => o.action === "seeded" || o.action === "revise")).toBe(false);
       expect(await seedRig.countDocs()).toBe(docsAfterFirst);
     } finally {
       seedRig.cleanup();
