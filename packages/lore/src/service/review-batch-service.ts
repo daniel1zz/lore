@@ -125,9 +125,9 @@ export interface ReviewTriggerDeps {
    * Starts the detached batch process; returns once it is spawned (never waits for it). `handoff` names the batch lease the
    * starter holds on the child's behalf: the child takes it over by compare-and-set on `handoff.holder` before it works.
    */
-  readonly spawnBatch: (handoff: BatchHandoff | undefined) => Result<{ readonly pid: number | undefined }, LoreError> | Promise<Result<{ readonly pid: number | undefined }, LoreError>>;
-  /** The machine's batch lease (BR-1532). Absent only in a bare construction (and the read-only ones, which never start a batch): `start` then spawns with no handoff. */
-  readonly batchLease?: BatchLeasePort;
+  readonly spawnBatch: (handoff: BatchHandoff) => Result<{ readonly pid: number | undefined }, LoreError> | Promise<Result<{ readonly pid: number | undefined }, LoreError>>;
+  /** The machine's batch lease (BR-1532), required: a start without it would spawn a batch no lease covers. A read-only caller passes a port that refuses `acquire`. */
+  readonly batchLease: BatchLeasePort;
 }
 
 /** The batch lease a landing took for the batch it spawns: the key and the starter's exact holder name. */
@@ -250,7 +250,12 @@ function messageOf(error: LoreError): string {
 
 /** The trigger side: reads state, never writes (see the module header). */
 export class ReviewTriggerService {
-  constructor(private readonly deps: ReviewTriggerDeps) {}
+  constructor(private readonly deps: ReviewTriggerDeps) {
+    // reason: the type already requires the port; this guards an untyped caller (a cast, a JS composition) from the retired no-handoff spawn.
+    if ((deps.batchLease as BatchLeasePort | undefined) === undefined) {
+      throw new Error("ReviewTriggerService needs a batch lease (BR-1532): a trigger without one would spawn a batch no lease covers");
+    }
+  }
 
   /**
    * The plans that need work now. Reads stored progress; computes no review.
@@ -315,14 +320,6 @@ export class ReviewTriggerService {
     if (!set.ok) return set;
     if (set.value.length === 0) return ok({ state: "empty" });
     const port = this.deps.batchLease;
-    if (port === undefined) {
-      // reason: an optional DI port, absent only in bare constructions (the repo's pattern: `app.ts` wires, a bare `new X(deps)` stays
-      // unleased). The spawn receives `undefined` as its handoff and the production spawn (`spawnDetachedReviewBatch`) refuses it, so
-      // a composition that forgot the port cannot start a batch; `lore integrate`'s wiring is asserted by review-machine-cap.test.ts.
-      const spawned = await this.deps.spawnBatch(undefined);
-      if (!spawned.ok) return spawned;
-      return ok({ state: "started", triggered: set.value.length, pid: spawned.value.pid });
-    }
     const machine = await port.machineId();
     const key = batchLeaseKey(machine);
     const machineUnknown = machine === UNKNOWN_MACHINE_ID;
