@@ -31,7 +31,9 @@ import type {
   RunId,
   RunRecord,
   SearchHit,
+  MissingDimensionFinding,
   ReviewTruncationEntry,
+  TemplateRevision,
   SupersededCandidate,
   VersionRecord,
 } from "@lore/core";
@@ -304,6 +306,10 @@ export interface JudgmentRow {
   truncated?: number | bigint | null;
   /** JSON `ReviewTruncationEntry[]` or NULL — nullable column since migration-019.ts (F1). */
   truncation?: string | null;
+  /** `slug@version` of the template the judgment was made against, or NULL — nullable column since migration-048.ts. */
+  template_ref?: string | null;
+  /** JSON `MissingDimensionFinding[]` or NULL — nullable column since migration-048.ts. */
+  missing_dimensions?: string | null;
   created_at: string;
   created_by: string;
 }
@@ -893,6 +899,7 @@ export function rowToAuditChainEntry(row: AuditChainRow): AuditChainEntry {
 export function rowToReviewJudgment(row: JudgmentRow): ReviewJudgment {
   const supersededCandidate = parseJsonOptional<SupersededCandidate>(row.superseded_candidate);
   const truncation = parseJsonOptional<ReviewTruncationEntry[]>(row.truncation);
+  const missingDimensions = parseJsonOptional<MissingDimensionFinding[]>(row.missing_dimensions);
   return {
     id: row.id,
     doc_id: row.doc_id,
@@ -911,9 +918,73 @@ export function rowToReviewJudgment(row: JudgmentRow): ReviewJudgment {
     ...(supersededCandidate !== undefined ? { superseded_candidate: supersededCandidate } : {}),
     ...(row.truncated !== null && row.truncated !== undefined && Number(row.truncated) === 1 ? { truncated: true } : {}),
     ...(truncation !== undefined ? { truncation } : {}),
+    ...(row.template_ref !== null && row.template_ref !== undefined ? { template_ref: row.template_ref } : {}),
+    ...(missingDimensions !== undefined ? { missing_dimensions: missingDimensions } : {}),
     created_at: row.created_at,
     created_by: row.created_by,
   };
+}
+
+/** Raw `template_revisions` row (migration-048.ts). */
+export interface TemplateRevisionRow {
+  id: string;
+  template_slug: string;
+  status: string;
+  base_version: number | bigint;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+}
+
+/** Raw `template_proposals` row (migration-048.ts). */
+export interface TemplateProposalRow {
+  id: string;
+  revision_id: string;
+  question: string;
+  decision: string | null;
+  dimension_id: string | null;
+  drop_reason: string | null;
+}
+
+/** The two columns of a `template_proposal_findings` row that a proposal's sources and count derive from. */
+export interface TemplateProposalFindingRow {
+  proposal_id: string;
+  judgment_id: string;
+}
+
+/**
+ * Assemble stored revision, proposal and finding rows into {@link TemplateRevision}s. `revisions` keeps the order given
+ * (the callers read newest first); a proposal's sources are its findings' judgment ids de-duplicated in finding order and
+ * its `count` is its number of finding rows. `proposals` / `findings` must already be in creation order.
+ */
+export function assembleTemplateRevisions(
+  revisions: readonly TemplateRevisionRow[],
+  proposals: readonly TemplateProposalRow[],
+  findings: readonly TemplateProposalFindingRow[],
+): TemplateRevision[] {
+  return revisions.map((revision) => ({
+    id: revision.id,
+    template_slug: revision.template_slug,
+    status: revision.status as TemplateRevision["status"],
+    base_version: Number(revision.base_version),
+    created_at: revision.created_at,
+    ...(revision.resolved_at !== null ? { resolved_at: revision.resolved_at } : {}),
+    ...(revision.resolved_by !== null ? { resolved_by: revision.resolved_by } : {}),
+    proposals: proposals
+      .filter((proposal) => proposal.revision_id === revision.id)
+      .map((proposal) => {
+        const own = findings.filter((finding) => finding.proposal_id === proposal.id);
+        return {
+          id: proposal.id,
+          question: proposal.question,
+          source_judgment_ids: [...new Set(own.map((finding) => finding.judgment_id))],
+          count: own.length,
+          ...(proposal.decision !== null ? { decision: proposal.decision as "accepted" | "dropped" } : {}),
+          ...(proposal.dimension_id !== null ? { dimension_id: proposal.dimension_id } : {}),
+          ...(proposal.drop_reason !== null ? { drop_reason: proposal.drop_reason } : {}),
+        };
+      }),
+  }));
 }
 
 /** Maps a raw `calibration_records` row to a CalibrationRecord. */

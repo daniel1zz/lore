@@ -18,6 +18,8 @@
  *     parse, not by the model — mirrors assessment.ts's llmAssessmentOutputSchema split)
  *   - reviewJudgmentSchema / ReviewJudgment — full persisted shape (llm output + identity
  *     + judge metadata + kind), stored one row per judgment in `review_judgments`
+ *   - templateDimensionVerdictSchema / missingDimensionFindingSchema — prompt v9's per-template-dimension verdicts and
+ *     "no dimension asks this" findings (`dimension_verdicts`, `missing_dimensions`, plus `template_ref` once persisted)
  *   - NewReviewJudgment — ReviewJudgment minus {id, created_at, created_by}, with `kind`
  *     made OPTIONAL again (see @invariant below); the AIProviderService.judgeDoc/
  *     probeStaleness → JudgmentService.record hand-off shape (SPEC-034 §4, SPEC-044 D3/D4)
@@ -171,6 +173,36 @@ export const supersededCandidateSchema = z.object({
 /** Derived TypeScript type for a superseded-candidate nomination. */
 export type SupersededCandidate = z.infer<typeof supersededCandidateSchema>;
 
+// ─── Per-Dimension Verdicts + Missing Dimensions (prompt v9) ────────────────
+
+/** The verdict a v9 judge reaches on ONE dimension of the document's pinned template. */
+export const TEMPLATE_DIMENSION_VERDICTS = ["pass", "fail", "unclear"] as const;
+export type TemplateDimensionVerdictValue = (typeof TEMPLATE_DIMENSION_VERDICTS)[number];
+
+/**
+ * One judgment of one template dimension (spec-every-document-is-stored-as-structured-fields-validated-by, Scope
+ * "Judge"). Stored one row per (judgment, dimension) in `review_judgment_dimensions` (migration-048).
+ */
+export const templateDimensionVerdictSchema = z.object({
+  dimension_id: z.string().min(1),
+  verdict: z.enum(TEMPLATE_DIMENSION_VERDICTS),
+  reason: z.string().min(1),
+  /** What in the document grounds the verdict; may be empty for `unclear`. */
+  evidence: z.string(),
+});
+export type TemplateDimensionVerdict = z.infer<typeof templateDimensionVerdictSchema>;
+
+/**
+ * A question the document ought to answer that NO dimension of its template asks (a `missing_dimension` finding).
+ * `same_as` names an existing pending proposal (the ids the v9 prompt lists) the judge considers the same gap.
+ */
+export const missingDimensionFindingSchema = z.object({
+  question: z.string().trim().min(1),
+  reason: z.string().optional(),
+  same_as: z.string().min(1).optional(),
+});
+export type MissingDimensionFinding = z.infer<typeof missingDimensionFindingSchema>;
+
 // ─── Shared Shape + Escalate Invariant ──────────────────────────────────────
 
 /**
@@ -227,6 +259,14 @@ const reviewJudgmentBaseShape = z.object({
    * `probeStaleness` pass it through verbatim, never re-deriving it.
    */
   superseded_candidate: supersededCandidateSchema.optional(),
+  /**
+   * v9 only: one verdict per dimension of the document's pinned template. The judge emits it; `judgeDoc` then COMPLETES
+   * it against the template (a dimension the judge left out becomes `unclear`, never `pass`; an unknown or repeated id is
+   * dropped), so the stored list always has exactly one entry per applicable dimension. Absent for v1-v8 judgments.
+   */
+  dimension_verdicts: z.array(templateDimensionVerdictSchema).optional(),
+  /** v9 only: questions no dimension of the template asks. Each becomes a proposal in the template's pending revision. */
+  missing_dimensions: z.array(missingDimensionFindingSchema).optional(),
 });
 
 /**
@@ -342,6 +382,8 @@ export const reviewJudgmentSchema = reviewJudgmentBaseShape
      * explicitly (`newJudgment.kind ?? "review"`) before this schema ever sees it.
      */
     kind: z.enum(REVIEW_JUDGMENT_KINDS).optional(),
+    /** `slug@version` of the template the judgment was made against (v9); absent for a legacy document. */
+    template_ref: z.string().min(1).optional(),
     created_at: z.string(),
     created_by: z.string(),
   })

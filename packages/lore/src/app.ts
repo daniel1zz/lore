@@ -128,6 +128,7 @@ import { SessionService } from "./service/session-service.js";
 import { ValidityService } from "./service/validity-service.js";
 import { DriftCheckService } from "./service/drift-check-service.js";
 import { TemplateService } from "./service/template-service.js";
+import { TemplateGrowthService } from "./service/template-growth-service.js";
 import { OutlineSectionsRetireMigrationService } from "./service/outline-sections-retire-migration-service.js";
 import { OrdinalMigrationService } from "./service/ordinal-migration-service.js";
 import { SpecParentMigrationService } from "./service/spec-parent-migration-service.js";
@@ -646,6 +647,11 @@ export interface App {
    */
   templateService?: TemplateService;
   /**
+   * The single pending revision of a template and its review (accepted proposals become dimensions). Judgments feed it
+   * through `JudgmentService.record`. Optional for the same hand-built-App reason as `templateService`.
+   */
+  templateGrowthService?: TemplateGrowthService;
+  /**
    * SPEC-102 OPTIONAL read/deny-instrumentation port — the SAME instance
    * wired into `CorpusService`/`GateEnforcer` (service-layer deny). Exposed
    * on `App` so the CLI adapter can fire the HOOK-layer deny trace
@@ -1077,6 +1083,9 @@ function buildAppFromSqlite(
     // reason: TemplateService is a read-only reader of corpus template documents (store only), same DI shape as
     // DriftCheckService; structured-documents T2.
     templateService: new TemplateService(store),
+    // reason: the review that turns a template's accepted proposals into dimensions edits the template document, so it takes the
+    // composed CorpusService (the one write route); stateless otherwise. structured-documents T8.
+    templateGrowthService: new TemplateGrowthService(store, new TemplateService(store), corpusService),
     // reason: VerificationProjectionService depends only on StoreInterface plus the
     // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
     // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.
@@ -1528,6 +1537,9 @@ function buildAppFromTurso(
     // reason: TemplateService is a read-only reader of corpus template documents (store only), same DI shape as
     // DriftCheckService; structured-documents T2.
     templateService: new TemplateService(store),
+    // reason: the review that turns a template's accepted proposals into dimensions edits the template document, so it takes the
+    // composed CorpusService (the one write route); stateless otherwise. structured-documents T8.
+    templateGrowthService: new TemplateGrowthService(store, new TemplateService(store), corpusService),
     // reason: VerificationProjectionService depends only on StoreInterface plus the
     // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
     // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.
