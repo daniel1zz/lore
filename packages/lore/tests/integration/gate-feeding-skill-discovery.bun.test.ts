@@ -106,7 +106,6 @@ const NO_PARENT_PAYLOAD_WITH_PARENT: Record<string, unknown> = {
   type: "spec",
   title: "A spec that names a parent",
   parent_id: "no-such-parent",
-  content: "just some prose, no headings at all",
 };
 
 async function withApp<T>(fn: (app: App) => Promise<T>): Promise<T> {
@@ -238,6 +237,17 @@ describe("lore gate spec-create — the rule is the approved template, never a s
       title: "Custom write-spec rules",
       appliesTo: "spec",
       content: "## Rule\n\nMust not stand in for the template.",
+    });
+    // reason: the skill-doc fixture above seeds the shipped templates (a bare corpus gets them from ensureRequirementsDocId),
+    // so "no template approved" needs them removed explicitly (as removeSeededTemplates in tests/helpers/structured-corpus.ts
+    // does for a rig, which this suite does not build).
+    await withApp(async (app) => {
+      const templates = await app.corpusService.list({ type: "template", limit: 500 } as never);
+      if (!templates.ok) throw new Error(`list templates failed: ${JSON.stringify(templates.error)}`);
+      for (const template of templates.value.docs) {
+        const removed = await app.corpusService.delete(template.id, true);
+        if (!removed.ok) throw new Error(`remove seeded template ${template.slug} failed: ${JSON.stringify(removed.error)}`);
+      }
     });
 
     const result = await runGateSpecCreate(NO_PARENT_PAYLOAD_WITH_PARENT);
