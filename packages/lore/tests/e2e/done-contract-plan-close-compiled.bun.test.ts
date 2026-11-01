@@ -1,4 +1,5 @@
 // @reads assets/project/lore-config-template.yaml
+// @reads assets/templates/**
 // @reads assets/project/reference-transaction
 // @spawns packages/lore/src/index.ts
 // @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
@@ -471,6 +472,8 @@ beforeAll(async () => {
   fixture.git(["add", "package.json"]);
   fixture.git(["commit", "-q", "-m", "fixture package scripts"]);
   await citeSpecViaAsyncCli((args) => fixture.mustRun(args), fixture.dir, undefined, fixture.spec, "AC-FX-1");
+  // every plan close files its milestone review from the corpus's approved knowledge/milestone-review template
+  await fixture.mustRun(["migrate", "templates", "--apply"]);
   await fixture.mustRun(["approve", fixture.spec]);
   execFileSync("sh", ["-c", "printf '.claude/\\n' >> .git/info/exclude"], { cwd: fixture.dir });
   installShippedGuard(fixture.dir, join(mkdtempSync(join(tmpdir(), "dcs2-pc-guard-")), "hooks"));
@@ -781,12 +784,13 @@ describe("AC-DCS2-20: plan close holds its own plan-scoped lease and never block
     // a close of another plan is not blocked by the held one
     const knownRuns = new Set(reviewBatchRuns().map((run) => run.id));
     const free = await closablePlan("Close free plan FREEPASS", "pc20f");
-    // reason: since BR-1511 the landing that made the plan closable starts its own batch (the old live-lease start-nothing path is gone); it
-    // answers FREEPASS at once and leaves the plan open, but it holds the plan's lease while it runs, so the by-hand close waits for it to end
-    await eventually(() => {
-      const started = reviewBatchRuns().filter((run) => !knownRuns.has(run.id));
-      return started.length >= 1 && started.every((run) => run.ended_at !== null);
-    }, "the batch the landing of the free plan started to end");
+    // reason: BR-1532 — one review batch runs per machine. The batch of the held plan is still running (its assess is held), so it holds
+    // `batch:<machine>` and the landing that made this plan closable starts NO batch of its own: the running batch re-reads the plans that
+    // need review when its pass ends and covers this one. The by-hand close of this plan therefore finds no batch holding its plan lease.
+    expect(
+      reviewBatchRuns().filter((run) => !knownRuns.has(run.id)),
+      "a landing under the live batch starts no batch",
+    ).toEqual([]);
     expect(planLeaseFiles(), "the first close still holds its lease").toContain(leaseFile);
     const closedFree = await spawned(fixture.dir, ["plan", "close", free], OWNER, withGh());
     expect(closedFree.exitCode, closedFree.text).toBe(0);
@@ -795,8 +799,9 @@ describe("AC-DCS2-20: plan close holds its own plan-scoped lease and never block
     // the holder ends: release the double and the plan closes
     rmSync(hold, { force: true });
     await eventually(() => statusOf(holdPlan) === "archived", "the held plan to archive");
-    // two batches ran: the held plan's, and the one the landing that went through meanwhile started
-    await batchesEnded(runsBefore + 2);
+    // ONE batch ran (BR-1532): the held plan's. The landings that went through meanwhile started none; it covered their plans on its re-read
+    await batchesEnded(runsBefore + 1);
+    expect(reviewBatchRuns().length, "no landing under the live batch started a second one").toBe(runsBefore + 1);
     expect(planLeaseFiles(), "every lease is removed when the closes end").toEqual([]);
 
     // the plan of the landing that went through meanwhile is complete: close it, so no later landing of this file has a plan waiting

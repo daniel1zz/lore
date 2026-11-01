@@ -4,6 +4,7 @@
 // @reads tsconfig.base.json
 // @reads bun.lock
 // @reads bunfig.toml
+// @reads vitest.node-files.ts
 // @reads packages/lore/src/service/dispatch-service.ts
 // @spawns dist/lore
 // @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
@@ -243,7 +244,8 @@ describe("lore dispatch prints the whole subagent prompt from the stored contrac
       mkdirSync(join(copy, dir), { recursive: true });
       execFileSync("rsync", ["-a", "--exclude", "node_modules", "--exclude", "/tests", "--exclude", ".git", `${join(REPO_ROOT, dir)}/`, `${join(copy, dir)}/`]);
     }
-    for (const file of ["package.json", "tsconfig.json", "tsconfig.base.json", "bun.lock", "bunfig.toml"]) {
+    // vitest.node-files.ts: scripts/changed-tests.ts imports it, and the build step of the copy loads that script
+    for (const file of ["package.json", "tsconfig.json", "tsconfig.base.json", "bun.lock", "bunfig.toml", "vitest.node-files.ts"]) {
       if (existsSync(join(REPO_ROOT, file))) copyFileSync(join(REPO_ROOT, file), join(copy, file));
     }
     symlinkSync(join(REPO_ROOT, "node_modules"), join(copy, "node_modules"));

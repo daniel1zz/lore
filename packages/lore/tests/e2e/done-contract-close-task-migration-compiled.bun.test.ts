@@ -196,6 +196,8 @@ beforeAll(async () => {
   fixture.git(["add", "package.json"]);
   fixture.git(["commit", "-q", "-m", "fixture package scripts"]);
   await citeSpecViaAsyncCli((args) => fixture.mustRun(args), fixture.dir, undefined, fixture.spec, "AC-FX-1");
+  // the plan close the migration runs files its milestone review from the corpus's approved knowledge/milestone-review template
+  await fixture.mustRun(["migrate", "templates", "--apply"]);
   await fixture.mustRun(["approve", fixture.spec]);
   execFileSync("sh", ["-c", "printf '.claude/\\n' >> .git/info/exclude"], { cwd: fixture.dir });
   installShippedGuard(fixture.dir, join(mkdtempSync(join(tmpdir(), "dcs2-13-guard-")), "hooks"));
