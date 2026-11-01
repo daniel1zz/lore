@@ -13,6 +13,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { templatedFieldsArgs } from "./templated-create.js";
 
 /** Runs `lore <args>` in the corpus under test; returns stdout; throws when the command fails. */
 export type LoreRunner = (args: string[]) => string;
@@ -63,9 +64,9 @@ export function ensureLiveRuleViaCli(lore: LoreRunner, corpusKey: string, prdSlu
   const known = ruleByCorpus.get(corpusKey);
   if (known !== undefined) return known;
   prdSlug ??= firstPrdSlug(lore);
-  const root = slugOf(lore(["baseline", "add", prdSlug, "--node", "root", "--label", "Root", "--title", "Fixture Root"]));
-  const branch = slugOf(lore(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "Fixture Branch"]));
-  const leaf = slugOf(lore(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "Fixture Leaf"]));
+  const root = slugOf(lore(["baseline", "add", prdSlug, "--node", "root", "--label", "Root", "--title", "Fixture Root", ...templatedFieldsArgs("baseline", { kind: "root" })]));
+  const branch = slugOf(lore(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "Fixture Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })]));
+  const leaf = slugOf(lore(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "Fixture Leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })]));
   const out = lore([
     "rule", "add", leaf, "--statement", "a live rule the fixture specs cite",
     "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one",
@@ -140,9 +141,9 @@ export async function ensureLiveRuleViaAsyncCli(lore: AsyncLoreRunner, corpusKey
     prdSlug = parsed.data?.docs?.[0]?.slug;
     if (prdSlug === undefined) throw new Error("live-rule fixture needs a PRD in the corpus and found none");
   }
-  const root = slugOf(await lore(["baseline", "add", prdSlug, "--node", "root", "--label", "Root", "--title", "Fixture Root"]));
-  const branch = slugOf(await lore(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "Fixture Branch"]));
-  const leaf = slugOf(await lore(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "Fixture Leaf"]));
+  const root = slugOf(await lore(["baseline", "add", prdSlug, "--node", "root", "--label", "Root", "--title", "Fixture Root", ...templatedFieldsArgs("baseline", { kind: "root" })]));
+  const branch = slugOf(await lore(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "Fixture Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })]));
+  const leaf = slugOf(await lore(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "Fixture Leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })]));
   const out = await lore([
     "rule", "add", leaf, "--statement", "a live rule the fixture specs cite",
     "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one",

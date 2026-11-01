@@ -3,6 +3,7 @@
 // @reads packages/lore/src/adapters/cli/commands/rule.ts
 // @reads scripts/check-unclaimed-oracle.ts
 // @spawns packages/lore/src/index.ts
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 // @spawns-external git builds throwaway git repositories the fixtures run against
 /**
  * task-t14-shared-test-helpers-and-fixtures-create-templated: the shared test helpers create their documents with FIELDS
@@ -114,7 +115,7 @@ describe("shared helpers create templated documents with the switch ON", () => {
         },
         fixture.dir,
         "probe-branch",
-        "check",
+        "code",
       );
       expect(claimed).toMatch(/^task-/);
     } finally {

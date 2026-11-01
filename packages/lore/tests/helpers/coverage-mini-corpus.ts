@@ -20,6 +20,7 @@ import { actedStore } from "../live-invocation";
 import { pendingCountOf } from "../../src/service/baseline-pending";
 import { approvePending } from "./approve-baseline";
 import { runLoreInProcess } from "./run-lore-in-process";
+import { templatedFieldsArgs } from "./templated-create";
 import { sessionEnvFor } from "./session-actor";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -77,7 +78,7 @@ const MINI_SOURCES: Readonly<Record<string, string>> = {
   "package.json": JSON.stringify({ name: "mini-checkout", private: true, scripts: { install: "true", build: "true", typecheck: "true" } }),
 };
 
-export async function buildMiniCorpus(opts: { autoApprove?: boolean } = {}): Promise<MiniCorpus> {
+export async function buildMiniCorpus(opts: { autoApprove?: boolean; requireCreate?: boolean } = {}): Promise<MiniCorpus> {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "bcr-mini-")));
   if (dir.startsWith(REPO_ROOT)) throw new Error("fixture must live outside the repo");
   const home = join(dir, ".home");
@@ -110,12 +111,13 @@ export async function buildMiniCorpus(opts: { autoApprove?: boolean } = {}): Pro
   saveConfig(dir, {
     project: { name: "bcr-mini", author: "tester" },
     ai: { provider: "claude-cli", providers: { "claude-cli": { command: aiScript, args: [], timeout_ms: 5000 } }, templates: {}, telemetry: false },
+    ...(opts.requireCreate === true ? { workflow: { structured_documents: { require_create: true } } } : {}),
   } as never);
-  const prd = slugOf(await must(["create", "prd", "--title", "BCR PRD", "--content", "root", "--no-ai"]));
-  const root = slugOf(await must(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "BCR Root"]));
-  const branch = slugOf(await must(["baseline", "add", root, "--node", "branch", "--label", "br", "--title", "BCR Branch"]));
-  const leafA = slugOf(await must(["baseline", "add", branch, "--node", "leaf", "--label", "la", "--title", "BCR Leaf A"]));
-  const leafB = slugOf(await must(["baseline", "add", branch, "--node", "leaf", "--label", "lb", "--title", "BCR Leaf B"]));
+  const prd = slugOf(await must(["create", "prd", "--title", "BCR PRD", "--no-ai", ...templatedFieldsArgs("prd")]));
+  const root = slugOf(await must(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "BCR Root", ...templatedFieldsArgs("baseline", { kind: "root" })]));
+  const branch = slugOf(await must(["baseline", "add", root, "--node", "branch", "--label", "br", "--title", "BCR Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })]));
+  const leafA = slugOf(await must(["baseline", "add", branch, "--node", "leaf", "--label", "la", "--title", "BCR Leaf A", ...templatedFieldsArgs("baseline", { kind: "leaf" })]));
+  const leafB = slugOf(await must(["baseline", "add", branch, "--node", "leaf", "--label", "lb", "--title", "BCR Leaf B", ...templatedFieldsArgs("baseline", { kind: "leaf" })]));
   const ruleArgs = ["--confidence", "established", "--enforced-by", "guaranteed", "--example", "fixture example"];
   const ruleOf = new Map<string, string>();
   for (const leaf of [leafA, leafB]) {

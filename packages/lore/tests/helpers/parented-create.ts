@@ -17,6 +17,7 @@
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
 import type { CreateDocInput, DocId, DocRecord } from "@lore/core";
 import { ulid } from "ulidx";
+import { templatedExtra, templatedFieldsArgs } from "./templated-create.js";
 
 /** Title of the requirements document the helper creates when the corpus holds none. */
 export const FIXTURE_REQUIREMENTS_TITLE = "Fixture Requirements";
@@ -52,10 +53,10 @@ export function asCliRun(result: { readonly stdout: string; readonly stderr: str
 }
 
 const LIST_PRD_ARGS = ["list", "--type", "prd", "--json"];
-const CREATE_PRD_ARGS = [
-  "create", "prd", "--title", FIXTURE_REQUIREMENTS_TITLE, "--no-ai", "--json",
-  "--content", "Fixture requirements document: the parent for fixtures with no natural parent.",
-];
+/** The create command of the fixture requirements document: structured (fields from the approved prd template), no body. */
+function createPrdArgs(): string[] {
+  return ["create", "prd", "--title", FIXTURE_REQUIREMENTS_TITLE, "--no-ai", "--json", ...templatedFieldsArgs("prd")];
+}
 
 function slugFromList(listed: CliRunResult): string | undefined {
   if (listed.exitCode !== 0) throw new Error(`list prd failed (exit ${String(listed.exitCode)}): ${listed.stderr}`);
@@ -82,12 +83,12 @@ function slugFromCreate(made: CliRunResult): string {
  *   runLore(["create", "plan", "--title", "P", "--parent", parent, "--no-ai"], tmpDir);
  */
 export function ensureRequirementsDocSlug(run: CliRunner): string {
-  return slugFromList(run(LIST_PRD_ARGS)) ?? slugFromCreate(run(CREATE_PRD_ARGS));
+  return slugFromList(run(LIST_PRD_ARGS)) ?? slugFromCreate(run(createPrdArgs()));
 }
 
 /** {@link ensureRequirementsDocSlug} for an async `lore` driver. */
 export async function ensureRequirementsDocSlugAsync(run: AsyncCliRunner): Promise<string> {
-  return slugFromList(await run(LIST_PRD_ARGS)) ?? slugFromCreate(await run(CREATE_PRD_ARGS));
+  return slugFromList(await run(LIST_PRD_ARGS)) ?? slugFromCreate(await run(createPrdArgs()));
 }
 
 /**
@@ -108,7 +109,7 @@ export async function ensureRequirementsDocId(service: CorpusParentSource): Prom
   const made = await service.create({
     type: "prd",
     title: FIXTURE_REQUIREMENTS_TITLE,
-    content: "Fixture requirements document: the parent for fixtures with no natural parent.",
+    extra: templatedExtra("prd"),
   } as CreateDocInput);
   if (!made.ok) throw new Error(`create fixture prd failed: ${JSON.stringify(made.error)}`);
   return made.value.id;
