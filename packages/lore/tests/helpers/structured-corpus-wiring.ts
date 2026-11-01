@@ -5,7 +5,7 @@
  *   creates structured documents works against it, and hand out a seeded `TemplateService` for a subject that only reads templates.
  *   Kept apart from `structured-docs.ts` because that file reaches the composition root (`bun:sqlite`), which a Node-run test file
  *   must not import; this file imports only services, the in-memory store and the shipped-seed reader.
- * Public surface: {@link wireStructuredCorpus}, {@link seededTemplateReader}, {@link fillTemplate}.
+ * Public surface: {@link wireStructuredCorpus}, {@link seededTemplateReader}, {@link fillTemplate}, {@link fillShippedTemplate}.
  * Invariants:
  *   - Seeds come from the repository's `assets/templates/`; a test using either function declares `// @reads assets/templates/**`.
  *   - A refused fixture write throws with the error; it never continues.
@@ -61,6 +61,23 @@ export async function seededTemplateReader(): Promise<TemplateService> {
   const reader = corpus.templateReader;
   if (reader === undefined) throw new Error("seededTemplateReader: the corpus has no template reader after wiring");
   return reader;
+}
+
+/**
+ * Valid fields and dimensions for a (type, kind), filled from the SHIPPED seed (no corpus needed): for a test that writes a
+ * fields file or a front matter by hand and drives a CLI.
+ *
+ * @param docType - the template's `doc_type`
+ * @param kind - the template's kind, when the type has kinds
+ * @returns `{fields, dimensions}`
+ * @throws when the seeds are unreadable or none matches
+ */
+export function fillShippedTemplate(docType: string, kind?: string): { fields: Record<string, unknown>; dimensions: DimensionAnswer[] } {
+  const seeds = readShippedTemplateSeeds(fileURLToPath(new URL("../../../../assets", import.meta.url)));
+  if (!seeds.ok) throw new Error(`fillShippedTemplate: ${JSON.stringify(seeds.error)}`);
+  const seed = seeds.value.find((candidate) => candidate.template.doc_type === docType && candidate.template.kind === kind);
+  if (seed === undefined) throw new Error(`fillShippedTemplate: no shipped seed for ${docType}${kind === undefined ? "" : `/${kind}`}`);
+  return fillTemplate(seed.template, kind);
 }
 
 function isNode(value: unknown): value is JsonSchemaNode {

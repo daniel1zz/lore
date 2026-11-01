@@ -17,8 +17,8 @@
  * corpus (`mkdtemp` + `lore init`), never this repo's `.lore/`.
  *
  * Falsifiers (mutations run by the author, see task evidence):
- *   - buildIssueDescriptionBlock drops the `**Repro command:**` line
- *   - buildIssueDescriptionBlock swaps `**Expected:**` and `**Actual:**`
+ *   - renderIssueReportBody (the approved `issue-report` template's render) drops the `### Reproduction command` field
+ *   - renderIssueReportBody swaps the `## Expected` and `## Actual` sections
  *   - the command stops printing the issue address / number
  */
 
@@ -124,6 +124,9 @@ exec /bin/sh ${quote(join(dir, "gh-payload"))} "$@"
 function prepareCorpus(root: string): void {
   const initResult = run(["init"], root);
   if (initResult.exitCode !== 0) throw new Error(`'lore init' failed (exit ${initResult.exitCode}): ${initResult.stderr}`);
+  // BR-1528: the filed body is rendered from the approved `issue-report` template, so the corpus carries the seeds.
+  const seededResult = run(["migrate", "templates", "--apply"], root);
+  if (seededResult.exitCode !== 0) throw new Error(`'lore migrate templates --apply' failed (exit ${seededResult.exitCode}): ${seededResult.stderr}`);
   const prdResult = run(
     [
       "create",
@@ -204,11 +207,12 @@ describe("BR-494 filed issue body", () => {
     expect(closeIdx).toBeGreaterThan(0);
     const afterBlock = filedBody.slice(closeIdx + "\n---".length);
 
+    // BR-1528: the body is rendered from the approved `issue-report` template: one `##` section per template section, in its order
     const positions = [
-      afterBlock.indexOf(DESCRIPTION),
-      afterBlock.indexOf(`**Expected:** ${EXPECTED}`),
-      afterBlock.indexOf(`**Actual:** ${ACTUAL}`),
-      afterBlock.indexOf(`**Repro command:**\n\`\`\`\n${REPRO}\n\`\`\``),
+      afterBlock.indexOf(`## Description\n\n${DESCRIPTION}`),
+      afterBlock.indexOf(`## Expected\n\n${EXPECTED}`),
+      afterBlock.indexOf(`## Actual\n\n${ACTUAL}`),
+      afterBlock.indexOf(`## Reproduction\n\n### Reproduction command\n\n${REPRO}`),
     ];
     for (const position of positions) expect(position).toBeGreaterThanOrEqual(0);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
@@ -217,7 +221,7 @@ describe("BR-494 filed issue body", () => {
   });
 
   it("each of expected, actual and repro command appears exactly once", () => {
-    for (const marker of ["**Expected:**", "**Actual:**", "**Repro command:**"]) {
+    for (const marker of ["## Expected", "## Actual", "### Reproduction command"]) {
       expect(filedBody.split(marker).length - 1, marker).toBe(1);
     }
   });
@@ -280,7 +284,7 @@ const FIX = "RI2-FIX change the thing";
 const PROSE_REPRO = "with an old fragment: lore integrate x";
 
 describe("AC-RI-2", () => {
-  it("a filing with every optional part records the sections once, in order, with a longer fence for a command containing backticks", () => {
+  it("a filing with every optional part records the template's sections once, in order, a command with backticks verbatim", () => {
     const { result, body } = fileInFreshCorpus([
       ...baseArgs("RI-2 all parts"),
       "--repro-command",
@@ -299,20 +303,20 @@ describe("AC-RI-2", () => {
     // `**Context:**` is attached by the context-attachment task (AC-RI-3/4/6), so it is absent here: no test file is named.
     const positions = [
       DESCRIPTION,
-      "**Expected:**",
-      "**Actual:**",
-      "**Repro command:**",
-      "**Repro steps:**",
-      "**Suggested fix:**",
-      "**Refs:**",
+      "## Expected",
+      "## Actual",
+      "### Reproduction command",
+      "### Reproduction steps",
+      "## Suggested fix",
+      "### References",
       "Reported by:",
     ].map((marker) => onlyOccurrence(body, marker));
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
 
-    expect(body).toContain(`**Repro command:**\n\`\`\`\`\n${REPRO_WITH_TICKS}\n\`\`\`\`\n`);
-    expect(body).toContain(`**Repro steps:**\n${STEPS}`);
-    expect(body).toContain(`**Suggested fix:**\n${FIX}`);
-    expect(body).toContain("**Refs:**\n- spec-one AC-1\n- #123\n");
+    expect(body).toContain(`### Reproduction command\n\n${REPRO_WITH_TICKS}`);
+    expect(body).toContain(`### Reproduction steps\n\n${STEPS}`);
+    expect(body).toContain(`## Suggested fix\n\n${FIX}`);
+    expect(body).toContain("### References\n\n- spec-one AC-1\n- #123");
     const parsed = parseIssueBody(body);
     expect(parsed.present).toBe(true);
     if (parsed.present) expect(parsed.fields.severity).toBe("high");
@@ -331,7 +335,7 @@ describe("AC-RI-2", () => {
     );
     const body = existsSync(recordedBodyPath) ? readFileSync(recordedBodyPath, "utf8") : "";
     expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
-    const positions = ["**Refs:**", "**Context:**", "Reported by:"].map((marker) => onlyOccurrence(body, marker));
+    const positions = ["### References", "**Context:**", "Reported by:"].map((marker) => onlyOccurrence(body, marker));
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
     expect(body).toContain("**Context:** tests/ctx.test.ts");
     expect(body).toContain("// @spec_ref spec-ri2-ctx ctx-marker-one");
@@ -340,7 +344,7 @@ describe("AC-RI-2", () => {
   it("a filing with none of the optional parts has no Repro, Suggested fix, Refs or Context heading and still round-trips", () => {
     const { result, body } = fileInFreshCorpus(baseArgs("RI-2 bare"));
     expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
-    for (const marker of ["**Repro command:**", "**Repro steps:**", "**Suggested fix:**", "**Refs:**", "**Context:**"]) {
+    for (const marker of ["### Reproduction command", "### Reproduction steps", "## Suggested fix", "### References", "**Context:**"]) {
       expect(body, marker).not.toContain(marker);
     }
     const parsed = parseIssueBody(body);

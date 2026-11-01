@@ -71,7 +71,7 @@ export interface SyncReport {
   /** Specs whose body matches corpus content exactly. */
   matched_clean: Array<{ file: string; slug: string }>;
   /** Specs found in corpus but whose body differs from the file. */
-  matched_drift: Array<{ file: string; slug: string; diff_chars: number }>;
+  matched_drift: Array<{ file: string; slug: string; diff_chars: number; structured?: true }>;
   /** Per-file parse/create errors. Other files still processed. */
   errors: Array<{ file: string; error: string }>;
 }
@@ -170,7 +170,7 @@ export class SyncDocsService {
     // ── Step 4: Process each parsed spec ─────────────────────────────────────
     const created: Array<{ file: string; slug: string }> = [];
     const matched_clean: Array<{ file: string; slug: string }> = [];
-    const matched_drift: Array<{ file: string; slug: string; diff_chars: number }> = [];
+    const matched_drift: Array<{ file: string; slug: string; diff_chars: number; structured?: true }> = [];
     const fileErrors: Array<{ file: string; error: string }> = [];
 
     for (const spec of parsedSpecs) {
@@ -200,7 +200,8 @@ export class SyncDocsService {
         const diff_chars = changes
           .filter((c) => c.added === true || c.removed === true)
           .reduce((sum, c) => sum + c.value.length, 0);
-          matched_drift.push({ file: spec.path, slug: existingSummary.slug, diff_chars });
+          // `structured`: the file's content is its `fields:` (compared as fields), so the fix is `lore set --fields-file`, never a body.
+          matched_drift.push({ file: spec.path, slug: existingSummary.slug, diff_chars, ...(spec.fields !== undefined ? { structured: true as const } : {}) });
         }
         continue;
       }
