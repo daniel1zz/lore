@@ -134,6 +134,8 @@ describe("lore baseline fidelity (CLI)", () => {
     expect(stored.extra).toMatchObject({ template_ref: "knowledge-research-template@1" });
     expect(stored.content).toContain("100.0% of 1 sampled citations judged faithful");
     expect(stored.content).toContain("## Findings");
+    // and the stored document passes the template's own check (fields valid, dimensions answered, refs resolving)
+    expect(runLore(["template", "check", out.data.doc.slug], "agent").exitCode).toBe(0);
   });
 
   it("STATE: a different judge reply changes the stored share (0 when the judge says not_faithful)", () => {

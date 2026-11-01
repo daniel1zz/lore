@@ -72,12 +72,12 @@ export async function seededTemplateReader(): Promise<TemplateService> {
  * @returns `{fields, dimensions}`
  * @throws when the seeds are unreadable or none matches
  */
-export function fillShippedTemplate(docType: string, kind?: string): { fields: Record<string, unknown>; dimensions: DimensionAnswer[] } {
+export function fillShippedTemplate(docType: string, kind?: string, refTarget?: string): { fields: Record<string, unknown>; dimensions: DimensionAnswer[] } {
   const seeds = readShippedTemplateSeeds(fileURLToPath(new URL("../../../../assets", import.meta.url)));
   if (!seeds.ok) throw new Error(`fillShippedTemplate: ${JSON.stringify(seeds.error)}`);
   const seed = seeds.value.find((candidate) => candidate.template.doc_type === docType && candidate.template.kind === kind);
   if (seed === undefined) throw new Error(`fillShippedTemplate: no shipped seed for ${docType}${kind === undefined ? "" : `/${kind}`}`);
-  return fillTemplate(seed.template, kind);
+  return fillTemplate(seed.template, kind, refTarget);
 }
 
 function isNode(value: unknown): value is JsonSchemaNode {
@@ -128,14 +128,14 @@ function fillObject(schema: JsonSchemaNode): Record<string, unknown> {
  * @param kind - the document kind, narrowing which dimensions apply
  * @returns `{fields, dimensions}`
  */
-export function fillTemplate(template: Template, kind?: string): { fields: Record<string, unknown>; dimensions: DimensionAnswer[] } {
+export function fillTemplate(template: Template, kind?: string, refTarget = "AC-FIXTURE-1"): { fields: Record<string, unknown>; dimensions: DimensionAnswer[] } {
   const dimensions = template.dimensions
     .filter((dimension) => dimension.applies_to === undefined || kind === undefined || dimension.applies_to.includes(kind))
     .map((dimension): DimensionAnswer => ({
       id: dimension.id,
       status: "handled",
       answer: `Answered for the ${dimension.id} dimension in a test fixture.`,
-      refs: dimension.needs_refs === true ? ["AC-FIXTURE-1"] : [],
+      refs: dimension.needs_refs === true ? [refTarget] : [],
     }));
   return { fields: fillObject(template.fields as JsonSchemaNode), dimensions };
 }
