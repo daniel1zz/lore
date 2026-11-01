@@ -183,7 +183,7 @@ export default defineLoreCommand({
       printLine(inv.io.stdout, `  Database: ${join(loreDir, "lore.db")}`);
       printLine(inv.io.stdout, `  Config:   ${join(loreDir, "config.yaml")}`);
       printLine(inv.io.stdout, "");
-      printLine(inv.io.stdout, "Run `lore create prd --title \"My Project\"` to add your first document.");
+      printLine(inv.io.stdout, "Add your first document: `lore template show prd --blank > prd.yaml`, fill it, then `lore create prd --title \"My Project\" --fields-file prd.yaml`.");
     };
 
     const outcome = armedBox.outcome;

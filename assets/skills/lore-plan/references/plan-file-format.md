@@ -4,7 +4,7 @@ Plans and tasks are BOTH typed lore docs addressed by slug (e.g. `plan-user-auth
 
 ## Plan Document Content Structure
 
-The plan doc's content (`lore create plan --parent <spec it implements> --content-file ...`) contains:
+The plan doc is created structured: `lore template show plan --blank > plan.yaml` → fill → `lore create plan --parent <spec it implements> --fields-file plan.yaml` (a supplied body is refused; the text is rendered from the fields and dimension answers, and `lore set <plan> --fields-file` revises it; a legacy unconverted plan is still edited with `--content-file`). The rendered content carries these sections, which you fill as fields/dimension answers:
 
 ```markdown
 # [Title]
@@ -149,8 +149,10 @@ Created via:
 lore create task --title "[Skill:implement] Build user authentication endpoint" \
   --parent plan-user-auth --plan-id plan-user-auth --phase "Phase 2: Implementation" \
   --anchor src/routes/auth.ts --anchor src/middleware/ \
-  --priority high --content-file /tmp/task.md
+  --priority high --fields-file /tmp/task.yaml
 ```
+
+(`lore template show task --blank > /tmp/task.yaml` prints the skeleton: objective, ac_scope, done_condition and the dimension answers carry the Estimate/Approach/AC content above.)
 
 ## Estimation Scale
 

@@ -213,7 +213,7 @@ See [jtbd-framework.md](jtbd-framework.md) for framework details.
 ## lore Protocol (MANDATORY)
 
 1. **Search first**: `lore search "{feature}" --type prd --json` — may need update, not new doc
-2. **Create**: `lore create prd --title '{feature}' --tags '{feature}' --content ...`
+2. **Create**: `lore template show prd --blank > f.yaml` → fill → `lore create prd --title '{feature}' --tags '{feature}' --fields-file f.yaml`
 3. **Link upstream (all that exist)**: `lore link <prd> <ost-doc> --type=implements` · `lore link <prd> <validation-ledger> --type=implements` · `lore link <prd> <benchmark-teardown> --type=relates-to`
 4. **Quality check**: Run checklist before marking `in-review` (`lore set <prd> --status in-review`)
 

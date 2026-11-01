@@ -217,7 +217,7 @@ describe('[Feature] quality evaluation', () => {
 - Archive per-dimension score trends
 
 ### Step 9: PERSIST
-- Update the test-plan knowledge doc (`lore set <test-plan-slug> --content ...`) with eval results:
+- Update the test-plan knowledge doc (`lore set <test-plan-slug> --fields-file f.yaml`, results added to its fields) with eval results:
   ```
   ## Eval Results — eval ({date})
   - Tier: 1/2/3
