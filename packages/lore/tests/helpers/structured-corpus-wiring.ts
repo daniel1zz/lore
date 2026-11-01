@@ -5,7 +5,7 @@
  *   creates structured documents works against it, and hand out a seeded `TemplateService` for a subject that only reads templates.
  *   Kept apart from `structured-docs.ts` because that file reaches the composition root (`bun:sqlite`), which a Node-run test file
  *   must not import; this file imports only services, the in-memory store and the shipped-seed reader.
- * Public surface: {@link wireStructuredCorpus}, {@link seededTemplateReader}.
+ * Public surface: {@link wireStructuredCorpus}, {@link seededTemplateReader}, {@link fillTemplate}.
  * Invariants:
  *   - Seeds come from the repository's `assets/templates/`; a test using either function declares `// @reads assets/templates/**`.
  *   - A refused fixture write throws with the error; it never continues.
@@ -13,7 +13,7 @@
  */
 
 import { fileURLToPath } from "node:url";
-import type { LoreError, Result } from "@lore/core";
+import type { DimensionAnswer, JsonSchemaNode, LoreError, Result, Template } from "@lore/core";
 import { readShippedTemplateSeeds } from "../../src/adapters/cli/template-seeds.js";
 import { CorpusService } from "../../src/service/corpus-service.js";
 import { GateEnforcer } from "../../src/service/gate-enforcer.js";
@@ -61,4 +61,64 @@ export async function seededTemplateReader(): Promise<TemplateService> {
   const reader = corpus.templateReader;
   if (reader === undefined) throw new Error("seededTemplateReader: the corpus has no template reader after wiring");
   return reader;
+}
+
+function isNode(value: unknown): value is JsonSchemaNode {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function fillNode(schema: JsonSchemaNode | undefined): unknown {
+  if (schema === undefined) return "sample";
+  if (Array.isArray(schema["enum"]) && schema["enum"].length > 0) return schema["enum"][0];
+  if (schema["const"] !== undefined) return schema["const"];
+  const type = Array.isArray(schema["type"]) ? schema["type"][0] : schema["type"];
+  switch (type) {
+    case "object":
+      return fillObject(schema);
+    case "array": {
+      const minItems = typeof schema["minItems"] === "number" ? schema["minItems"] : 0;
+      const items = isNode(schema["items"]) ? schema["items"] : undefined;
+      return Array.from({ length: minItems }, () => fillNode(items));
+    }
+    case "integer":
+    case "number":
+      return typeof schema["minimum"] === "number" ? schema["minimum"] : 1;
+    case "boolean":
+      return false;
+    default: {
+      const max = typeof schema["maxLength"] === "number" ? schema["maxLength"] : undefined;
+      return max !== undefined ? "sample".slice(0, max) : "sample";
+    }
+  }
+}
+
+function fillObject(schema: JsonSchemaNode): Record<string, unknown> {
+  const required = new Set(Array.isArray(schema["required"]) ? (schema["required"] as unknown[]).filter((name): name is string => typeof name === "string") : []);
+  const properties = isNode(schema["properties"]) ? (schema["properties"] as Record<string, unknown>) : {};
+  const filled: Record<string, unknown> = {};
+  for (const [name, node] of Object.entries(properties)) {
+    if (required.has(name)) filled[name] = fillNode(isNode(node) ? node : undefined);
+  }
+  return filled;
+}
+
+/**
+ * Valid fields and dimension answers for a template: the minimum a create accepts. Values are minimal and deterministic:
+ * first enum member, `"sample"` strings cut to `maxLength`, the schema's `minimum` (or 1) for numbers, required properties
+ * only, `minItems` items per array; every applicable dimension is answered `handled`, with one ref where it needs refs.
+ *
+ * @param template - an approved template
+ * @param kind - the document kind, narrowing which dimensions apply
+ * @returns `{fields, dimensions}`
+ */
+export function fillTemplate(template: Template, kind?: string): { fields: Record<string, unknown>; dimensions: DimensionAnswer[] } {
+  const dimensions = template.dimensions
+    .filter((dimension) => dimension.applies_to === undefined || kind === undefined || dimension.applies_to.includes(kind))
+    .map((dimension): DimensionAnswer => ({
+      id: dimension.id,
+      status: "handled",
+      answer: `Answered for the ${dimension.id} dimension in a test fixture.`,
+      refs: dimension.needs_refs === true ? ["AC-FIXTURE-1"] : [],
+    }));
+  return { fields: fillObject(template.fields as JsonSchemaNode), dimensions };
 }

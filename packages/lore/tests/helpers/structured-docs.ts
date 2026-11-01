@@ -83,63 +83,9 @@ export function armRequireCreate(rig: StructuredRig): void {
   patchLoreConfig(rig.dir, { workflow: { structured_documents: { require_create: true } } });
 }
 
-function isNode(value: unknown): value is JsonSchemaNode {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function fillNode(schema: JsonSchemaNode | undefined): unknown {
-  if (schema === undefined) return "sample";
-  if (Array.isArray(schema["enum"]) && schema["enum"].length > 0) return schema["enum"][0];
-  if (schema["const"] !== undefined) return schema["const"];
-  const type = Array.isArray(schema["type"]) ? schema["type"][0] : schema["type"];
-  switch (type) {
-    case "object":
-      return fillObject(schema);
-    case "array": {
-      const minItems = typeof schema["minItems"] === "number" ? schema["minItems"] : 0;
-      const items = isNode(schema["items"]) ? schema["items"] : undefined;
-      return Array.from({ length: minItems }, () => fillNode(items));
-    }
-    case "integer":
-    case "number":
-      return typeof schema["minimum"] === "number" ? schema["minimum"] : 1;
-    case "boolean":
-      return false;
-    default: {
-      const max = typeof schema["maxLength"] === "number" ? schema["maxLength"] : undefined;
-      return max !== undefined ? "sample".slice(0, max) : "sample";
-    }
-  }
-}
-
-function fillObject(schema: JsonSchemaNode): Record<string, unknown> {
-  const required = new Set(Array.isArray(schema["required"]) ? (schema["required"] as unknown[]).filter((name): name is string => typeof name === "string") : []);
-  const properties = isNode(schema["properties"]) ? (schema["properties"] as Record<string, unknown>) : {};
-  const filled: Record<string, unknown> = {};
-  for (const [name, node] of Object.entries(properties)) {
-    if (required.has(name)) filled[name] = fillNode(isNode(node) ? node : undefined);
-  }
-  return filled;
-}
-
-/**
- * Valid fields and dimension answers for a template: the minimum a create accepts.
- *
- * @param template - an approved template
- * @param kind - the document kind, narrowing which dimensions apply
- * @returns `{fields, dimensions}`
- */
-export function fillTemplate(template: Template, kind?: string): { fields: Record<string, unknown>; dimensions: DimensionAnswer[] } {
-  const dimensions = template.dimensions
-    .filter((dimension) => dimension.applies_to === undefined || kind === undefined || dimension.applies_to.includes(kind))
-    .map((dimension): DimensionAnswer => ({
-      id: dimension.id,
-      status: "handled",
-      answer: `Answered for the ${dimension.id} dimension in a test fixture.`,
-      refs: dimension.needs_refs === true ? ["AC-FIXTURE-1"] : [],
-    }));
-  return { fields: fillObject(template.fields as JsonSchemaNode), dimensions };
-}
+// `fillTemplate` lives with the other runtime-neutral helpers (`structured-corpus-wiring.ts`); re-exported here.
+import { fillTemplate } from "./structured-corpus-wiring.js";
+export { fillTemplate };
 
 /** What {@link createStructured} takes: a create input without a body, plus optional overrides of the filled content. */
 export interface CreateStructuredInput extends Omit<CreateDocInput, "content"> {

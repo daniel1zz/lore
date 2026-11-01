@@ -215,12 +215,7 @@ export class SyncDocsService {
         ignoredParentNoted = true;
       }
 
-      if (opts.dryRun) {
-        // Dry-run: report what would be created but write nothing
-        created.push({ file: spec.path, slug: "(dry-run)" });
-        continue;
-      }
-
+      // reason: the refusal comes BEFORE the dry-run report, so a dry run never lists as "would create" a file the real run refuses.
       if (spec.fields === undefined || spec.body.trim() !== "") {
         fileErrors.push({
           file: spec.path,
@@ -230,6 +225,12 @@ export class SyncDocsService {
                 "add `fields:` and `dimensions:` (`lore template show spec --kind <kind> --blank` prints the skeleton)"
               : "create failed: the file declares `fields:` so its text is rendered from them; its markdown body must be empty",
         });
+        continue;
+      }
+
+      if (opts.dryRun) {
+        // Dry-run: report what would be created but write nothing
+        created.push({ file: spec.path, slug: "(dry-run)" });
         continue;
       }
 
