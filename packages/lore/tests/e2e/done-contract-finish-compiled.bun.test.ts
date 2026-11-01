@@ -281,6 +281,29 @@ describe("AC-DCS1-15: finish runs every oracle at the commit it read and keeps t
     expect(after.status).not.toBe("archived");
   });
 
+  it("AC-DCS1-15: a contract AC declared only by a spec the plan implements (not its parent) runs under finish: exit 0 and the output names ac:AC-IMPL-F (issue 622)", async () => {
+    useConfig(PASS_CONFIG);
+    const implemented = (await fixture.mustRun(["create", "spec", "--title", "Finish implemented spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] ?? "";
+    expect(implemented).not.toBe("");
+    await fixture.mustRun(["ac", "add", implemented, "AC-IMPL-F", "--statement", "Declared on the implemented spec only.", "--mode", "script", "--oracle", "test", "--command", "echo impl-f"]);
+    const plan = await fixture.createPlan("Finish implements plan");
+    await fixture.mustRun(["link", plan, implemented, "--type", "implements"]);
+    const slug = await fixture.createTask({ plan, kind: "code", title: "Finish implemented AC", anchors: ONE_ANCHORED, acScope: [] });
+    await fixture.mustRun(["scope", "add", slug, "AC-IMPL-F"]);
+    await fixture.mustRun(["approve", slug]);
+    const tree = addWorktree("implements");
+    await claimOn(slug, tree, "dcs1-fin-implements");
+    commitIn(tree, { "src/impl.ts": "export const impl = 1;\n" });
+    await redIn(tree, slug, "dcs1-fin-implements");
+
+    const out = await finishIn(tree, slug, "dcs1-fin-implements");
+    expect(out.exitCode, out.text).toBe(0);
+    expect(out.text).toContain("ac:AC-IMPL-F");
+    const row = (await rowsOf(slug)).find((candidate) => candidate.ac_ref === "AC-IMPL-F");
+    expect(row?.result).toBe("pass");
+    expect(row?.command).toBe("echo impl-f");
+  });
+
   it("AC-DCS1-15: the finished mark tracks the branch tip; a later commit leaves the claim unfinished in effect and a second finish binds to the new commit", async () => {
     useConfig(PASS_CONFIG);
     const plan = await fixture.createPlan("Finish again plan");

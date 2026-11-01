@@ -38,6 +38,7 @@ import {
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { type DocWritePort } from "./corpus-service.js";
+import { resolvePlanGoverningSpecs } from "./plan-governing-specs.js";
 import {
   compileDoneContract,
   contractAlreadyStored,
@@ -374,19 +375,9 @@ export class DoneContractService implements ApproveContractPort {
       const recorded = resolveRecordedGoverningSpec(task, all.value, `task "${task.slug}"`);
       if (recorded.ok) specs.push(recorded.value.spec);
     } else {
-      if (plan.parent_id !== null) {
-        const parent = await this.store.find(plan.parent_id);
-        if (!parent.ok) return parent;
-        if (parent.value !== null && parent.value.type === "spec") specs.push(parent.value);
-      }
-      const links = await this.store.findLinks(plan.id, "out");
-      if (!links.ok) return links;
-      for (const link of links.value) {
-        if (link.link_type !== "implements") continue;
-        const target = await this.store.find(link.to_id);
-        if (!target.ok) return target;
-        if (target.value !== null && target.value.type === "spec" && !specs.some((spec) => spec.id === target.value?.id)) specs.push(target.value);
-      }
+      const governing = await resolvePlanGoverningSpecs(this.store, plan);
+      if (!governing.ok) return governing;
+      specs.push(...governing.value);
     }
     const criteria: AcceptanceCriterion[] = [];
     for (const spec of specs) {

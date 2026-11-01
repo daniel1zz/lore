@@ -138,6 +138,7 @@ import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
 import { armMainTree, buildBaselineDeclarationPort } from "./adapters/cli/absent-declarations.js";
 import { DoneContractService } from "./service/done-contract-service.js";
+import { resolvePlanGoverningSpecs } from "./service/plan-governing-specs.js";
 import { DoneContractMigrationService } from "./service/done-contract-migration-service.js";
 import { CloseTaskMigrationService } from "./service/close-task-migration-service.js";
 import { ExecutionLogService } from "./service/execution-log-service.js";
@@ -1268,7 +1269,9 @@ function buildAppFromSqlite(
       undefined,
       buildStateBindingOccupancyPort(corpusService),
       worktreeRemovalService,
-    ).setOverrideDecisionPort(overrideDecisionPort),
+    )
+      .setOverrideDecisionPort(overrideDecisionPort)
+      .setGoverningSpecsPort((plan) => resolvePlanGoverningSpecs(store, plan)),
     // reason: ConfigService (SPEC-062 D1) — constructed over the SAME repoRoot
     // VerifyRunnerService/SeatService already receive (config lives at
     // "<repoRoot>/.lore/config.yaml"), not a store; the narrow appendAuditEntry
@@ -1719,7 +1722,9 @@ function buildAppFromTurso(
       undefined,
       buildStateBindingOccupancyPort(corpusService),
       worktreeRemovalService,
-    ).setOverrideDecisionPort(overrideDecisionPort),
+    )
+      .setOverrideDecisionPort(overrideDecisionPort)
+      .setGoverningSpecsPort((plan) => resolvePlanGoverningSpecs(store, plan)),
     // reason: ConfigService (SPEC-062 D1) — see buildAppFromSqlite's identical comment.
     configService: new ConfigService(repoRoot, store.appendAuditEntry.bind(store)),
     // reason: GlobalConfigService (SPEC-064 D1) — see buildAppFromSqlite's identical comment.
