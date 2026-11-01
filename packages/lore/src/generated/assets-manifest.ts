@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "ccd280ed024efcae19324ae5f68387b055dd512681b06594174f4165bdcd06da",
+  tree_digest: "8cff9c611f38576fb8ebe00c52593da0391fcd18e11b893afa7134d08b551fae",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "be7b99d5d1f72cf4ff8579ab09c2e42454c03ec0e0f9ba4e8fdb303b4a6cb73f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -400,6 +400,6 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "templates/spec-domain-overview.json", kind: "template", ownership: "managed", sha256: "374fa9dc8e12a6d9105ba022d12f592a35de9d0e81a2b827ef0811493fc22717" },
   { path: "templates/spec-feature.json", kind: "template", ownership: "managed", sha256: "681fcdeea903283e02bc185af65b0ae850f18f88c10fd28cd19118a64a55c2ef" },
   { path: "templates/spec-tech.json", kind: "template", ownership: "managed", sha256: "f07076a101f66313c16c1b2ab28c0fde486fc27de5573726959214fb4bb5faed" },
-  { path: "templates/task.json", kind: "template", ownership: "managed", sha256: "cbf701acaf78d2b97a3f6e0503f82ba50c0d92de952f7f99cbbeef5af7597245" },
+  { path: "templates/task.json", kind: "template", ownership: "managed", sha256: "336442b1c06d4bce4f1cc30182129dbfe3ea4b51cc57a24714bd70cb3971ef0d" },
   ],
 };

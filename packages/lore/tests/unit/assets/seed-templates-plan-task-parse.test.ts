@@ -72,9 +72,9 @@ describe("seed template task", () => {
   beforeEach(() => {
     task = load("task");
   });
-  it("HAPPY: parses as doc_type task v1 with refs-resolve", () => {
+  it("HAPPY: parses as doc_type task v2 with refs-resolve", () => {
     expect(task.doc_type).toBe("task");
-    expect(task.version).toBe(1);
+    expect(task.version).toBe(2);
     expect([...task.checks]).toEqual(["refs-resolve"]);
   });
   it("BOUNDARY: done-contract fields exist; kind is required, system-filled fields are optional", () => {
