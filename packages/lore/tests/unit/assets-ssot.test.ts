@@ -97,8 +97,6 @@ const DECLARED_FILES = [
   "skills/lore-ai-native-coding/references/typescript-conventions.md",
   // skills/lore-baseline (baseline authoring skill + node templates, Baseline slice 3a BL-8; installed by `setup --project`)
   "skills/lore-baseline/SKILL.md",
-  "skills/lore-baseline/templates/branch.md",
-  "skills/lore-baseline/templates/leaf.md",
   "skills/lore-ai-native-coding/references/zod-as-ssot.md",
   // skills/lore-design (vendored upstream workflow skill, 2026-07-17)
   "skills/lore-design/SKILL.md",

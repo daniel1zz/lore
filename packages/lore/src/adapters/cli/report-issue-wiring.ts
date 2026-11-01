@@ -803,7 +803,7 @@ export async function fileGithubIssue(
       field: "reporter_root_prd",
       message:
         "this corpus has no root PRD at all — 'reporter_root_prd' (Risk R1's identity mitigation) has nothing " +
-        "to publish. Create one (`lore create prd`) before filing.",
+        "to publish. Create one (`lore template show prd --blank`, fill it, `lore create prd --title <title> --fields-file <file>`) before filing.",
       value: ctx.consumerCorpusRoot,
       rule: "BR-493",
     });

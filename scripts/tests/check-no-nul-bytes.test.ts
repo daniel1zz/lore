@@ -26,8 +26,6 @@
 // @reads assets/skills/lore-auto-wire/scripts/fix-path.sh
 // @reads assets/skills/lore-autopilot/SKILL.md
 // @reads assets/skills/lore-baseline/SKILL.md
-// @reads assets/skills/lore-baseline/templates/branch.md
-// @reads assets/skills/lore-baseline/templates/leaf.md
 // @reads assets/skills/lore-best-practice/SKILL.md
 // @reads assets/skills/lore-biz-review/SKILL.md
 // @reads assets/skills/lore-bug-hunt/SKILL.md
