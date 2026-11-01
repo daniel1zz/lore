@@ -647,26 +647,74 @@ describe("AC-DCS2-19: land integrates the branch once no open code task of the p
     const branch = "integration/p19d";
     const plan = await planWithBranch("Land branch plan", branch);
     const a = await codeTask(plan, "a19d", { from: branch });
-    const b = await codeTask(plan, "b19d", { from: branch, finish: false });
+    // AC-DCF-5 (BR-1551): with an open code task unfolded the branch is never integrated, not even by naming it; that is asserted in
+    // the AC-DCF-5 test below. Here the only task folds, which lands the branch; naming the landed branch again is idempotent.
     expect((await land(a.slug)).exitCode).toBe(0);
-    const mainBefore = mainTip();
-    expect(mainBefore, "b is open and unfolded, so land A did not land the branch").toBe(mainTip());
+    const merged = mainTip();
+    expect(isAncestor(a.tip, merged)).toBe(true);
+    expect(await statusOf(a.slug)).toBe("archived");
 
     const out = await land(branch);
     expect(out.exitCode, out.text).toBe(0);
-    const merged = mainTip();
-    expect(merged).not.toBe(mainBefore);
-    expect(isAncestor(a.tip, merged)).toBe(true);
-    expect(await statusOf(a.slug)).toBe("archived");
-    // the unfolded task is not on the branch: untouched
-    expect(await statusOf(b.slug)).toBe("approved");
-    expect(isAncestor(b.tip, merged)).toBe(false);
+    expect(mainTip()).toBe(merged);
 
     const again = await land(branch);
     expect(again.exitCode, again.text).toBe(0);
     expect(mainTip()).toBe(merged);
     const absent = await land("integration/no-such-branch-dcs2");
     expect(absent.exitCode, absent.text).not.toBe(0);
+  });
+});
+
+// ───────────────────────────── AC-DCF-5 ─────────────────────────────
+
+describe("AC-DCF-5: a waiting integration branch names each unfolded task; only a fold or a reasoned deprecation clears it", () => {
+  it("AC-DCF-5: land T2 waits and names T3 with its unmet cause and the clearing commands; the branch never integrates while T3 is open; a reasoned deprecation clears it and the landing names T3 deprecated, not landed", async () => {
+    const branch = "integration/dcf5";
+    const plan = await planWithBranch("Waiting branch plan", branch);
+    const t1 = await codeTask(plan, "t1dcf5", { from: branch });
+    const t2 = await codeTask(plan, "t2dcf5", { from: branch });
+    const t3 = await codeTask(plan, "t3dcf5", { from: branch, finish: false });
+    const mainBefore = mainTip();
+
+    // T3 is unfinishable: finish refuses (exit 4) because its oracles cannot pass.
+    expect((await land(t1.slug)).exitCode).toBe(0);
+    const waiting = await land(t2.slug);
+    expect(waiting.exitCode, waiting.text).toBe(0);
+    expect(mainTip(), "main is unchanged while T3 is open").toBe(mainBefore);
+    expect(waiting.text, "the waiting output names T3").toContain(t3.slug);
+    expect(waiting.text, "with its unmet cause").toMatch(/not finished|unmet|no runner-attested pass/);
+    expect(waiting.text).toContain(`lore finish ${t3.slug}`);
+    expect(waiting.text).toContain("lore set");
+    expect(waiting.text).toContain("--correction");
+    expect(waiting.text).toContain(`lore set ${t3.slug} --status deprecated --reason`);
+
+    // naming the branch does not integrate it either
+    const refused = await land(branch);
+    expect(refused.exitCode, refused.text).not.toBe(0);
+    expect(refused.text).toContain(t3.slug);
+    expect(mainTip(), "main is unchanged: an open code task is unfolded").toBe(mainBefore);
+
+    // deprecating without a reason is a usage error; the task stays open
+    const bare = await fixture.run(["set", t3.slug, "--status", "deprecated"]);
+    expect(bare.exitCode, `${bare.stdout}\n${bare.stderr}`).toBe(2);
+    expect(await statusOf(t3.slug)).toBe("approved");
+
+    // a non-empty reason deprecates it, which clears the wait
+    const deprecated = await fixture.run(["set", t3.slug, "--status", "deprecated", "--reason", "T3 cannot finish; its work moves to another plan"]);
+    expect(deprecated.exitCode, `${deprecated.stdout}\n${deprecated.stderr}`).toBe(0);
+    expect(await statusOf(t3.slug)).toBe("deprecated");
+
+    const landed = await land(branch);
+    expect(landed.exitCode, landed.text).toBe(0);
+    const merged = mainTip();
+    expect(merged).not.toBe(mainBefore);
+    for (const task of [t1, t2]) {
+      expect(isAncestor(task.tip, merged)).toBe(true);
+      expect(await statusOf(task.slug)).toBe("archived");
+    }
+    expect(isAncestor(t3.tip, merged), "T3 was not landed").toBe(false);
+    expect(landed.text).toMatch(new RegExp(`${t3.slug}[^\\n]*deprecated[^\\n]*not landed`));
   });
 });
 
