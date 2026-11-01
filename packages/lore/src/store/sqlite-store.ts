@@ -91,6 +91,7 @@ import type {
   TraceDenyByCheckpoint,
   SuiteResultRecord,
   SuiteFileRunRecord,
+  JudgeVerdictRow,
   CheckOutcomeInput,
   CheckOutcomeStat,
   PendingAskInput,
@@ -173,6 +174,7 @@ import {
   buildNonLiveRuleRefusal,
   rowToSuiteResult,
   rowToSuiteFileRun,
+  rowToJudgeVerdict,
   suiteResultJsonColumns,
   type SuiteResultRow,
   type SuiteFileRunRow,
@@ -207,6 +209,7 @@ import { MIGRATION_045_SQL } from "./migrations/migration-045.js";
 import { MIGRATION_046_SQL } from "./migrations/migration-046.js";
 import { MIGRATION_047_ADD_COLUMNS, MIGRATION_047_SQL } from "./migrations/migration-047.js";
 import { MIGRATION_048_ADD_COLUMNS, MIGRATION_048_SQL } from "./migrations/migration-048.js";
+import { MIGRATION_049_SQL } from "./migrations/migration-049.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey, DecisionVersionQuery } from "./store-interface.js";
@@ -1166,6 +1169,20 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("ROLLBACK;");
         } catch {
           // reason: same as migration-019 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 49 && 49 <= ceiling) {
+      // reason: migration-049 creates judge_verdicts (BR-1535) in ONE BEGIN/COMMIT; a failure rolls back and leaves schema 48.
+      try {
+        this.db.exec(MIGRATION_049_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-043 — safe to ignore, the failure below is what to report.
         }
         throw error;
       }
@@ -4210,6 +4227,72 @@ export class SQLiteStore implements StoreInterface {
     try {
       const row = this.db.prepare("SELECT * FROM suite_results WHERE id = ?").get(id) as SuiteResultRow | null | undefined;
       return ok(row === null || row === undefined ? null : rowToSuiteResult(row));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async getJudgeVerdict(key: string, readAt: string): Promise<Result<JudgeVerdictRow | null, LoreError>> {
+    try {
+      // reason: one transaction, so a reader's last_read_at refresh and its read see the same row (BR-1535).
+      return ok(
+        this.db.transaction((): JudgeVerdictRow | null => {
+          this.db.run("UPDATE judge_verdicts SET last_read_at = ? WHERE key = ?", [readAt, key]);
+          const row = this.db.prepare("SELECT * FROM judge_verdicts WHERE key = ?").get(key) as Record<string, unknown> | null | undefined;
+          return row === null || row === undefined ? null : rowToJudgeVerdict(row);
+        })(),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async insertJudgeVerdictIfAbsent(row: JudgeVerdictRow): Promise<Result<JudgeVerdictRow, LoreError>> {
+    try {
+      return ok(
+        this.db.transaction((): JudgeVerdictRow => {
+          this.db.run(
+            `INSERT OR IGNORE INTO judge_verdicts (key, unit_kind, unit_id, raw_answer, provider, model, template_hash, first_review, created_at, last_read_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [row.key, row.unit_kind, row.unit_id, row.raw_answer, row.provider, row.model, row.template_hash, row.first_review, row.created_at, row.last_read_at],
+          );
+          return rowToJudgeVerdict(this.db.prepare("SELECT * FROM judge_verdicts WHERE key = ?").get(row.key) as Record<string, unknown>);
+        })(),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async replaceJudgeVerdictIfEquals(key: string, expectedRawAnswer: string, row: JudgeVerdictRow): Promise<Result<JudgeVerdictRow, LoreError>> {
+    try {
+      return ok(
+        this.db.transaction((): JudgeVerdictRow => {
+          const swapped = this.db
+            .prepare(
+              `UPDATE judge_verdicts SET unit_kind = ?, unit_id = ?, raw_answer = ?, provider = ?, model = ?, template_hash = ?, first_review = ?, created_at = ?, last_read_at = ?
+               WHERE key = ? AND raw_answer = ? RETURNING key`,
+            )
+            .all(row.unit_kind, row.unit_id, row.raw_answer, row.provider, row.model, row.template_hash, row.first_review, row.created_at, row.last_read_at, key, expectedRawAnswer);
+          if (swapped.length === 0) {
+            this.db.run(
+              `INSERT OR IGNORE INTO judge_verdicts (key, unit_kind, unit_id, raw_answer, provider, model, template_hash, first_review, created_at, last_read_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [key, row.unit_kind, row.unit_id, row.raw_answer, row.provider, row.model, row.template_hash, row.first_review, row.created_at, row.last_read_at],
+            );
+          }
+          return rowToJudgeVerdict(this.db.prepare("SELECT * FROM judge_verdicts WHERE key = ?").get(key) as Record<string, unknown>);
+        })(),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async pruneJudgeVerdictsNotReadSince(cutoff: string): Promise<Result<number, LoreError>> {
+    try {
+      // reason: BR-1535 — deletion is by last-read age only; never by template_hash, provider or model.
+      return ok(this.db.prepare("DELETE FROM judge_verdicts WHERE last_read_at < ? RETURNING key").all(cutoff).length);
     } catch (e) {
       return wrapStoreError(e);
     }

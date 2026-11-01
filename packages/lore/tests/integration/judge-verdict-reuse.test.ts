@@ -333,8 +333,8 @@ describe("AC-JR-2: criterion key covers its files and facts", () => {
   ];
   const importing = (testSha = "t1", commit = "01"): AiCriterionInput =>
     criterion("AC-W", "The feature works end to end.", { statement: "The feature works.", command: COMMAND, attestation: attestation(testSha, commit) as never });
-  const ctx = (reach: readonly string[], present: readonly string[] = []) => ({
-    pathExists: async (path: string): Promise<Result<boolean, LoreError>> => ok(present.includes(path)),
+  const ctx = (reach: readonly string[], absent: readonly string[] = []) => ({
+    pathExists: async (path: string): Promise<Result<boolean, LoreError>> => ok(!absent.includes(path)),
     reachedChangedFiles: async (_command: string, changed: readonly string[]): Promise<Result<readonly string[], LoreError>> => ok(reach.filter((f) => changed.includes(f))),
   });
   const BASE = { "src/lib.ts": "L1", "src/other.ts": "O1" };
@@ -394,8 +394,8 @@ describe("AC-JR-2: criterion key covers its files and facts", () => {
   it("AC-JR-2 re-asks when it names a path a fix deleted (neither changed nor present)", async () => {
     const named = criterion("AC-N", "The behaviour in src/gone.ts is documented.");
     const asked = await secondReviewAsks(
-      { files: { ...BASE, "src/gone.ts": "G1" }, criteria: [named], ctx: ctx([], []) },
-      { files: BASE, criteria: [named], ctx: ctx([], []) },
+      { files: { ...BASE, "src/gone.ts": "G1" }, criteria: [named], ctx: ctx([], ["src/gone.ts"]) },
+      { files: BASE, criteria: [named], ctx: ctx([], ["src/gone.ts"]) },
     );
     expect(asked).toEqual(["spec-x:AC-N"]);
   });

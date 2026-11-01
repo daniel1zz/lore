@@ -52,6 +52,7 @@ import type {
   TraceDenyByCheckpoint,
   SuiteResultRecord,
   SuiteFileRunRecord,
+  JudgeVerdictRow,
   CheckOutcomeInput,
   CheckOutcomeStat,
   PendingAskInput,
@@ -161,6 +162,8 @@ export class InMemoryStore implements StoreInterface {
   /** Mirrors `suite_results` / `suite_file_runs` (migration-043), in insertion order. */
   private readonly suiteResults: SuiteResultRecord[] = [];
   private readonly suiteFileRuns: SuiteFileRunRecord[] = [];
+  /** Mirrors `judge_verdicts` (migration-049), keyed by the unit key. */
+  private readonly judgeVerdicts = new Map<string, JudgeVerdictRow>();
   /** BR-1374 — mirrors `pending_asks`: lore-issued questions with their single-use nonces, in issue order. */
   private readonly pendingAsks: Array<PendingAskInput & { used_at: string | null }> = [];
   /** Mirrors `runs` (migration-016), keyed by run id; first registration wins. */
@@ -2023,6 +2026,39 @@ export class InMemoryStore implements StoreInterface {
 
   async getSuiteResult(id: string): Promise<Result<SuiteResultRecord | null, LoreError>> {
     return ok(this.suiteResults.find((r) => r.id === id) ?? null);
+  }
+
+  async getJudgeVerdict(key: string, readAt: string): Promise<Result<JudgeVerdictRow | null, LoreError>> {
+    const row = this.judgeVerdicts.get(key);
+    if (row === undefined) return ok(null);
+    const refreshed = { ...row, last_read_at: readAt };
+    this.judgeVerdicts.set(key, refreshed);
+    return ok({ ...refreshed });
+  }
+
+  async insertJudgeVerdictIfAbsent(row: JudgeVerdictRow): Promise<Result<JudgeVerdictRow, LoreError>> {
+    // reason: mirrors migration-049's PRIMARY KEY with INSERT OR IGNORE: the first writer of a key wins.
+    const existing = this.judgeVerdicts.get(row.key);
+    if (existing !== undefined) return ok({ ...existing });
+    this.judgeVerdicts.set(row.key, { ...row });
+    return ok({ ...row });
+  }
+
+  async replaceJudgeVerdictIfEquals(key: string, expectedRawAnswer: string, row: JudgeVerdictRow): Promise<Result<JudgeVerdictRow, LoreError>> {
+    const existing = this.judgeVerdicts.get(key);
+    if (existing === undefined || existing.raw_answer === expectedRawAnswer) this.judgeVerdicts.set(key, { ...row, key });
+    return ok({ ...(this.judgeVerdicts.get(key) as JudgeVerdictRow) });
+  }
+
+  async pruneJudgeVerdictsNotReadSince(cutoff: string): Promise<Result<number, LoreError>> {
+    let removed = 0;
+    for (const [key, row] of this.judgeVerdicts) {
+      if (row.last_read_at < cutoff) {
+        this.judgeVerdicts.delete(key);
+        removed += 1;
+      }
+    }
+    return ok(removed);
   }
 
   async insertSuiteFileRuns(rows: readonly SuiteFileRunRecord[]): Promise<Result<void, LoreError>> {

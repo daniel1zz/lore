@@ -25,6 +25,8 @@ import {
   judgmentAnswerSchema,
   ok,
   type AiCriterionAnswer,
+  type AiCriterionInput,
+  type JudgeUnitRecord,
   type DecisionFinding,
   type DimensionJudgment,
   type JudgedDimension,
@@ -35,6 +37,7 @@ import {
   type Result,
 } from "@lore/core";
 import { chunkDiffByFile } from "../ai/diff-chunking.js";
+import { splitDiffByFile } from "../ai/diff-truncation.js";
 import {
   askedDimensionsOf,
   buildMilestoneReviewPrompt,
@@ -42,9 +45,30 @@ import {
   type JudgedDecisionInput,
   type MilestonePromptMode,
   type MilestoneReviewPromptInput,
+  type PromptUnits,
 } from "../ai/milestone-review-template.js";
 import { noCodeSecurityJudgment } from "./corpus-only-task.js";
 import { judgedFindingsOf } from "./decision-recheck.js";
+import {
+  criterionAnswerSchema,
+  fileAnswerSchema,
+  rawCriterionAnswer,
+  rawFileAnswer,
+  type CriterionAnswer,
+  type FileAnswer,
+  type SettledUnit,
+  type UnitDescriptor,
+  type UnitLedger,
+} from "./judge-unit-ledger.js";
+import {
+  criterionCoveredFiles,
+  criterionUnitInput,
+  fileUnitInput,
+  sha256Hex,
+  unitKeyOf,
+  type CriterionContextPort,
+  type JudgeIdentity,
+} from "./judge-unit-keys.js";
 
 /** One judge reply with what the call cost. */
 export interface JudgeReply {
@@ -52,6 +76,17 @@ export interface JudgeReply {
   readonly duration_ms: number;
   readonly tokens_in?: number;
   readonly tokens_out?: number;
+  /** The model that answered, when the provider can name it (spec S5); absent for a provider that cannot. */
+  readonly model?: string;
+}
+
+/** What per-unit reuse needs: the ledger over the verdict store, the judge's identity, the unit-instruction text and the repository facts. */
+export interface JudgmentReuse {
+  readonly ledger: UnitLedger;
+  readonly identity: JudgeIdentity | undefined;
+  /** The unfilled unit instructions: sent in every call AND hashed into every key. */
+  readonly unitInstructions: string;
+  readonly criterionContext?: CriterionContextPort;
 }
 
 /** Sends one prompt to the configured judge. */
@@ -67,6 +102,8 @@ export interface JudgmentInput {
   readonly maxDiffChars: number;
   readonly judge: JudgePort;
   readonly recorded: readonly JudgedDecisionInput[];
+  /** Per-unit reuse (BR-1535). */
+  readonly reuse: JudgmentReuse;
 }
 
 /** The folded result of the judgment layer. */
@@ -102,6 +139,41 @@ interface CallResult {
   readonly dimensions: Partial<Record<JudgedDimension, DimensionJudgment>>;
   readonly criteria: readonly AiCriterionAnswer[];
   readonly findings: readonly DecisionFinding[];
+  /** The per-file answers, by path (only the files the call asked). */
+  readonly files: ReadonlyMap<string, FileAnswer>;
+  /** The model the last reply named, when it did. */
+  readonly model: string | undefined;
+}
+
+/** The units a call must answer (those not reused). */
+interface AskedUnits {
+  readonly files: readonly string[];
+  readonly criteria: readonly AiCriterionInput[];
+}
+
+/** One unit of this review: its descriptor, its recorded answer once settled or reused, and the answer parsed. */
+interface UnitState {
+  readonly desc: UnitDescriptor;
+  settled?: SettledUnit;
+  /** The stored raw answer a reused unit is shown to the judge with. */
+  reusedAnswer?: string;
+  file?: FileAnswer;
+  criterion?: CriterionAnswer;
+}
+
+/** Parses a unit's recorded raw answer into `file` / `criterion` (it was checked to parse before it was recorded). */
+function parseStored(state: UnitState): void {
+  const raw: unknown = JSON.parse((state.settled as SettledUnit).raw_answer);
+  if (state.desc.kind === "file") state.file = fileAnswerSchema.parse(raw);
+  else state.criterion = criterionAnswerSchema.parse(raw);
+}
+
+/** The file units' verdicts of one gate dimension, as dimension judgments (a unit's cites are its own). */
+function unitJudgments(states: ReadonlyMap<string, UnitState>, dimension: "security" | "concurrency_safety"): DimensionJudgment[] {
+  return [...states.values()].map((s) => {
+    const j = (s.file as FileAnswer)[dimension];
+    return { verdict: j.verdict, reason: j.reason, reference: j.reference, ...(j.cites !== undefined && j.cites.length > 0 ? { cites: [...j.cites] } : {}) };
+  });
 }
 
 interface CallTally {
@@ -124,10 +196,12 @@ async function judgeCall(
   t: CallTally,
   mode: MilestonePromptMode,
   prompt: string,
+  units: AskedUnits,
 ): Promise<Result<CallResult, LoreError>> {
   const asked = askedDimensionsOf(mode);
   const schema = judgmentAnswerSchema(asked);
-  const expectedCriteria = mode === "chunk" ? [] : (input.base.facts?.ai_criteria ?? []);
+  // reason: BR-1535 — a call answers only the units it was not given as already judged.
+  const expectedCriteria = mode === "chunk" ? [] : units.criteria;
   const expectedDecisions = mode === "chunk" ? [] : input.recorded;
   let current = prompt;
   let lastProblem = "";
@@ -135,6 +209,7 @@ async function judgeCall(
     const reply = await input.judge(current, input.title);
     if (!reply.ok) return reply;
     tally(t, reply.value);
+    const model = reply.value.model;
     const extracted = extractAssessmentJson(reply.value.text);
     if (!extracted.ok) {
       lastProblem = "message" in extracted.error ? extracted.error.message : extracted.error.code;
@@ -147,13 +222,23 @@ async function judgeCall(
         const missing = expectedCriteria.filter((c) => !answered.some((a) => a.ac === c.ac && (a.spec === undefined || a.spec === c.spec)));
         // reason: llmMilestoneOutputSchema-style stripping drops `decisions`, so it is read from the raw object.
         const decisions = judgedFindingsOf(expectedDecisions, (extracted.value as { decisions?: unknown }).decisions);
+        const files = new Map<string, FileAnswer>();
+        for (const entry of parsed.data.files ?? []) {
+          if (entry.security !== undefined && entry.concurrency_safety !== undefined && !files.has(entry.path)) {
+            files.set(entry.path, { security: entry.security, concurrency_safety: entry.concurrency_safety });
+          }
+        }
+        const missingFiles = units.files.filter((path) => !files.has(path));
         if (missing.length > 0) lastProblem = `\`criteria\` has no verdict for: ${missing.map((c) => `${c.spec}:${c.ac}`).join(", ")}`;
+        else if (missingFiles.length > 0) lastProblem = `\`files\` has no security and concurrency_safety verdict for: ${missingFiles.join(", ")}`;
         else if (!decisions.ok) lastProblem = decisions.error;
         else {
           return ok({
             dimensions: parsed.data.dimensions as Partial<Record<JudgedDimension, DimensionJudgment>>,
             criteria: answered,
             findings: decisions.value,
+            files,
+            model,
           });
         }
       }
@@ -206,43 +291,148 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
   const oneCall = chunking === undefined || (chunking.chunks.length === 1 && chunking.unseen.length === 0);
 
   const dimensions = {} as Record<JudgedDimension, DimensionJudgment>;
-  let criteria: readonly AiCriterionAnswer[] = [];
   let findings: readonly DecisionFinding[] = [];
 
+  // ── per-unit state (BR-1535): one unit per shown changed file and per AI criterion, looked up before any call ──
+  const { ledger, unitInstructions } = input.reuse;
+  const diffByFile = new Map<string, string>(hasDiff ? splitDiffByFile(input.diffText as string).map((f) => [f.filePath, f.text]) : []);
+  const shownFiles = oneCall ? (chunking?.allFiles ?? []) : (chunking?.chunks ?? []).flatMap((c) => c.files.map((f) => f.path));
+  const expectedCriteria = input.base.facts?.ai_criteria ?? [];
+  const fileStates = new Map<string, UnitState>();
+  const criterionStates = new Map<string, UnitState>();
+  const keyOf = (kind: "file" | "criterion", id: string, canonical: string): Result<string, LoreError> => {
+    // reason: without a known model a key cannot name its judge; such a unit is never stored or looked up, its `unkeyed:` key only labels the record.
+    if (!ledger.enabled || input.reuse.identity === undefined) return ok(`unkeyed:${sha256Hex(JSON.stringify([kind, id, canonical]))}`);
+    return unitKeyOf(kind, canonical, unitInstructions, input.reuse.identity);
+  };
+  const register = async (states: Map<string, UnitState>, desc: UnitDescriptor): Promise<Result<void, LoreError>> => {
+    const found = await ledger.lookup(desc);
+    if (!found.ok) return found;
+    const state: UnitState = { desc };
+    if (found.value.state === "reused") {
+      state.settled = ledger.reused(found.value.row);
+      state.reusedAnswer = found.value.row.raw_answer;
+      parseStored(state);
+    }
+    states.set(desc.id, state);
+    return ok(undefined);
+  };
+  for (const path of shownFiles) {
+    const key = keyOf("file", path, fileUnitInput(diffByFile.get(path) ?? ""));
+    if (!key.ok) return key;
+    const registered = await register(fileStates, { kind: "file", id: path, key: key.value });
+    if (!registered.ok) return registered;
+  }
+  for (const c of expectedCriteria) {
+    const id = `${c.spec}:${c.ac}`;
+    let canonical = "";
+    if (ledger.enabled) {
+      const covered = await criterionCoveredFiles(c, diffByFile, input.reuse.criterionContext);
+      if (!covered.ok) return covered;
+      canonical = criterionUnitInput(c, covered.value, diffByFile);
+    }
+    const key = keyOf("criterion", id, canonical);
+    if (!key.ok) return key;
+    const registered = await register(criterionStates, { kind: "criterion", id, key: key.value });
+    if (!registered.ok) return registered;
+  }
+  const askedFilesOf = (paths: readonly string[]): string[] => paths.filter((p) => fileStates.get(p)?.reusedAnswer === undefined);
+  const askedCriteria = expectedCriteria.filter((c) => criterionStates.get(`${c.spec}:${c.ac}`)?.reusedAnswer === undefined);
+  const promptUnits = (paths: readonly string[], withCriteria: boolean): PromptUnits => ({
+    files: paths.map((p) => ({ id: p, ...(fileStates.get(p)?.reusedAnswer !== undefined ? { reusedAnswer: fileStates.get(p)?.reusedAnswer as string } : {}) })),
+    criteria: withCriteria
+      ? expectedCriteria.map((c) => {
+          const id = `${c.spec}:${c.ac}`;
+          const reused = criterionStates.get(id)?.reusedAnswer;
+          return { id, ...(reused !== undefined ? { reusedAnswer: reused } : {}) };
+        })
+      : [],
+  });
+  /** Records a call's fresh unit answers in the store (first writer wins) and keeps the recorded answer as the unit's verdict. */
+  const settleCall = async (answered: CallResult, askedPaths: readonly string[], criteriaAsked: readonly AiCriterionInput[]): Promise<Result<void, LoreError>> => {
+    if (ledger.enabled && answered.model !== undefined && answered.model !== input.reuse.identity?.model) {
+      return err(aiError(`the judge answered with model "${answered.model}" but its identity says "${String(input.reuse.identity?.model)}": its verdicts are not stored under a key naming another model`));
+    }
+    for (const path of askedPaths) {
+      const state = fileStates.get(path) as UnitState;
+      const settled = await ledger.settle(state.desc, rawFileAnswer(answered.files.get(path) as FileAnswer));
+      if (!settled.ok) return settled;
+      state.settled = settled.value;
+      parseStored(state);
+    }
+    for (const c of criteriaAsked) {
+      const state = criterionStates.get(`${c.spec}:${c.ac}`) as UnitState;
+      const given = answered.criteria.find((a) => a.ac === c.ac && (a.spec === undefined || a.spec === c.spec)) as AiCriterionAnswer;
+      const settled = await ledger.settle(state.desc, rawCriterionAnswer({ verdict: given.verdict, reason: given.reason }));
+      if (!settled.ok) return settled;
+      state.settled = settled.value;
+      parseStored(state);
+    }
+    return ok(undefined);
+  };
+  const unitOpts = { unitInstructions };
+
   if (oneCall) {
-    const prompt = buildMilestoneReviewPrompt({ ...input.base, mode: "full", ...(hasDiff ? { diffText: input.diffText as string } : {}), unseenFiles: unseen, recordedDecisions: input.recorded });
-    const answered = await judgeCall(input, t, "full", prompt);
+    const askedPaths = askedFilesOf(shownFiles);
+    const prompt = buildMilestoneReviewPrompt({
+      ...input.base,
+      ...unitOpts,
+      mode: "full",
+      ...(hasDiff ? { diffText: input.diffText as string } : {}),
+      unseenFiles: unseen,
+      recordedDecisions: input.recorded,
+      units: promptUnits(shownFiles, true),
+    });
+    const answered = await judgeCall(input, t, "full", prompt, { files: askedPaths, criteria: askedCriteria });
     if (!answered.ok) return answered;
+    const settledCall = await settleCall(answered.value, askedPaths, askedCriteria);
+    if (!settledCall.ok) return settledCall;
     for (const d of askedDimensionsOf("full")) dimensions[d] = answered.value.dimensions[d] as DimensionJudgment;
-    criteria = answered.value.criteria;
+    for (const d of ["concurrency_safety", "security"] as const) dimensions[d] = combineWorst([dimensions[d], ...unitJudgments(fileStates, d)]);
     findings = answered.value.findings;
   } else {
     const plan = chunking as NonNullable<typeof chunking>;
     const perChunk: Record<"concurrency_safety" | "security", DimensionJudgment[]> = { concurrency_safety: [], security: [] };
     for (const chunk of plan.chunks) {
-      const prompt = buildMilestoneReviewPrompt({ ...input.base, mode: "chunk", diffText: chunk.text, unseenFiles: unseen, recordedDecisions: [] });
-      const answered = await judgeCall(input, t, "chunk", prompt);
+      const paths = chunk.files.map((f) => f.path);
+      const askedPaths = askedFilesOf(paths);
+      const prompt = buildMilestoneReviewPrompt({
+        ...input.base,
+        ...unitOpts,
+        mode: "chunk",
+        diffText: chunk.text,
+        unseenFiles: unseen,
+        recordedDecisions: [],
+        units: promptUnits(paths, false),
+      });
+      const answered = await judgeCall(input, t, "chunk", prompt, { files: askedPaths, criteria: [] });
       if (!answered.ok) return answered;
+      const settledCall = await settleCall(answered.value, askedPaths, []);
+      if (!settledCall.ok) return settledCall;
       perChunk.concurrency_safety.push(answered.value.dimensions.concurrency_safety as DimensionJudgment);
       perChunk.security.push(answered.value.dimensions.security as DimensionJudgment);
     }
     const summaries: DiffChunkSummary[] = plan.chunks.map((c, index) => ({ index, files: c.files }));
     const summaryPrompt = buildMilestoneReviewPrompt({
       ...input.base,
+      ...unitOpts,
       mode: "summary",
       allFiles: plan.allFiles,
       chunkSummaries: summaries,
       unseenFiles: unseen,
       recordedDecisions: input.recorded,
+      units: promptUnits([], true),
     });
-    const answered = await judgeCall(input, t, "summary", summaryPrompt);
+    const answered = await judgeCall(input, t, "summary", summaryPrompt, { files: [], criteria: askedCriteria });
     if (!answered.ok) return answered;
+    const settledCall = await settleCall(answered.value, [], askedCriteria);
+    if (!settledCall.ok) return settledCall;
     dimensions.spec_conformance = answered.value.dimensions.spec_conformance as DimensionJudgment;
     dimensions.design_necessity = answered.value.dimensions.design_necessity as DimensionJudgment;
     for (const d of ["concurrency_safety", "security"] as const) {
-      dimensions[d] = perChunk[d].length > 0 ? combineWorst(perChunk[d]) : notMeasured("no file fit a call, so none was judged");
+      const all = [...perChunk[d], ...unitJudgments(fileStates, d)];
+      dimensions[d] = all.length > 0 ? combineWorst(all) : notMeasured("no file fit a call, so none was judged");
     }
-    criteria = answered.value.criteria;
     findings = answered.value.findings;
   }
 
@@ -251,9 +441,8 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
   if (input.base.facts?.no_task_changes_code === true) dimensions.security = noCodeSecurityJudgment(input.base.facts.no_code_tasks ?? []);
   dimensions.concurrency_safety = withUnseen(dimensions.concurrency_safety, unseen);
 
-  const expected = input.base.facts?.ai_criteria ?? [];
-  const aiCriteria = expected.map((c) => {
-    const given = criteria.find((a) => a.ac === c.ac && (a.spec === undefined || a.spec === c.spec)) as AiCriterionAnswer;
+  const aiCriteria = expectedCriteria.map((c) => {
+    const given = (criterionStates.get(`${c.spec}:${c.ac}`) as UnitState).criterion as CriterionAnswer;
     const unseenNamed = unseen.filter((f) => c.rubric.includes(f));
     if (unseenNamed.length > 0) {
       return { spec: c.spec, ac: c.ac, verdict: "not-measured" as const, reason: `its rubric names a file not seen in any call: ${unseenNamed.join(", ")}` };
@@ -261,10 +450,31 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
     return { spec: c.spec, ac: c.ac, verdict: given.verdict, reason: given.reason };
   });
 
+  const units: JudgeUnitRecord[] = [...fileStates.values(), ...criterionStates.values()].map((state) => {
+    const settled = state.settled as SettledUnit;
+    return {
+      kind: state.desc.kind,
+      id: state.desc.id,
+      source: settled.source,
+      key: settled.key,
+      first_review: settled.first_review,
+      answer_sha256: settled.answer_sha256,
+      verdicts:
+        state.file !== undefined
+          ? { security: state.file.security.verdict, concurrency_safety: state.file.concurrency_safety.verdict }
+          : { verdict: (state.criterion as CriterionAnswer).verdict },
+    };
+  });
+  const identity = input.reuse.identity;
+
   return ok({
     dimensions,
     findings,
     record: {
+      review_token: ledger.reviewToken,
+      ...(identity !== undefined ? { judge: { provider: identity.provider, ...(identity.model !== undefined ? { model: identity.model } : {}), settings: { ...identity.settings } } } : {}),
+      reuse: ledger.enabled ? { enabled: true as const } : { enabled: false as const, cause: ledger.disabledCause as string },
+      units,
       calls: t.calls,
       ...(t.tokens_in !== undefined ? { tokens_in: t.tokens_in } : {}),
       ...(t.tokens_out !== undefined ? { tokens_out: t.tokens_out } : {}),
