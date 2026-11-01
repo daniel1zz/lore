@@ -49,7 +49,7 @@ import {
   type MirrorClassification,
   type PlannedMirror,
 } from "../issues-migrate-plan.js";
-import { classifyFeedbackUpstream, fileGithubIssue, requireTemplateService, resolveConsumerCorpusRoot, resolveGithubIssueListing, type GithubUpstreamCfg } from "../report-issue-wiring.js";
+import { classifyFeedbackUpstream, fileGithubIssue, resolveConsumerCorpusRoot, resolveGithubIssueListing, type GithubUpstreamCfg } from "../report-issue-wiring.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { GhRunner, createNodeGhExecFile } from "../../../service/gh-runner.js";
 import { joinIssueStatuses } from "../../../service/github-issue-listing.js";
@@ -520,7 +520,7 @@ export async function runIssuesMigrate(args: { apply: boolean; json: boolean }, 
             tags: [],
           },
           cfg,
-          { consumerCorpusRoot: resolveConsumerCorpusRoot(inv.io, inv), corpusService: app.corpusService, templates: requireTemplateService(app, inv.io), actor, home: inv.paths.home, env: inv.env },
+          { consumerCorpusRoot: resolveConsumerCorpusRoot(inv.io, inv), corpusService: app.corpusService, actor, home: inv.paths.home, env: inv.env },
         );
         return filed.ok ? ok(filed.value.number) : filed;
       },

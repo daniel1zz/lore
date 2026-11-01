@@ -19,7 +19,6 @@
 
 import {
   MILESTONE_DIMENSIONS,
-  type ChangeSource,
   type CreateDocInput,
   type DimensionAnswer,
   type HandoffExtra,
@@ -56,6 +55,9 @@ function confidenceBand(confidence: number | undefined): "established" | "observ
   if (confidence >= 70) return "observed";
   return "unconfirmed";
 }
+
+/** One change source of a handoff's changed-file entry (derived: the core barrel does not export the session-trail type). */
+type ChangeSource = NonNullable<HandoffExtra["changed_files"]>[number]["sources"][number];
 
 function changeSourceLabel(source: ChangeSource): string {
   switch (source.kind) {

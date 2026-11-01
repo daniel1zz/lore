@@ -157,6 +157,7 @@ import {
   type StructuredWriteDeps,
 } from "./structured-write.js";
 import { resolveRuleSlice } from "./template-rule-slice.js";
+import type { TemplateService } from "./template-service.js";
 import { ANCHOR_SCANNED_DOC_TYPES } from "./drift-check-service.js";
 import { findPlanClaimedByWriter } from "./run-claimed-plan.js";
 // reason: NOT a cross-service import — `service/CLAUDE.md`'s "no cross-service imports"
@@ -1152,6 +1153,16 @@ export class CorpusService {
    */
   setStructuredWrite(deps: StructuredWriteDeps): void {
     this.structuredWrite = deps;
+  }
+
+  /**
+   * The template reader this service validates writes with, for a caller that renders something from a template
+   * without storing a document here (the GitHub issue report body, `issue-report-body.ts`).
+   *
+   * @returns the reader, or `undefined` in a bare construction (no structured-write wiring)
+   */
+  get templateReader(): TemplateService | undefined {
+    return this.structuredWrite?.templates;
   }
 
   /** Template validation/rendering for the write path; absent (bare construction) ⇒ every write is legacy-shaped. */

@@ -125,7 +125,6 @@ import {
 } from "@lore/core";
 import type { CorpusService } from "../../service/corpus-service.js";
 import { renderIssueReportBody } from "../../service/issue-report-body.js";
-import type { TemplateService } from "../../service/template-service.js";
 import { checkReproCommand, type ReproCheck } from "../../service/report-issue-repro.js";
 import { GhRunner, createNodeGhExecFile } from "../../service/gh-runner.js";
 import { GitHubIntakePort, type GithubListedIssue } from "../../service/github-intake-port.js";
@@ -133,22 +132,6 @@ import { joinIssueStatuses, type IssueStatusRow } from "../../service/github-iss
 import { ReceiptLogV2, type ReceiptV2Entry, type ReceiptV2ReadResult } from "../../service/receipt-log-v2.js";
 import { findLoreDbPath, type CorpusLocator } from "./corpus-resolution.js";
 import type { CliIo } from "./output.js";
-
-/**
- * The corpus's template reader for a filing context ({@link GithubFilingContext.templates}).
- *
- * @param app - the composed App
- * @param io - where the wiring error is written
- * @returns the App's `TemplateService`
- * @throws exitCli(1) when the App was composed without one (an internal wiring error, never a user condition)
- */
-export function requireTemplateService(app: { readonly templateService?: TemplateService | undefined }, io: CliIo): TemplateService {
-  if (app.templateService === undefined) {
-    io.stderr.write("Internal error: TemplateService not wired on App\n");
-    return exitCli(1);
-  }
-  return app.templateService;
-}
 
 /**
  * Resolves the CALLING corpus's own root — the directory containing
@@ -482,14 +465,6 @@ export interface GithubFilingContext {
   readonly consumerCorpusRoot: string;
   /** The reporter's OWN corpus service — used ONLY to resolve `reporter_root_prd` (this corpus's root PRD), never the upstream's. */
   readonly corpusService: CorpusService;
-  /**
-   * The reporter's corpus template reader: the report is validated against the approved `issue-report` template and its
-   * GitHub body is rendered from it ({@link renderIssueReportBody}); a corpus without that template refuses the filing.
-   * Optional in the TYPE only so a composition site not yet migrated still compiles; {@link fileGithubIssue} refuses a
-   * context without it (loud, nothing filed) — there is no hand-built-body fallback. Every composition site passes
-   * {@link requireTemplateService}.
-   */
-  readonly templates?: TemplateService;
   /**
    * The filing actor: the name of the invocation's known party (an agent run's session name, a registered human's
    * or a key's own name). Required, mirroring `RawReporterIdentity.actor`'s own required-string shape.
@@ -842,10 +817,13 @@ export async function fileGithubIssue(
   };
 
   // reason: BR-1528 — the body is rendered from the approved `issue-report` template (validated, fail loud), not hand-built.
-  if (ctx.templates === undefined) {
-    return err(validationError("templates", "the filing context carries no template reader, so the report cannot be rendered from the issue-report template (internal wiring error: nothing was filed)", undefined, "BR-1528"));
+  // reason: the template reader is the one the reporter's own CorpusService validates its writes with, so every composition
+  // site that already passes `corpusService` (report-issue, assess, issues-migrate) gets it without a new context field.
+  const templates = ctx.corpusService.templateReader;
+  if (templates === undefined) {
+    return err(validationError("templates", "the reporter's corpus service has no template reader, so the report cannot be rendered from the issue-report template (internal wiring error: nothing was filed)", undefined, "BR-1528"));
   }
-  const body = await renderIssueReportBody(ctx.templates, input);
+  const body = await renderIssueReportBody(templates, input);
   if (!body.ok) return body;
 
   const fileResult = await port.fileIssue({
