@@ -17,11 +17,10 @@
  *     `apiCreateDoc` racing the first. The title input is ALSO disabled while
  *     pending, narrowing (not replacing) that surface.
  *   - `docType === "spec"` is create-time BLOCKED (ADR: adr-newdocmodal-spec-create-cli-skill-only-authoring-disable):
- *     the spec-create gate (`hasSkeleton` + the deterministic/structured-AC rules
- *     in knowledge-write-spec-rules-gate-feeding-source) requires a skeleton
- *     PLUS follow-up `lore ac add` calls that this quick-create form has no way
- *     to collect — a seeded template would only mechanically pass the gate while
- *     staying hollow. So no `POST /api/dashboard/docs` request is ever issued for
+ *     a spec is validated against its approved template (fields and dimension
+ *     answers, written with `--fields-file`) and then needs follow-up `lore ac add`
+ *     calls that this quick-create form has no way to collect — a generated
+ *     body would only look complete while staying hollow. So no `POST /api/dashboard/docs` request is ever issued for
  *     a spec: the form renders a visible notice naming the real authoring paths
  *     (`lore create spec` CLI / `/lore-design` skill) and disables Create,
  *     instead of letting the user hit a silent 4xx from the service-layer gate.
@@ -111,10 +110,9 @@ const TYPES_TAKING_NO_PARENT: DocType[] = ["spec"];
  * Doc types this quick-create form must never submit, because the service-layer
  * create-time gate for that type demands more than type/title/parent can ever
  * express (see ADR adr-newdocmodal-spec-create-cli-skill-only-authoring-disable).
- * Currently just `spec`: the spec-create gate's `hasSkeleton` check requires
- * `## ` heading lines, and the write-spec rules go further still (deterministic,
- * oracle-verifiable ACs added via a separate `lore ac add` call) — no single
- * create-time payload, templated or not, can satisfy that. Submitting for a
+ * Currently just `spec`: a spec's fields and dimension answers are validated against its
+ * approved template, and its acceptance criteria are added via separate `lore ac add`
+ * calls — no single title/parent create-time payload can satisfy that. Submitting for a
  * blocked type would always be denied server-side with no way for this form to
  * explain why, so `isCreateBlockedType` is checked BEFORE any request is sent.
  */
