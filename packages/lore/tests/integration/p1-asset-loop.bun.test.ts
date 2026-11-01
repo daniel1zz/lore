@@ -234,7 +234,6 @@ describe("P1 asset-discovery + feeding closed loop (e2e, no seed script)", () =>
       type: "spec",
       title: "A fully compliant spec",
       extra: { spec_kind: "tech" },
-      content: "## Overview\n\nA properly-structured spec body.",
     });
 
     expect(result.exitCode).toBe(0);

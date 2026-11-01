@@ -279,7 +279,6 @@ describe("lore feed <checkpoint> — feed-before-produce PULL (P4)", () => {
       type: "spec",
       title: "A spec that names a parent",
       parent_id: prd.id,
-      content: "just some prose, no headings at all",
     };
     const gateResult = await runGateSpecCreate(violatingPayload);
 
