@@ -60,15 +60,7 @@ import {
   type UnitDescriptor,
   type UnitLedger,
 } from "./judge-unit-ledger.js";
-import {
-  criterionCoveredFiles,
-  criterionUnitInput,
-  fileUnitInput,
-  sha256Hex,
-  unitKeyOf,
-  type CriterionContextPort,
-  type JudgeIdentity,
-} from "./judge-unit-keys.js";
+import { criterionUnitInput, fileUnitInput, type JudgeIdentity } from "./judge-unit-keys.js";
 
 /** One judge reply with what the call cost. */
 export interface JudgeReply {
@@ -84,9 +76,10 @@ export interface JudgeReply {
 export interface JudgmentReuse {
   readonly ledger: UnitLedger;
   readonly identity: JudgeIdentity | undefined;
-  /** The unfilled unit instructions: sent in every call AND hashed into every key. */
+  /** The unfilled unit instructions: sent in every call AND (with the dimension guide) hashed into every key. */
   readonly unitInstructions: string;
-  readonly criterionContext?: CriterionContextPort;
+  /** The dimension guide sent in every call and hashed into every key; default the shipped one. */
+  readonly dimensionGuide?: Readonly<Record<JudgedDimension, string>>;
 }
 
 /** Sends one prompt to the configured judge. */
@@ -300,11 +293,6 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
   const expectedCriteria = input.base.facts?.ai_criteria ?? [];
   const fileStates = new Map<string, UnitState>();
   const criterionStates = new Map<string, UnitState>();
-  const keyOf = (kind: "file" | "criterion", id: string, canonical: string): Result<string, LoreError> => {
-    // reason: without a known model a key cannot name its judge; such a unit is never stored or looked up, its `unkeyed:` key only labels the record.
-    if (!ledger.enabled || input.reuse.identity === undefined) return ok(`unkeyed:${sha256Hex(JSON.stringify([kind, id, canonical]))}`);
-    return unitKeyOf(kind, canonical, unitInstructions, input.reuse.identity);
-  };
   const register = async (states: Map<string, UnitState>, desc: UnitDescriptor): Promise<Result<void, LoreError>> => {
     const found = await ledger.lookup(desc);
     if (!found.ok) return found;
@@ -318,22 +306,13 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
     return ok(undefined);
   };
   for (const path of shownFiles) {
-    const key = keyOf("file", path, fileUnitInput(diffByFile.get(path) ?? ""));
-    if (!key.ok) return key;
-    const registered = await register(fileStates, { kind: "file", id: path, key: key.value });
+    const registered = await register(fileStates, { kind: "file", id: path, canonical: fileUnitInput(diffByFile.get(path) ?? "") });
     if (!registered.ok) return registered;
   }
+  // reason: BR-1535 S2 — an AI criterion's verdict may depend on any changed file, so its input is its text and the WHOLE plan diff.
+  const planDiff = hasDiff ? (input.diffText as string) : "";
   for (const c of expectedCriteria) {
-    const id = `${c.spec}:${c.ac}`;
-    let canonical = "";
-    if (ledger.enabled) {
-      const covered = await criterionCoveredFiles(c, diffByFile, input.reuse.criterionContext);
-      if (!covered.ok) return covered;
-      canonical = criterionUnitInput(c, covered.value, diffByFile);
-    }
-    const key = keyOf("criterion", id, canonical);
-    if (!key.ok) return key;
-    const registered = await register(criterionStates, { kind: "criterion", id, key: key.value });
+    const registered = await register(criterionStates, { kind: "criterion", id: `${c.spec}:${c.ac}`, canonical: criterionUnitInput(c, planDiff) });
     if (!registered.ok) return registered;
   }
   const askedFilesOf = (paths: readonly string[]): string[] => paths.filter((p) => fileStates.get(p)?.reusedAnswer === undefined);
@@ -350,12 +329,10 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
   });
   /** Records a call's fresh unit answers in the store (first writer wins) and keeps the recorded answer as the unit's verdict. */
   const settleCall = async (answered: CallResult, askedPaths: readonly string[], criteriaAsked: readonly AiCriterionInput[]): Promise<Result<void, LoreError>> => {
-    if (ledger.enabled && answered.model !== undefined && answered.model !== input.reuse.identity?.model) {
-      return err(aiError(`the judge answered with model "${answered.model}" but its identity says "${String(input.reuse.identity?.model)}": its verdicts are not stored under a key naming another model`));
-    }
+    // reason: BR-1535 S5 — a verdict is stored under the model the REPLY named, never the configured one.
     for (const path of askedPaths) {
       const state = fileStates.get(path) as UnitState;
-      const settled = await ledger.settle(state.desc, rawFileAnswer(answered.files.get(path) as FileAnswer));
+      const settled = await ledger.settle(state.desc, rawFileAnswer(answered.files.get(path) as FileAnswer), answered.model);
       if (!settled.ok) return settled;
       state.settled = settled.value;
       parseStored(state);
@@ -363,14 +340,14 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
     for (const c of criteriaAsked) {
       const state = criterionStates.get(`${c.spec}:${c.ac}`) as UnitState;
       const given = answered.criteria.find((a) => a.ac === c.ac && (a.spec === undefined || a.spec === c.spec)) as AiCriterionAnswer;
-      const settled = await ledger.settle(state.desc, rawCriterionAnswer({ verdict: given.verdict, reason: given.reason }));
+      const settled = await ledger.settle(state.desc, rawCriterionAnswer({ verdict: given.verdict, reason: given.reason }), answered.model);
       if (!settled.ok) return settled;
       state.settled = settled.value;
       parseStored(state);
     }
     return ok(undefined);
   };
-  const unitOpts = { unitInstructions };
+  const unitOpts = { unitInstructions, ...(input.reuse.dimensionGuide !== undefined ? { dimensionGuide: input.reuse.dimensionGuide } : {}) };
 
   if (oneCall) {
     const askedPaths = askedFilesOf(shownFiles);
@@ -472,8 +449,17 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
     findings,
     record: {
       review_token: ledger.reviewToken,
-      ...(identity !== undefined ? { judge: { provider: identity.provider, ...(identity.model !== undefined ? { model: identity.model } : {}), settings: { ...identity.settings } } } : {}),
-      reuse: ledger.enabled ? { enabled: true as const } : { enabled: false as const, cause: ledger.disabledCause as string },
+      ...(identity !== undefined
+        ? {
+            judge: {
+              provider: identity.provider,
+              ...(identity.model !== undefined ? { model: identity.model } : {}),
+              ...(ledger.answeringModel !== undefined ? { answering_model: ledger.answeringModel } : {}),
+              settings: { ...identity.settings },
+            },
+          }
+        : {}),
+      reuse: ledger.enabled ? { enabled: true as const, ...(ledger.note !== undefined ? { note: ledger.note } : {}) } : { enabled: false as const, cause: ledger.disabledCause as string },
       units,
       calls: t.calls,
       ...(t.tokens_in !== undefined ? { tokens_in: t.tokens_in } : {}),

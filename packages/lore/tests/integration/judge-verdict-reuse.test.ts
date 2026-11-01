@@ -19,6 +19,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import * as core from "@lore/core";
 import { err, ok, type AiCriterionInput, type DocRecord, type LoreError, type MilestoneReview, type Result } from "@lore/core";
+import { measureCriteriaAtHead, planCriterionScopes } from "../../src/service/milestone-attestation-facts.js";
 import { chunkDiffByFile } from "../../src/ai/diff-chunking.js";
 import { exitCode } from "../../src/adapters/cli/utils.js";
 import { MilestoneReviewService } from "../../src/service/milestone-review-service.js";
@@ -130,8 +131,11 @@ function parseCall(prompt: string): CallRecord {
 
 interface Identity {
   provider: string;
+  /** The configured ai.assess.model (what lookups use). */
   model: string | undefined;
+  reportsAnsweringModel: boolean;
   settings: Record<string, string | number>;
+  modelHint?: string;
 }
 
 interface EnvOptions {
@@ -145,10 +149,7 @@ interface PlanState {
   readonly files: Record<string, string>;
   readonly criteria: readonly AiCriterionInput[];
   readonly maxDiffChars?: number;
-  readonly ctx?: {
-    pathExists: (path: string) => Promise<Result<boolean, LoreError>>;
-    reachedChangedFiles: (command: string, changed: readonly string[]) => Promise<Result<readonly string[], LoreError>>;
-  };
+  readonly rejudge?: boolean;
 }
 
 function diffOf(files: Record<string, string>): string {
@@ -167,9 +168,16 @@ function makeEnv(options: EnvOptions = {}) {
     store,
     calls,
     state,
-    identity: { provider: "stub-provider", model: "stub-model-1", settings: { temperature: 0 } } as Identity,
+    identity: { provider: "stub-provider", model: "stub-model-1", reportsAnsweringModel: true, settings: { args: "-p" } } as Identity,
+    /** The model the reply names; `undefined` = the reply names none. Defaults to the configured model, as with a full model id. */
+    answering: "stub-model-1" as string | undefined,
+    guide: undefined as Record<string, string> | undefined,
     clock: options.clock ?? new Date("2026-11-01T00:00:00.000Z"),
     template: undefined as string | undefined,
+    /** Calls the stub judge has answered (a re-ask must not cost an extra call). */
+    get judgeCalls(): number {
+      return calls.length;
+    },
     reviews: [] as MilestoneReview[],
     async review(plan: PlanState): Promise<Result<{ review: MilestoneReview }, LoreError>> {
       const judge = async (prompt: string): Promise<Result<JudgeReply, LoreError>> => {
@@ -188,7 +196,7 @@ function makeEnv(options: EnvOptions = {}) {
             return { spec, ac, verdict: "pass", reason: `${tag}${String(n)} criterion ${ac} ok` };
           }),
         };
-        const reply: JudgeReply = { text: JSON.stringify(answer), duration_ms: 3, ...(env.identity.model !== undefined ? { model: env.identity.model } : {}) };
+        const reply: JudgeReply = { text: JSON.stringify(answer), duration_ms: 3, ...(env.answering !== undefined ? { model: env.answering } : {}) };
         return ok(reply);
       };
       const bundle = {
@@ -211,6 +219,7 @@ function makeEnv(options: EnvOptions = {}) {
         judgeIdentity: () => env.identity,
         now: () => env.clock,
         ...(env.template !== undefined ? { unitInstructions: env.template } : {}),
+        ...(env.guide !== undefined ? { dimensionGuide: env.guide } : {}),
       } as never);
       const diffText = diffOf(plan.files);
       const result = await service.review("plan-one", {
@@ -218,7 +227,7 @@ function makeEnv(options: EnvOptions = {}) {
         diffSource: "test",
         maxDiffChars: plan.maxDiffChars ?? 80000,
         facts: { ai_criteria: plan.criteria, assessed_commit: "c1" },
-        ...(plan.ctx !== undefined ? { criterionContext: plan.ctx } : {}),
+        ...(plan.rejudge === true ? { rejudge: true } : {}),
       } as never);
       if (!result.ok) return result;
       env.reviews.push(result.value.review);
@@ -232,7 +241,6 @@ const criterion = (ac: string, rubric: string, extra: Partial<AiCriterionInput> 
 const CRITERIA: readonly AiCriterionInput[] = [
   criterion("AC-X", "The behaviour in src/a.ts is documented."),
   criterion("AC-Y", "The behaviour in src/c.ts is documented."),
-  criterion("AC-Z", "The plan reads clearly overall."),
 ];
 const FILES_V1 = { "src/a.ts": "A1", "src/b.ts": "B1", "src/c.ts": "C1" };
 const FILES_A_CHANGED = { "src/a.ts": "A2", "src/b.ts": "B1", "src/c.ts": "C1" };
@@ -252,12 +260,12 @@ function must<T>(result: Result<T, LoreError>): T {
 // ─── AC-JR-1 ─────────────────────────────────────────────────────────────────
 
 describe("AC-JR-1: only changed units are re-asked", () => {
-  it("AC-JR-1 a first review asks every unit in one full call; after a fix to a's diff the second asks a, X, Z and reuses b, c, Y", async () => {
+  it("AC-JR-1 a first review asks every unit in one full call; after a fix to a's diff the second asks a, X, Y and reuses b, c; a third asks only the plan-level dimensions; --rejudge asks every unit", async () => {
     const env = makeEnv();
     const first = must(await env.review({ files: FILES_V1, criteria: CRITERIA }));
     expect(env.calls).toHaveLength(1);
     expect(askedFiles(env.calls)).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"]);
-    expect(askedCriteria(env.calls)).toEqual(["spec-x:AC-X", "spec-x:AC-Y", "spec-x:AC-Z"]);
+    expect(askedCriteria(env.calls)).toEqual(["spec-x:AC-X", "spec-x:AC-Y"]);
     expect(env.calls[0]?.dims).toEqual(ALL_DIMS);
 
     env.calls.length = 0;
@@ -265,28 +273,46 @@ describe("AC-JR-1: only changed units are re-asked", () => {
     // same call count as the first review (one full call), never one call per unit
     expect(env.calls).toHaveLength(1);
     expect(askedFiles(env.calls)).toEqual(["src/a.ts"]);
-    expect(askedCriteria(env.calls)).toEqual(["spec-x:AC-X", "spec-x:AC-Z"]);
+    // an AI criterion depends on the whole plan diff, so a changed file re-asks every criterion
+    expect(askedCriteria(env.calls)).toEqual(["spec-x:AC-X", "spec-x:AC-Y"]);
     expect(env.calls[0]?.dims).toEqual(ALL_DIMS);
     // reused units are given to the call as already judged, and their diffs are still sent
     expect([...(env.calls[0]?.reusedFiles ?? [])].sort()).toEqual(["src/b.ts", "src/c.ts"]);
-    expect(env.calls[0]?.reusedCriteria).toEqual(["spec-x:AC-Y"]);
     expect(env.calls[0]?.prompt).toContain("+B1");
     expect(env.calls[0]?.prompt).toContain("+C1");
 
     // each reused unit is recorded with the review it came from
     const reused = unitsOf(second.review).filter((u) => u.source === "reused");
-    expect(reused.map((u) => u.id).sort()).toEqual(["spec-x:AC-Y", "src/b.ts", "src/c.ts"]);
+    expect(reused.map((u) => u.id).sort()).toEqual(["src/b.ts", "src/c.ts"]);
     const sourceToken = reviewToken(first.review);
     expect(typeof sourceToken).toBe("string");
     expect(reused.every((u) => u.first_review === sourceToken)).toBe(true);
-    expect(unitsOf(second.review).filter((u) => u.source === "fresh").map((u) => u.id).sort()).toEqual(["spec-x:AC-X", "spec-x:AC-Z", "src/a.ts"]);
+    expect(unitsOf(second.review).filter((u) => u.source === "fresh").map((u) => u.id).sort()).toEqual(["spec-x:AC-X", "spec-x:AC-Y", "src/a.ts"]);
 
     // lore assess prints fresh and reused counts per dimension
     expect(typeof (core as Record<string, unknown>)["renderUnitCounts"]).toBe("function");
     const line = (core as unknown as { renderUnitCounts: (r: MilestoneReview) => string }).renderUnitCounts(second.review);
     expect(line).toContain("security: 1 fresh, 2 reused");
     expect(line).toContain("concurrency_safety: 1 fresh, 2 reused");
-    expect(line).toContain("criteria: 2 fresh, 1 reused");
+    expect(line).toContain("criteria: 2 fresh, 0 reused");
+
+    // a third review with nothing changed asks no unit, only the plan-level dimensions (in the same one call)
+    env.calls.length = 0;
+    must(await env.review({ files: FILES_A_CHANGED, criteria: CRITERIA }));
+    expect(env.calls).toHaveLength(1);
+    expect(askedFiles(env.calls)).toEqual([]);
+    expect(askedCriteria(env.calls)).toEqual([]);
+    expect(env.calls[0]?.dims).toEqual(ALL_DIMS);
+
+    // --rejudge ignores the stored verdicts: every unit is asked again, nothing stored is replaced
+    env.calls.length = 0;
+    const storedBefore = JSON.stringify([...env.store.rows.entries()].sort());
+    const rejudged = must(await env.review({ files: FILES_A_CHANGED, criteria: CRITERIA, rejudge: true }));
+    expect(askedFiles(env.calls)).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"]);
+    expect(askedCriteria(env.calls)).toEqual(["spec-x:AC-X", "spec-x:AC-Y"]);
+    expect(unitsOf(rejudged.review).every((u) => u.source === "fresh")).toBe(true);
+    expect(JSON.stringify([...env.store.rows.entries()].sort())).toBe(storedBefore);
+    expect((rejudged.review.judgment as unknown as { reuse?: { note?: string } }).reuse?.note).toMatch(/rejudge/);
   });
 
   it("AC-JR-1 a chunked review keeps today's call count (one call per chunk plus the summary) and every chunk is still sent", async () => {
@@ -298,18 +324,18 @@ describe("AC-JR-1: only changed units are re-asked", () => {
     const first = must(await env.review({ files: FILES_V1, criteria: CRITERIA, maxDiffChars: eachOwnChunk }));
     expect(env.calls.map((c) => c.mode)).toEqual(["chunk", "chunk", "chunk", "summary"]);
     expect(askedFiles(env.calls)).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"]);
-    expect(askedCriteria(env.calls)).toEqual(["spec-x:AC-X", "spec-x:AC-Y", "spec-x:AC-Z"]);
+    expect(askedCriteria(env.calls)).toEqual(["spec-x:AC-X", "spec-x:AC-Y"]);
 
     env.calls.length = 0;
     const second = must(await env.review({ files: FILES_A_CHANGED, criteria: CRITERIA, maxDiffChars: eachOwnChunk }));
     expect(env.calls).toHaveLength(expectedCalls);
     expect(askedFiles(env.calls)).toEqual(["src/a.ts"]);
-    expect(askedCriteria(env.calls)).toEqual(["spec-x:AC-X", "spec-x:AC-Z"]);
+    expect(askedCriteria(env.calls)).toEqual(["spec-x:AC-X", "spec-x:AC-Y"]);
     // every chunk is sent, including the chunks whose only file is reused
     const chunkPrompts = env.calls.filter((c) => c.mode === "chunk").map((c) => c.prompt);
     expect(chunkPrompts.some((p) => p.includes("+B1"))).toBe(true);
     expect(chunkPrompts.some((p) => p.includes("+C1"))).toBe(true);
-    expect(unitsOf(second.review).filter((u) => u.source === "reused").map((u) => u.id).sort()).toEqual(["spec-x:AC-Y", "src/b.ts", "src/c.ts"]);
+    expect(unitsOf(second.review).filter((u) => u.source === "reused").map((u) => u.id).sort()).toEqual(["src/b.ts", "src/c.ts"]);
     expect(unitsOf(first.review).every((u) => u.source === "fresh")).toBe(true);
   });
 
@@ -325,19 +351,22 @@ describe("AC-JR-1: only changed units are re-asked", () => {
 
 // ─── AC-JR-2 ─────────────────────────────────────────────────────────────────
 
-describe("AC-JR-2: criterion key covers its files and facts", () => {
-  const TEST_FILE = "packages/x/tests/feature.test.ts";
-  const COMMAND = `bun run test:file ${TEST_FILE}`;
-  const attestation = (testSha: string, commit: string) => [
-    { criterion_id: "AC-W", verdict: "pass", command: COMMAND, test_files: [{ path: TEST_FILE, content_sha256: testSha }], commit_sha: commit, run_id: `run-${commit}`, recorded_at: `2026-10-${commit}` },
-  ];
-  const importing = (testSha = "t1", commit = "01"): AiCriterionInput =>
-    criterion("AC-W", "The feature works end to end.", { statement: "The feature works.", command: COMMAND, attestation: attestation(testSha, commit) as never });
-  const ctx = (reach: readonly string[], absent: readonly string[] = []) => ({
-    pathExists: async (path: string): Promise<Result<boolean, LoreError>> => ok(!absent.includes(path)),
-    reachedChangedFiles: async (_command: string, changed: readonly string[]): Promise<Result<readonly string[], LoreError>> => ok(reach.filter((f) => changed.includes(f))),
-  });
+describe("AC-JR-2: an AI criterion is keyed by its text and the whole plan diff", () => {
   const BASE = { "src/lib.ts": "L1", "src/other.ts": "O1" };
+
+  /** The AI criteria exactly as the production assess wiring hands them to the review (scope -> measureCriteriaAtHead), no injected field. */
+  async function wired(statement: string, rubric: string): Promise<readonly AiCriterionInput[]> {
+    const doc = (over: Record<string, unknown>) => ({ title: "t", status: "approved", content: "", parent_id: null, deleted_at: null, version: 1, tags: [], ...over }) as never;
+    const spec = doc({ id: "S1", slug: "spec-x", type: "spec", extra: { acceptance_criteria: [{ id: "AC-W", statement, verify: { mode: "ai", rubric } }] } });
+    const task = doc({ id: "T1", slug: "task-one", type: "task", extra: { ac_scope: ["AC-W"] } });
+    const facts = await measureCriteriaAtHead({
+      scopes: planCriterionScopes(spec, [task]),
+      headCommit: "a".repeat(40),
+      runner: { runCriteria: async () => ok([]) } as never,
+      readRows: async () => ok([]),
+    });
+    return facts.ai_criteria;
+  }
 
   async function secondReviewAsks(first: PlanState, second: PlanState): Promise<string[]> {
     const env = makeEnv();
@@ -347,73 +376,39 @@ describe("AC-JR-2: criterion key covers its files and facts", () => {
     return askedCriteria(env.calls);
   }
 
-  it("AC-JR-2 re-asks when a changed source its command's tests import (and its text does not name) changed", async () => {
-    const reach = ctx(["src/lib.ts"]);
-    const asked = await secondReviewAsks(
-      { files: BASE, criteria: [importing()], ctx: reach },
-      { files: { ...BASE, "src/lib.ts": "L2" }, criteria: [importing()], ctx: reach },
-    );
-    expect(asked).toEqual(["spec-x:AC-W"]);
+  it("AC-JR-2 the production wiring hands the review statement and rubric and nothing that names a command, attestation or reach", async () => {
+    const [c] = await wired("Readers can follow it.", "The plan reads clearly.");
+    expect(c).toEqual({ spec: "spec-x", ac: "AC-W", rubric: "The plan reads clearly.", statement: "Readers can follow it." });
   });
 
-  it("AC-JR-2 reuses when only files outside its covered set changed", async () => {
-    const reach = ctx(["src/lib.ts"]);
-    const asked = await secondReviewAsks(
-      { files: BASE, criteria: [importing()], ctx: reach },
-      { files: { ...BASE, "src/other.ts": "O2" }, criteria: [importing()], ctx: reach },
-    );
-    expect(asked).toEqual([]);
+  it("AC-JR-2 is reused when nothing in the plan changed and its text is unchanged", async () => {
+    const criteria = await wired("Readers can follow it.", "The plan reads clearly.");
+    expect(await secondReviewAsks({ files: BASE, criteria }, { files: BASE, criteria })).toEqual([]);
   });
 
-  it("AC-JR-2 re-asks when its attestation rows at the assessed commit changed (a test file's content hash)", async () => {
-    const reach = ctx(["src/lib.ts"]);
-    const asked = await secondReviewAsks(
-      { files: BASE, criteria: [importing("t1")], ctx: reach },
-      { files: BASE, criteria: [importing("t2")], ctx: reach },
-    );
-    expect(asked).toEqual(["spec-x:AC-W"]);
+  it("AC-JR-2 is re-asked when its statement changed", async () => {
+    const before = await wired("Readers can follow it.", "The plan reads clearly.");
+    const after = await wired("Readers can follow it and its rollback.", "The plan reads clearly.");
+    expect(await secondReviewAsks({ files: BASE, criteria: before }, { files: BASE, criteria: after })).toEqual(["spec-x:AC-W"]);
   });
 
-  it("AC-JR-2 reuses when only the commit, run id and timestamp of its attestation rows changed", async () => {
-    const reach = ctx(["src/lib.ts"]);
-    const asked = await secondReviewAsks(
-      { files: BASE, criteria: [importing("t1", "01")], ctx: reach },
-      { files: BASE, criteria: [importing("t1", "02")], ctx: reach },
-    );
-    expect(asked).toEqual([]);
+  it("AC-JR-2 is re-asked when its rubric changed", async () => {
+    const before = await wired("Readers can follow it.", "The plan reads clearly.");
+    const after = await wired("Readers can follow it.", "The plan reads clearly and names its risks.");
+    expect(await secondReviewAsks({ files: BASE, criteria: before }, { files: BASE, criteria: after })).toEqual(["spec-x:AC-W"]);
   });
 
-  it("AC-JR-2 re-asks a criterion that covers no file when any plan file changed", async () => {
-    const asked = await secondReviewAsks(
-      { files: BASE, criteria: [criterion("AC-Z", "The plan reads clearly overall.")] },
-      { files: { ...BASE, "src/other.ts": "O2" }, criteria: [criterion("AC-Z", "The plan reads clearly overall.")] },
-    );
-    expect(asked).toEqual(["spec-x:AC-Z"]);
+  it("AC-JR-2 is re-asked when any file of the plan changed, one its text names or one it does not", async () => {
+    const naming = await wired("The behaviour in src/lib.ts is documented.", "src/lib.ts has a header.");
+    expect(await secondReviewAsks({ files: BASE, criteria: naming }, { files: { ...BASE, "src/lib.ts": "L2" }, criteria: naming })).toEqual(["spec-x:AC-W"]);
+    // a file it does not name, which it may still depend on (a caller, configuration): keying by named paths would reuse it here
+    expect(await secondReviewAsks({ files: BASE, criteria: naming }, { files: { ...BASE, "src/other.ts": "O2" }, criteria: naming })).toEqual(["spec-x:AC-W"]);
   });
 
-  it("AC-JR-2 re-asks when it names a path a fix deleted (neither changed nor present)", async () => {
-    const named = criterion("AC-N", "The behaviour in src/gone.ts is documented.");
-    const asked = await secondReviewAsks(
-      { files: { ...BASE, "src/gone.ts": "G1" }, criteria: [named], ctx: ctx([], ["src/gone.ts"]) },
-      { files: BASE, criteria: [named], ctx: ctx([], ["src/gone.ts"]) },
-    );
-    expect(asked).toEqual(["spec-x:AC-N"]);
-  });
-
-  it("AC-JR-2 re-asks a criterion whose statement was edited although its rubric and the files did not change", async () => {
-    const before = criterion("AC-S", "The plan reads clearly overall.", { statement: "Readers can follow the plan." });
-    const after = criterion("AC-S", "The plan reads clearly overall.", { statement: "Readers can follow the plan and its rollback." });
-    expect(await secondReviewAsks({ files: BASE, criteria: [before] }, { files: BASE, criteria: [before] })).toEqual([]);
-    expect(await secondReviewAsks({ files: BASE, criteria: [before] }, { files: BASE, criteria: [after] })).toEqual(["spec-x:AC-S"]);
-  });
-
-  it("AC-JR-2 reuses a criterion naming a changed path when a different file changed", async () => {
-    const named = criterion("AC-N", "The behaviour in src/lib.ts is documented.");
-    const asked = await secondReviewAsks(
-      { files: BASE, criteria: [named] },
-      { files: { ...BASE, "src/other.ts": "O2" }, criteria: [named] },
-    );
-    expect(asked).toEqual([]);
+  it("AC-JR-2 is re-asked when a file of the plan was added or removed", async () => {
+    const criteria = await wired("Readers can follow it.", "The plan reads clearly.");
+    expect(await secondReviewAsks({ files: BASE, criteria }, { files: { ...BASE, "src/new.ts": "N1" }, criteria })).toEqual(["spec-x:AC-W"]);
+    expect(await secondReviewAsks({ files: BASE, criteria }, { files: { "src/lib.ts": "L1" }, criteria })).toEqual(["spec-x:AC-W"]);
   });
 });
 
@@ -429,7 +424,8 @@ describe("AC-JR-3: model and prompt version are in the key", () => {
     return { env, second };
   }
   const EVERY_UNIT_FILES = ["src/a.ts", "src/b.ts", "src/c.ts"];
-  const EVERY_UNIT_CRITERIA = ["spec-x:AC-X", "spec-x:AC-Y", "spec-x:AC-Z"];
+  const EVERY_UNIT_CRITERIA = ["spec-x:AC-X", "spec-x:AC-Y"];
+  const GUIDE = { spec_conformance: "g1", design_necessity: "g2", concurrency_safety: "g3", security: "g4" };
 
   it("AC-JR-3 an unchanged second review reuses every unit (control)", async () => {
     const { env } = await secondAsks(() => undefined);
@@ -437,7 +433,7 @@ describe("AC-JR-3: model and prompt version are in the key", () => {
     expect(askedCriteria(env.calls)).toEqual([]);
   });
 
-  it("AC-JR-3 editing the unit-instruction template source makes every unit fresh", async () => {
+  it("AC-JR-3 editing the unit-instruction text makes every unit fresh", async () => {
     const { env } = await secondAsks((e) => {
       e.template = "EDITED unit instructions, no version string changed.";
     });
@@ -445,23 +441,35 @@ describe("AC-JR-3: model and prompt version are in the key", () => {
     expect(askedCriteria(env.calls)).toEqual(EVERY_UNIT_CRITERIA);
   });
 
-  it("AC-JR-3 changing a model-behaviour setting makes every unit fresh", async () => {
+  it("AC-JR-3 editing the dimension guide makes every unit fresh", async () => {
+    const env = makeEnv();
+    env.guide = GUIDE;
+    must(await env.review({ files: FILES_V1, criteria: CRITERIA }));
+    env.calls.length = 0;
+    env.guide = { ...GUIDE, security: "g4 EDITED" };
+    must(await env.review({ files: FILES_V1, criteria: CRITERIA }));
+    expect(askedFiles(env.calls)).toEqual(EVERY_UNIT_FILES);
+    expect(askedCriteria(env.calls)).toEqual(EVERY_UNIT_CRITERIA);
+  });
+
+  it("AC-JR-3 changing a fixed provider argument (an effort or sampling flag) makes every unit fresh", async () => {
     const { env } = await secondAsks((e) => {
-      e.identity = { ...e.identity, settings: { temperature: 0.7 } };
+      e.identity = { ...e.identity, settings: { args: "-p --effort high" } };
     });
     expect(askedFiles(env.calls)).toEqual(EVERY_UNIT_FILES);
     expect(askedCriteria(env.calls)).toEqual(EVERY_UNIT_CRITERIA);
   });
 
-  it("AC-JR-3 changing the answering model makes every unit fresh", async () => {
+  it("AC-JR-3 a different answering model makes every unit fresh", async () => {
     const { env } = await secondAsks((e) => {
       e.identity = { ...e.identity, model: "stub-model-2" };
+      e.answering = "stub-model-2";
     });
     expect(askedFiles(env.calls)).toEqual(EVERY_UNIT_FILES);
     expect(askedCriteria(env.calls)).toEqual(EVERY_UNIT_CRITERIA);
   });
 
-  it("AC-JR-3 a unit judged first in a chunk call is reused in a full call (call kind, schema and max tokens are not in the key)", async () => {
+  it("AC-JR-3 a unit judged first in a chunk call is reused in a full call (per-call arguments are not in the key)", async () => {
     const env = makeEnv();
     const eachOwnChunk = Math.max(...Object.keys(FILES_V1).map((p) => diffOf({ [p]: "A1" }).length)) + 2;
     must(await env.review({ files: FILES_V1, criteria: CRITERIA, maxDiffChars: eachOwnChunk }));
@@ -473,32 +481,70 @@ describe("AC-JR-3: model and prompt version are in the key", () => {
     expect(askedCriteria(env.calls)).toEqual([]);
   });
 
-  it("AC-JR-3 a provider that reports no model makes every unit fresh and the review records reuse disabled with the cause", async () => {
-    const { env, second } = await secondAsks((e) => {
-      e.identity = { ...e.identity, model: undefined };
-    });
+  it("AC-JR-3 a verdict is stored under the reply's answering model: with an alias configured nothing is reused, the cause is recorded and no extra call is made", async () => {
+    const env = makeEnv();
+    env.identity = { ...env.identity, model: "sonnet" };
+    env.answering = "claude-sonnet-full-id";
+    must(await env.review({ files: FILES_V1, criteria: CRITERIA }));
+    expect(env.judgeCalls).toBe(1);
+    // stored under the answering model, never under the configured alias
+    expect([...env.store.rows.values()].every((r) => r.model === "claude-sonnet-full-id")).toBe(true);
+    env.calls.length = 0;
+    const second = must(await env.review({ files: FILES_V1, criteria: CRITERIA }));
+    expect(askedFiles(env.calls)).toEqual(EVERY_UNIT_FILES_OF(FILES_V1));
+    expect(askedCriteria(env.calls)).toEqual(["spec-x:AC-X", "spec-x:AC-Y"]);
+    // the same one call as the first review: the alias cost no probe, no re-run
+    expect(env.calls).toHaveLength(1);
+    const reuse = (second.review.judgment as unknown as { reuse?: { enabled: boolean; note?: string } }).reuse;
+    expect(reuse?.enabled).toBe(true);
+    expect(reuse?.note).toContain("sonnet");
+    expect(reuse?.note).toContain("claude-sonnet-full-id");
+    // set to the full id, the stored verdicts are found
+    env.calls.length = 0;
+    env.identity = { ...env.identity, model: "claude-sonnet-full-id" };
+    must(await env.review({ files: FILES_V1, criteria: CRITERIA }));
+    expect(askedFiles(env.calls)).toEqual([]);
+    expect(askedCriteria(env.calls)).toEqual([]);
+  });
+
+  it("AC-JR-3 no configured model disables lookup and storing from the start and the cause names ai.assess.model", async () => {
+    const env = makeEnv();
+    env.identity = { ...env.identity, model: undefined, modelHint: "set ai.assess.model to the full id of the model" };
+    must(await env.review({ files: FILES_V1, criteria: CRITERIA }));
+    expect(env.store.rows.size).toBe(0);
+    expect(env.store.insertCalls).toHaveLength(0);
+    env.calls.length = 0;
+    const second = must(await env.review({ files: FILES_V1, criteria: CRITERIA }));
     expect(askedFiles(env.calls)).toEqual(EVERY_UNIT_FILES);
     expect(askedCriteria(env.calls)).toEqual(EVERY_UNIT_CRITERIA);
-    const reuse = (second.review.judgment as unknown as { reuse?: { enabled: boolean; cause?: string } } | undefined)?.reuse;
+    const reuse = (second.review.judgment as unknown as { reuse?: { enabled: boolean; cause?: string } }).reuse;
     expect(reuse?.enabled).toBe(false);
-    expect(reuse?.cause).toMatch(/model/i);
+    expect(reuse?.cause).toContain("ai.assess.model");
     expect(unitsOf(second.review).every((u) => u.source === "fresh")).toBe(true);
   });
 
-  it("AC-JR-3 a criterion's canonical attestation input is identical across two commits whose test files did not change", async () => {
-    const withRows = (commit: string): AiCriterionInput =>
-      criterion("AC-W", "Works.", {
-        command: "bun run test:file t.test.ts",
-        attestation: [{ criterion_id: "AC-W", verdict: "pass", command: "bun run test:file t.test.ts", test_files: [{ path: "t.test.ts", content_sha256: "same" }], commit_sha: commit, run_id: `r-${commit}`, recorded_at: `at-${commit}` }] as never,
-      });
-    const reach = { pathExists: async () => ok(true), reachedChangedFiles: async () => ok([] as readonly string[]) };
+  it("AC-JR-3 a provider that reports no answering model disables lookup and storing from the start", async () => {
     const env = makeEnv();
-    must(await env.review({ files: { "src/x.ts": "X1" }, criteria: [withRows("c1")], ctx: reach as never }));
-    env.calls.length = 0;
-    must(await env.review({ files: { "src/x.ts": "X1" }, criteria: [withRows("c2")], ctx: reach as never }));
-    expect(askedCriteria(env.calls)).toEqual([]);
+    env.identity = { ...env.identity, reportsAnsweringModel: false };
+    must(await env.review({ files: FILES_V1, criteria: CRITERIA }));
+    expect(env.store.rows.size).toBe(0);
+    const second = must(await env.review({ files: FILES_V1, criteria: CRITERIA }));
+    const reuse = (second.review.judgment as unknown as { reuse?: { enabled: boolean; cause?: string } }).reuse;
+    expect(reuse?.enabled).toBe(false);
+    expect(reuse?.cause).toMatch(/does not report the model/);
+  });
+
+  it("AC-JR-3 a reply that names no model is never stored", async () => {
+    const env = makeEnv();
+    env.answering = undefined;
+    const first = must(await env.review({ files: FILES_V1, criteria: CRITERIA }));
+    expect(env.store.rows.size).toBe(0);
+    expect(unitsOf(first.review).every((u) => u.source === "fresh")).toBe(true);
+    expect((first.review.judgment as unknown as { reuse?: { note?: string } }).reuse?.note).toMatch(/named no answering model/);
   });
 });
+
+const EVERY_UNIT_FILES_OF = (files: Record<string, string>): string[] => Object.keys(files).sort();
 
 // ─── AC-JR-4 ─────────────────────────────────────────────────────────────────
 

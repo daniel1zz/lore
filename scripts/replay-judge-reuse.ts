@@ -5,8 +5,9 @@
  *   are in the store and ONE file's diff changed (a real one-line change to the plan's `assess.ts` hunk), so that file is asked again
  *   and every other file's verdict is reused; the warm review must still report the cross-file flow from assess.ts `claimedSource`
  *   to gate-acceptance-service `humanPartyOf`. This script grades nothing; it prints what each review found.
- * Usage: `REPLAY_MODEL=<model id or claude alias> bun scripts/replay-judge-reuse.ts [plan-slug] [task-slug] [spec-slug]`
- *   (defaults: the AC-JR-5 plan, its task and its spec). The judge is `claude -p --model $REPLAY_MODEL`.
+ * Usage: `[REPLAY_MODEL=<full model id>] bun scripts/replay-judge-reuse.ts [plan-slug] [task-slug] [spec-slug]`
+ *   (defaults: the AC-JR-5 plan, its task and its spec). Without REPLAY_MODEL the judge is the claude CLI's default model, whose full id
+ *   is read from the CLI itself; the judge runs as `claude -p --model <that id> --output-format json`.
  * Safety: nothing here writes the live corpus. The plan, task and spec are READ with `lore get --json`; the verdict store is a
  *   throwaway SQLite file under `mktemp -d`; the review documents go to an in-memory stub that only prints. `lore assess` itself has
  *   no diff override and derives the diff from fixed landing ranges, which is why the warm change is made on the diff text here.
@@ -19,6 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NoOpTelemetry, ok, renderUnitCounts, type DocRecord, type MilestoneReview } from "@lore/core";
 import { ClaudeCliProvider } from "../packages/lore/src/ai/claude-cli-provider.js";
+import { parseClaudeJsonReply } from "../packages/lore/src/ai/hermetic-spawn.js";
 import { AIProviderService } from "../packages/lore/src/service/ai-provider-service.js";
 import { MilestoneReviewService } from "../packages/lore/src/service/milestone-review-service.js";
 import { SQLiteStore } from "../packages/lore/src/store/sqlite-store.js";
@@ -26,7 +28,21 @@ import { SQLiteStore } from "../packages/lore/src/store/sqlite-store.js";
 const PLAN = process.argv[2] ?? "plan-an-agent-s-gate-acceptance-waits-for-a-human-decision";
 const TASK = process.argv[3] ?? "task-agent-accept-gate-creates-a-pending-human-decision-readers";
 const SPEC = process.argv[4] ?? "spec-an-agent-s-gate-acceptance-waits-for-a-human-decision";
-const MODEL = process.env["REPLAY_MODEL"] ?? "sonnet";
+/**
+ * The FULL model id the replay keys verdicts by. `REPLAY_MODEL` (a full id, never an alias: an alias never matches an answering model,
+ * so nothing would be reused) or, when unset, the claude CLI's own default model, read from one trivial `claude -p` call's JSON reply.
+ */
+function resolveModel(): string {
+  const given = process.env["REPLAY_MODEL"];
+  if (given !== undefined && given.trim() !== "") return given;
+  const probe = spawnSync("claude", ["-p", "--output-format", "json", "--setting-sources", ""], { input: "Reply with the word ok.", encoding: "utf8" });
+  const parsed = probe.status === 0 ? parseClaudeJsonReply(probe.stdout) : undefined;
+  if (parsed === undefined || !parsed.ok || parsed.value.model === undefined) {
+    throw new Error("could not read the claude default model from `claude -p --output-format json`; set REPLAY_MODEL to a full model id");
+  }
+  return parsed.value.model;
+}
+const MODEL = resolveModel();
 const WARM_FILE = "packages/lore/src/adapters/cli/commands/assess.ts";
 
 function run(command: string, args: string[]): string {

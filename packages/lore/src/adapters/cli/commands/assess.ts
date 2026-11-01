@@ -81,7 +81,6 @@ import { printLine } from "../output.js";
 import { requireBulkLifecycleService } from "../../bulk-wiring.js";
 import { resolveBulkSelector, type BulkSelector } from "../../../service/bulk-lifecycle-service.js";
 import { failedDimensions, renderUnitCounts, resolveMachineTestSlots, type MilestoneReview, type RetiredAcRef } from "@lore/core";
-import { createGitCriterionContext } from "../assess-criterion-context.js";
 import { ReviewTestSlots, slotCommitSuiteRunner, slotCriterionRerunner, slotStaleRefresher } from "../../../service/review-test-slots.js";
 import type { LoreError, MilestoneFacts, PlanBundle } from "@lore/core";
 
@@ -167,6 +166,11 @@ export default defineLoreCommand({
       type: "boolean",
       description:
         "File the failed findings by root cause: ONE issue per fingerprint (searched among open issues first, never duplicated), linked to every plan that shares it",
+    },
+    rejudge: {
+      type: "boolean",
+      description:
+        "Ignore the stored per-unit judge verdicts for this review and ask the judge about every unit again (fresh answers are still stored, replacing nothing): use it when a stored verdict is suspected wrong",
     },
     close: {
       type: "boolean",
@@ -544,7 +548,8 @@ export default defineLoreCommand({
           facts,
           ...(rerunCriterion !== undefined ? { rerunCriterion } : {}),
           ...(derivation.status === "derived" ? { diffText: derivation.diff_text } : {}),
-          ...(facts.assessed_commit !== undefined ? { criterionContext: createGitCriterionContext(inv.cwd, inv.env, facts.assessed_commit) } : {}),
+          // reason: BR-1535 S5 — `--rejudge` ignores stored unit verdicts for this review; fresh answers are still stored.
+          ...(args.rejudge === true ? { rejudge: true } : {}),
           diffSource: describeDiffSource(diffSource),
           maxDiffChars: app.aiProviderService.assessMaxDiffChars,
           ...(suiteOfPlan !== undefined ? { suite: suiteOfPlan } : {}),

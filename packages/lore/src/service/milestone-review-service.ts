@@ -31,6 +31,7 @@ import {
   type DecisionFinding,
   type DocRecord,
   type LinkType,
+  type JudgedDimension,
   type LlmMilestoneOutput,
   type ReviewCauses,
   type LoreError,
@@ -44,10 +45,11 @@ import {
 import { factsDimensions, mergeDimensions, runJudgment, type JudgePort } from "./milestone-review-judgment.js";
 import { randomUUID } from "node:crypto";
 import { UnitLedger, type JudgeVerdictStorePort } from "./judge-unit-ledger.js";
-import type { CriterionContextPort, JudgeIdentity } from "./judge-unit-keys.js";
+import type { JudgeIdentity } from "./judge-unit-keys.js";
 import {
   MILESTONE_REVIEW_PROMPT_VERSION,
   UNIT_INSTRUCTION_TEMPLATE,
+  unitTemplateSourceOf,
   type JudgedDecisionInput,
   type MilestoneTaskInput,
 } from "../ai/milestone-review-template.js";
@@ -108,6 +110,8 @@ export interface MilestoneReviewDeps {
   readonly now?: () => Date;
   /** The unit-instruction template source; default the shipped text. Sent in every call and hashed into every unit key. */
   readonly unitInstructions?: string;
+  /** The dimension guide; default the shipped one. Sent in every call and hashed (with the unit instructions) into every unit key. */
+  readonly dimensionGuide?: Readonly<Record<JudgedDimension, string>>;
 }
 
 /** Per-run inputs the adapter measured. */
@@ -124,8 +128,8 @@ export interface MilestoneReviewOptions {
   readonly suite?: SuiteRun;
   /** Runs one criterion in this run's execution context; absent = the re-run of criteria citing a reworded rule is not done. */
   readonly rerunCriterion?: CriterionRerunPort;
-  /** Repository facts a criterion's verdict key reads (path presence, test-file reach); absent = named paths count as present and no reach is computed. */
-  readonly criterionContext?: CriterionContextPort;
+  /** `lore assess --rejudge`: ignore stored unit verdicts for this review; fresh answers are still stored, replacing nothing (BR-1535 S5). */
+  readonly rejudge?: boolean;
 }
 
 /** A stored review and its document. */
@@ -319,9 +323,16 @@ export class MilestoneReviewService {
     const unitInstructions = this.deps.unitInstructions ?? UNIT_INSTRUCTION_TEMPLATE;
     // reason: BR-1535 — the review is named before it judges so the units it writes carry `first_review`; the review document does not exist yet.
     const reviewToken = `${bundle.plan.slug}@${clock().toISOString()}#${randomUUID().slice(0, 8)}`;
-    const ledger = new UnitLedger(this.deps.judgeVerdicts, identity, reviewToken, clock, unitInstructions);
+    const ledger = new UnitLedger(
+      this.deps.judgeVerdicts,
+      identity,
+      reviewToken,
+      clock,
+      unitTemplateSourceOf(unitInstructions, this.deps.dimensionGuide),
+      opts.rejudge === true,
+    );
     const judged = await runJudgment({
-      reuse: { ledger, identity, unitInstructions, ...(opts.criterionContext !== undefined ? { criterionContext: opts.criterionContext } : {}) },
+      reuse: { ledger, identity, unitInstructions, ...(this.deps.dimensionGuide !== undefined ? { dimensionGuide: this.deps.dimensionGuide } : {}) },
       base: {
         suiteSection: renderSuiteSection(opts.suite),
         plan: { slug: bundle.plan.slug, title: bundle.plan.title, content: bundle.plan.content },

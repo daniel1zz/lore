@@ -153,9 +153,22 @@ export interface MilestoneReviewPromptInput {
   readonly unitInstructions?: string;
   /** The units this call lists (BR-1535); absent = a bare prompt build that lists every file-less unit-free call. */
   readonly units?: PromptUnits;
+  /** The dimension guide (default {@link DIMENSION_GUIDE}); the judgment layer passes the same text it keys on. */
+  readonly dimensionGuide?: Readonly<Record<JudgedDimension, string>>;
 }
 
-const DIMENSION_GUIDE: Readonly<Record<JudgedDimension, string>> = {
+/**
+ * The template source a unit's verdict key reads (BR-1535 S2): the unit instructions AND the dimension guide they refer to, unfilled.
+ * Editing either invalidates every stored verdict, without anybody bumping a version string.
+ *
+ * @param unitInstructions - the unfilled per-unit instructions
+ * @param guide - the dimension guide (default the shipped one)
+ */
+export function unitTemplateSourceOf(unitInstructions: string, guide: Readonly<Record<JudgedDimension, string>> = DIMENSION_GUIDE): string {
+  return JSON.stringify({ unitInstructions, dimensionGuide: Object.fromEntries(Object.entries(guide).sort(([a], [b]) => a.localeCompare(b))) });
+}
+
+export const DIMENSION_GUIDE: Readonly<Record<JudgedDimension, string>> = {
   spec_conformance:
     "Does the landed work do what the spec and plan say, no less and no more? The facts table lists files landings " +
     "touched outside their task's anchors: a helper may legitimately sit outside, but a file that adds behaviour the " +
@@ -308,7 +321,8 @@ function renderUnits(units: PromptUnits | undefined): string {
  */
 export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): string {
   const asked = askedDimensionsOf(input.mode);
-  const dims = asked.map((d) => `- ${d}: ${DIMENSION_GUIDE[d]}`).join("\n");
+  const guide = input.dimensionGuide ?? DIMENSION_GUIDE;
+  const dims = asked.map((d) => `- ${d}: ${guide[d]}`).join("\n");
   // reason: BR-1535 — a call answers only the units marked ASK; with no units given (a bare prompt build) every criterion is asked as before.
   const asksCriteria =
     input.mode !== "chunk" &&

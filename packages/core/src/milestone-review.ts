@@ -195,22 +195,6 @@ export interface AiCriterionInput {
   readonly rubric: string;
   /** The criterion's statement; part of its verdict key (BR-1535). Absent = the rubric alone is its text. */
   readonly statement?: string;
-  /** A verify command the criterion carries, when it has one: its test files' reach decides which changed files it covers (BR-1535). */
-  readonly command?: string;
-  /** Its attestation rows at the assessed commit, as the adapter read them (volatile fields are dropped when the key is made). */
-  readonly attestation?: readonly CriterionAttestationInput[];
-}
-
-/** One attestation row of a criterion as read; `commit_sha`, `run_id` and `recorded_at` never reach the verdict key. */
-export interface CriterionAttestationInput {
-  readonly criterion_id: string;
-  readonly verdict: string;
-  readonly command: string;
-  /** Each test file the command runs and the sha256 of its content at the assessed commit. */
-  readonly test_files: readonly { readonly path: string; readonly content_sha256: string }[];
-  readonly commit_sha?: string;
-  readonly run_id?: string;
-  readonly recorded_at?: string;
 }
 
 /**
@@ -278,9 +262,12 @@ export const judgeUnitRecordSchema = z.object({
 });
 export type JudgeUnitRecord = z.infer<typeof judgeUnitRecordSchema>;
 
-/** Whether the review could reuse stored unit verdicts; a disabled review names the cause (spec S5). */
+/**
+ * Whether the review could reuse stored unit verdicts; a disabled review names the cause (spec S5). An enabled review may carry a
+ * `note`: why nothing could be reused although it was on (a configured alias is not the answering model; `--rejudge`).
+ */
 export const judgeReuseRecordSchema = z.discriminatedUnion("enabled", [
-  z.object({ enabled: z.literal(true) }),
+  z.object({ enabled: z.literal(true), note: z.string().min(1).optional() }),
   z.object({ enabled: z.literal(false), cause: z.string().min(1) }),
 ]);
 export type JudgeReuseRecord = z.infer<typeof judgeReuseRecordSchema>;
@@ -290,7 +277,16 @@ export const judgmentRecordSchema = z.object({
   /** Names this review in the units of later reviews (`first_review`); stored with the review so its document can be found from a unit. */
   review_token: z.string().min(1).optional(),
   /** The judge that answered: provider, the answering model when the provider can name it, the model-behaviour settings. */
-  judge: z.object({ provider: z.string().min(1), model: z.string().min(1).optional(), settings: z.record(z.string(), z.union([z.string(), z.number()])) }).optional(),
+  judge: z
+    .object({
+      provider: z.string().min(1),
+      /** The configured `ai.assess.model` (what lookups key by). */
+      model: z.string().min(1).optional(),
+      /** The model the provider's reply named for the answering call(s); stored verdicts are keyed by it. */
+      answering_model: z.string().min(1).optional(),
+      settings: z.record(z.string(), z.union([z.string(), z.number()])),
+    })
+    .optional(),
   /** Whether stored unit verdicts were used; absent on a review stored before per-unit verdicts. */
   reuse: judgeReuseRecordSchema.optional(),
   /** Every unit judged by this review, fresh or reused; absent on a review stored before per-unit verdicts. */

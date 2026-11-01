@@ -161,7 +161,8 @@ export function buildHermeticSpawnSpec(
 ): HermeticSpawnSpec {
   // reason: BR-1535 — `--model <id>` is the Claude Code CLI's flag (`claude --help`), so like the isolation flag it is added only for
   // the `claude` binary; a custom judge command owns its own argument contract and is never handed a flag it may not know.
-  const modelFlags = context.model !== undefined && isClaudeCliCommand(cfg.command) ? ["--model", context.model] : [];
+  // `--output-format json` rides with it: the JSON reply names the model that answered (`modelUsage`), which the review keys verdicts by.
+  const modelFlags = context.model !== undefined && isClaudeCliCommand(cfg.command) ? ["--model", context.model, "--output-format", "json"] : [];
   const args = isClaudeCliCommand(cfg.command)
     ? [...cfg.args, ...HERMETIC_ISOLATION_FLAGS, ...modelFlags]
     : [...cfg.args];
@@ -171,4 +172,73 @@ export function buildHermeticSpawnSpec(
     cwd: context.tmpDir,
     env: sanitizeSpawnEnv(context.sourceEnv),
   };
+}
+
+/** Flags whose value differs per call (the call's model, output format, schema, token budget, prompt file); never part of a verdict key. */
+const PER_CALL_FLAGS: ReadonlySet<string> = new Set([
+  "--model",
+  "--output-format",
+  "--input-format",
+  "--json-schema",
+  "--max-tokens",
+  "--max-output-tokens",
+  "--max-turns",
+  "--prompt-file",
+  "--system-prompt-file",
+]);
+
+/**
+ * The configured provider arguments that are the SAME for every call (effort and sampling flags, `-p`): what a verdict key reads as the
+ * model-behaviour settings (BR-1535 S2). A per-call flag and its value are dropped (`--flag value` and `--flag=value`).
+ *
+ * @param args - the provider's configured `args`
+ * @returns the fixed arguments, in order
+ */
+export function fixedProviderArgs(args: readonly string[]): string[] {
+  const kept: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] as string;
+    const flag = arg.split("=", 1)[0] as string;
+    if (!PER_CALL_FLAGS.has(flag)) {
+      kept.push(arg);
+      continue;
+    }
+    if (!arg.includes("=")) i += 1;
+  }
+  return kept;
+}
+
+/** What `claude -p --output-format json` replied: the answer text and the model that produced it. */
+export interface ClaudeJsonReply {
+  readonly text: string;
+  /** The model id with the most output tokens in `modelUsage`; `undefined` when the reply lists none. */
+  readonly model: string | undefined;
+}
+
+/**
+ * Reads the reply of `claude -p --output-format json`: `result` is the answer, the keys of `modelUsage` are the models that took
+ * part. When several did (a helper model for a side task), the one that produced the most output tokens is the answering model.
+ *
+ * @param stdout - the process's stdout
+ * @returns the reply, or the reason it is not one (`is_error`, not JSON, no `result`)
+ */
+export function parseClaudeJsonReply(stdout: string): { ok: true; value: ClaudeJsonReply } | { ok: false; reason: string } {
+  let json: unknown;
+  try {
+    json = JSON.parse(stdout);
+  } catch {
+    return { ok: false, reason: "stdout is not JSON" };
+  }
+  // reason: a hand-checked boundary (this module is dependency-free); every field read is type-guarded before use.
+  const object = typeof json === "object" && json !== null ? (json as Record<string, unknown>) : undefined;
+  if (object === undefined || typeof object["result"] !== "string") return { ok: false, reason: "JSON has no string `result`" };
+  if (object["is_error"] === true) return { ok: false, reason: `claude reported an error: ${object["result"].slice(0, 300)}` };
+  const usageRaw = object["modelUsage"];
+  const usage = typeof usageRaw === "object" && usageRaw !== null ? Object.entries(usageRaw as Record<string, unknown>) : [];
+  let top: [string, number] | undefined;
+  for (const [id, entry] of usage) {
+    const tokens = typeof entry === "object" && entry !== null && typeof (entry as Record<string, unknown>)["outputTokens"] === "number" ? ((entry as Record<string, number>)["outputTokens"] as number) : 0;
+    if (top === undefined || tokens > top[1]) top = [id, tokens];
+  }
+  return { ok: true, value: { text: object["result"], model: top?.[0] } };
 }

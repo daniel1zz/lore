@@ -245,6 +245,8 @@ export class HttpAIProvider implements AIProvider {
       duration_ms,
       exit_code: 0,
       provider_name: this.name,
+      // reason: BR-1535 — the response's own `model` field is the model that answered.
+      model: parsed.data.model,
       ...(parsed.data.usage !== undefined
         ? {
             usage: {

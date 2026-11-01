@@ -165,6 +165,8 @@ interface ModelAwareProvider {
   readonly modelId?: string;
   /** True when a call's `model` decides the model that answers (`claude -p --model`, the HTTP request body). */
   readonly acceptsModelOverride?: boolean;
+  /** The configured arguments that are the same for every call (the model-behaviour settings of a verdict key). */
+  readonly fixedArgs?: readonly string[];
 }
 
 export class AIProviderService {
@@ -292,12 +294,12 @@ export class AIProviderService {
     const { result, duration_ms } = await this._invokeProvider({ prompt, doc_type: "knowledge", title, ...this._milestoneModel() });
     if (!result.ok) return result;
     const usage = result.value.usage;
-    const model = this.judgeIdentity().model;
+    const model = result.value.model;
     return ok({
       text: result.value.content,
       duration_ms,
       ...(usage !== undefined ? { tokens_in: usage.input_tokens, tokens_out: usage.output_tokens } : {}),
-      // reason: BR-1535 — the model a reply names is the provider's resolved model; a provider that cannot name one (the CLI) names none, never a guess.
+      // reason: BR-1535 S5 — the model is whatever the provider's REPLY named (claude JSON `modelUsage`, HTTP `model`), never the requested name.
       ...(model !== undefined ? { model } : {}),
     });
   }
@@ -314,25 +316,23 @@ export class AIProviderService {
   }
 
   /**
-   * Which judge answers milestone reviews (BR-1535). The model is the one the call is INVOKED with: `ai.assess.model` when the
-   * provider takes an explicit model (the `claude` CLI via `--model <id>`, the HTTP provider), else the model the provider itself
-   * names (`HttpAIProvider.modelId`). A provider that can do neither (a custom judge command) or no configured model leaves it
-   * unknown: per-unit reuse is then off and `modelHint` says what to set. No provider sends a reasoning-effort or temperature
-   * setting today, so `settings` is empty; the key reads it so a provider that starts sending one invalidates stored verdicts.
+   * Which judge answers milestone reviews (BR-1535 S2, S5). `model` is the CONFIGURED `ai.assess.model` (what lookups match; an
+   * alias such as `sonnet` finds nothing because verdicts are stored under the model id the reply names). `reportsAnsweringModel`
+   * is true for a provider whose reply names its model: the `claude` binary (JSON output, `modelUsage`) and the HTTP provider
+   * (`model` field); a custom judge command does not. `settings` are the provider arguments that are the same for every call.
    *
    * @returns the identity; never throws
    */
   judgeIdentity(): JudgeIdentity {
     const provider = this.providers.get(this.active) as (AIProvider & Partial<ModelAwareProvider>) | undefined;
-    const invoked = this._milestoneModel().model;
-    const own = provider?.modelId;
-    const named = invoked ?? (own === undefined || own.trim() === "" ? undefined : own);
-    if (named !== undefined) return { provider: this.active, model: named, settings: {} };
-    const hint =
-      provider?.acceptsModelOverride === true
-        ? "set ai.assess.model to the model id the judge should answer with (the judge is then invoked with it explicitly)"
-        : `provider "${this.active}" takes no explicit model, so use the claude-cli provider with the claude binary or the http provider and set ai.assess.model`;
-    return { provider: this.active, model: undefined, settings: {}, modelHint: hint };
+    const reports = provider?.acceptsModelOverride === true;
+    const fixed = provider?.fixedArgs ?? [];
+    const settings: Record<string, string | number> = fixed.length > 0 ? { args: fixed.join(" ") } : {};
+    const configured = this.assessBudgets.model;
+    const hint = reports
+      ? "set ai.assess.model to the full id of the model the judge should answer with (the judge is then invoked with it explicitly)"
+      : `use the claude-cli provider with the claude binary, or the http provider, and set ai.assess.model; provider "${this.active}" does not report the model that answered`;
+    return { provider: this.active, model: configured, reportsAnsweringModel: reports, settings, modelHint: hint };
   }
 
   // ─── SPEC-017: create path ──────────────────────────────────────────────────

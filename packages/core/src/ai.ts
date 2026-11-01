@@ -83,6 +83,8 @@ export interface GenerateOutput {
   exit_code: number;
   /** Provider name as registered in the provider registry */
   provider_name: string;
+  /** The model that actually answered, read from the provider's reply (claude CLI JSON output, HTTP response `model`); absent when the provider cannot say. */
+  model?: string;
   /**
    * Token usage from the provider API (populated by HttpAIProvider; absent for ClaudeCliProvider).
    * Forwarded to aiGenerationEventSchema.usage in telemetry (AC-HTTP-TEL-1).
