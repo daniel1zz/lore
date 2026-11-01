@@ -142,7 +142,8 @@ describe("setup --project --uninstall removes the baseline skill (BL-8)", () => 
     const skillPaths = (JSON.parse(readFileSync(ledgerPath, "utf8")) as { entries: { path: string }[] }).entries
       .map((e) => e.path)
       .filter((p) => p.startsWith(".claude/skills/lore-baseline/"));
-    expect(skillPaths.length).toBeGreaterThanOrEqual(2);
+    // reason: T19b removed templates/branch.md and leaf.md; SKILL.md is the whole shipped skill now.
+    expect([...skillPaths].sort()).toEqual([".claude/skills/lore-baseline/SKILL.md"]);
     for (const p of skillPaths) expect(existsSync(join(repo, p))).toBe(true);
 
     const removed = runLore(["setup", "--project", "--uninstall", "--yes"], repo);

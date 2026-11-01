@@ -186,7 +186,7 @@ describe("AC-073-1: gate-denial hint — configured consumer earns exactly 1 hin
     configureUpstream(tmpDir);
 
     const result = await runLore(
-      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","parent_id":"some-parent","content":""}'],
+      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","parent_id":"some-parent"}'],
       tmpDir,
     );
 
@@ -205,7 +205,7 @@ describe("AC-073-1: gate-denial hint — configured consumer earns exactly 1 hin
     // config.yaml has no feedback.upstream section at all.
 
     const result = await runLore(
-      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","parent_id":"some-parent","content":""}'],
+      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","parent_id":"some-parent"}'],
       tmpDir,
     );
 
@@ -295,7 +295,7 @@ describe("AC-OOB-6: self-lock broken, both directions — unconfigured gate-deni
     await initCorpus(tmpDir);
 
     const unconfigured = await runLore(
-      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","parent_id":"some-parent","content":""}'],
+      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","parent_id":"some-parent"}'],
       tmpDir,
     );
     // Clean up this half's throwaway dir now — the second half below reassigns
@@ -323,7 +323,7 @@ describe("AC-OOB-6: self-lock broken, both directions — unconfigured gate-deni
     configureUpstream(tmpDir);
 
     const configured = await runLore(
-      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","parent_id":"some-parent","content":""}'],
+      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","parent_id":"some-parent"}'],
       tmpDir,
     );
 
@@ -376,7 +376,6 @@ describe("REGRESSION: the hint wiring never fires on an ALLOW branch", () => {
         JSON.stringify({
           type: "spec",
           title: "x",
-          content: "## Overview\nsomething",
           extra: { spec_kind: "feature" },
         }),
       ],
