@@ -1,3 +1,4 @@
+// @reads assets/templates/**
 /**
  * Tests for SessionService.bootstrap (SPEC-041 S1 pointer-set).
  * Uses InMemoryStore — no file I/O, no SQLite.
@@ -27,6 +28,7 @@ import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
+import { wireStructuredCorpus } from "../../helpers/structured-docs.js";
 function makeSessionService(store: InMemoryStore, isCheckpointEnabled?: (cp: GateCheckpoint) => boolean) {
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const sessionService = new SessionService(store, {
@@ -48,6 +50,9 @@ describe("SessionService.bootstrap — HAPPY (AC-SL-1)", () => {
   it("assembles a correct pointer-set from a realistic corpus", async () => {
     const store = actedStore(new InMemoryStore());
     const { corpusService, sessionService } = makeSessionService(store);
+    // BR-1528: the handoff below is created structured, with a body rendered from the seeded `knowledge/handoff` template
+    // (the content-freedom check at the end compares that non-empty body against the report).
+    await wireStructuredCorpus(corpusService, store);
 
     const prd = await mustCreate(corpusService, {
       type: "prd",

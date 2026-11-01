@@ -18,6 +18,7 @@
  */
 
 import {
+  DEGRADED_HANDOFF_MARKER,
   MILESTONE_DIMENSIONS,
   type CreateDocInput,
   type DimensionAnswer,
@@ -95,7 +96,11 @@ function changedFileLines(handoff: HandoffExtra): string[] {
     if (file.named_by_author) labels.push("named by author");
     lines.push(`${file.path} (${labels.join("; ")})`);
   }
-  for (const group of handoff.changed_files_overflow ?? []) lines.push(`${group.dir}/ (${String(group.files)} files, grouped by top-level directory)`);
+  const overflow = handoff.changed_files_overflow ?? [];
+  if (overflow.length > 0) {
+    lines.push(`${String(overflow.reduce((total, group) => total + group.files, 0))} more files, grouped by top-level directory:`);
+    for (const group of overflow) lines.push(`${group.dir}/ (${String(group.files)} files)`);
+  }
   return lines;
 }
 
@@ -117,7 +122,8 @@ function trailGapThreads(handoff: HandoffExtra): { thread: string; blocking: boo
  */
 export function handoffFields(handoff: HandoffExtra): GeneratedFields {
   const summary =
-    `Handoff by ${handoff.by}` +
+    // reason: the degraded marker is the exact line a reader of a git-only capture must see first (SPEC-041 D7).
+    `${handoff.degraded === true ? `${DEGRADED_HANDOFF_MARKER}\n\n` : ""}Handoff by ${handoff.by}` +
     `${handoff.plan_ref !== undefined ? ` on ${handoff.plan_ref}` : ""}: ${String(handoff.key_decisions.length)} decision(s), ` +
     `${String(handoff.modified_files.length)} modified file(s), ${String(handoff.next_steps.length)} next step(s)` +
     `${handoff.degraded === true ? " (degraded git-only capture)" : ""}.`;

@@ -1,3 +1,4 @@
+// @reads assets/templates/**
 /**
  * AC-LG-10 / BR-1371: a handoff is bounded. A session that touched 1500 files across 40 runs yields
  * 150 one-line files (path + run count, no run id), one line per top-level directory for the rest,
@@ -10,6 +11,7 @@
  */
 
 import { ensureRequirementsDocId } from "../helpers/parented-create.js";
+import { wireStructuredCorpus } from "../helpers/structured-docs.js";
 import { describe, expect, it } from "vitest";
 import { RecordLockService } from "../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../src/service/gate-enforcer.js";
@@ -64,11 +66,13 @@ function makeService(trail: SessionTrail) {
     createHandoffDoc: corpus.createHandoffDoc.bind(corpus),
     readTrail: () => trail,
   });
-  return { service, corpus };
+  return { service, corpus, store };
 }
 
 async function write(fileCount: number, unmeasuredTurns = 0) {
-  const { service: svc, corpus } = makeService(trailOf(fileCount, unmeasuredTurns));
+  const { service: svc, corpus, store } = makeService(trailOf(fileCount, unmeasuredTurns));
+  // BR-1528: the handoff body is rendered from the approved `knowledge/handoff` template, so the corpus carries the seeds.
+  await wireStructuredCorpus(corpus, store);
   // reason: BR-709 — a handoff is filed under the requirements document when it names no plan, so the corpus needs one.
   await ensureRequirementsDocId(corpus);
   const r = await svc.writeHandoff(
@@ -99,7 +103,8 @@ describe("bounded handoff", () => {
     const grouped = groupLines.reduce((n, l) => n + Number(/\((\d+) files\)/.exec(l)![1]), 0);
     expect(grouped).toBe(1350);
 
-    const gapLines = body.split("\n").filter((l) => l.startsWith("- not measured:"));
+    // the gap is an open thread of the template-rendered body: `- thread: not measured: ...` (non-blocking)
+    const gapLines = body.split("\n").filter((l) => l.startsWith("- thread: not measured:"));
     expect(gapLines).toHaveLength(1);
     expect(gapLines[0]).toContain("700");
     expect(body).not.toMatch(/run cc:/);
