@@ -855,7 +855,7 @@ describe("AC-DCF-1: approve refuses an absent undeclared test anchor; --creates 
     (await df.readTask(slug)).extra["done_contract"] as { oracles: StoredOracle[] };
 
   it("AC-DCF-1: approve of a code task anchored to an absent undeclared test file exits 4 done-contract-uncompilable with anchor-absent naming the path, anchor rm and --creates, and writes nothing", async () => {
-    const slug = await df.createTask({ plan: dfPlan, kind: "code", title: "Absent anchor", anchors: [MISSING], acScope: [] });
+    const slug = await df.createTask({ plan: dfPlan, kind: "code", title: "Absent anchor", anchors: [MISSING], plainAnchors: true, acScope: [] });
     const before = await df.readTask(slug);
     const refused = await df.run(["approve", slug]);
     expect(refused.exitCode, refused.stderr).toBe(4);
