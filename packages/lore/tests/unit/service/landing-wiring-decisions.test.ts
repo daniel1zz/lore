@@ -1,3 +1,4 @@
+// @layer service-landing-wiring AC-DCS1-14
 /**
  * Decisions of task-every-closer-and-reader-uses-landingof-integrate-plan (spec-lore-done-closes-a-commitless-task-through-an-audited-no, AC-ND-8, BR-1468):
  *
@@ -41,10 +42,22 @@ async function createTask(corpus: CorpusService, anchors: string[] = []): Promis
   if (!plan.ok) throw new Error(JSON.stringify(plan.error));
   const task = await corpus.create({
     type: "task", title: "Task", parent_id: plan.value.id, content: "# Task",
-    extra: { plan_id: plan.value.id, ...(anchors.length > 0 ? { file_anchors: anchors } : {}) },
+    extra: { plan_id: plan.value.id, kind: "code", ...(anchors.length > 0 ? { file_anchors: anchors } : {}) },
   } as CreateDocInput);
   if (!task.ok) throw new Error(JSON.stringify(task.error));
   return task.value.id;
+}
+
+/**
+ * Writes an open claim with no branch and no worktree straight into the store. `lore claim` of a code task can no longer make one
+ * (AC-DCS1-14: work-needs-branch), but the anchor guard of BR-1468 still reads such a record, so the record is seeded as an old
+ * corpus holds it.
+ */
+async function seedNoBranchClaim(store: InMemoryStore, id: string, by: string): Promise<void> {
+  const found = await store.find(id);
+  if (!found.ok || found.value === null) throw new Error("task not found");
+  const written = await store.update(id, { extra: { ...found.value.extra, claim: { by, at: new Date().toISOString(), harness_run: runOfName(by) } } });
+  if (!written.ok) throw new Error(`no-branch claim seed failed: ${JSON.stringify(written.error)}`);
 }
 
 async function anchorsOf(store: InMemoryStore, id: string): Promise<unknown> {
@@ -57,7 +70,7 @@ describe("anchor add under an open no-branch claim (BR-1468)", () => {
   it("NEGATIVE: addAnchors and setAnchors are refused with exit-4 VALIDATION_ERROR and write nothing", async () => {
     const { store, corpus, service } = makeServices();
     const id = await createTask(corpus);
-    expect((await service.claim(id, { by: "alice", harnessRun: runOfName("alice") })).ok).toBe(true);
+    await seedNoBranchClaim(store, id, "alice");
     const versionBefore = (await store.find(id)) as { ok: true; value: DocRecord };
 
     const added = await service.addAnchors(id, ["src/a.ts"], { by: "alice" });
@@ -90,9 +103,9 @@ describe("anchor add under an open no-branch claim (BR-1468)", () => {
   it("BOUNDARY: releasing the no-branch claim, then re-claiming on a branch, lets the anchor in; removal is never refused", async () => {
     const { store, corpus, service } = makeServices();
     const id = await createTask(corpus, ["src/keep.ts", "src/drop.ts"]);
-    // an anchored task cannot hold a no-branch claim at all (BR-1468 at claim time), so claim a corpus-only one
+    // an anchored task cannot hold a no-branch claim at all (BR-1468 at claim time), so seed a corpus-only one
     const corpusOnly = await createTask(corpus);
-    expect((await service.claim(corpusOnly, { by: "alice", harnessRun: runOfName("alice") })).ok).toBe(true);
+    await seedNoBranchClaim(store, corpusOnly, "alice");
     expect((await service.addAnchors(corpusOnly, ["src/a.ts"], { by: "alice" })).ok).toBe(false);
     expect((await service.release(corpusOnly, { by: "alice", harnessRun: runOfName("alice") })).ok).toBe(true);
     expect((await service.claim(corpusOnly, { by: "alice", harnessRun: runOfName("alice"), worktree: "feature-y" })).ok).toBe(true);
@@ -116,7 +129,7 @@ describe("a claim that records a branch needs a readable start (required git pro
     const { store, corpus, service } = makeServices(unreadable());
     const id = await createTask(corpus);
 
-    const refused = await service.claim(id, { by: "alice", harnessRun: runOfName("alice"), branch: "ghost" });
+    const refused = await service.claim(id, { by: "alice", harnessRun: runOfName("alice"), branch: "ghost", worktree: "ghost" });
 
     expect(refused.ok).toBe(false);
     if (refused.ok) return;
@@ -138,10 +151,16 @@ describe("a claim that records a branch needs a readable start (required git pro
     expect(claim["start_head"]).toBe(FAKE_HEAD_SHA);
   });
 
-  it("BOUNDARY: a claim that records no branch needs no start, even when git cannot answer", async () => {
-    const { corpus, service } = makeServices(unreadable());
+  it("BOUNDARY: a claim that records no branch is refused work-needs-branch (AC-DCS1-14) before any start is measured, even when git cannot answer", async () => {
+    const { store, corpus, service } = makeServices(unreadable());
     const id = await createTask(corpus);
-    expect((await service.claim(id, { by: "alice", harnessRun: runOfName("alice") })).ok).toBe(true);
+    const refused = await service.claim(id, { by: "alice", harnessRun: runOfName("alice") });
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.code).toBe("VALIDATION_ERROR");
+    expect(JSON.stringify(refused.error)).toContain("work-needs-branch");
+    const found = await store.find(id);
+    expect(found.ok && found.value !== null ? found.value.extra["claim"] : "unreadable").toBeUndefined();
   });
 });
 

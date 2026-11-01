@@ -16,6 +16,7 @@ import { uatVerdictSchema } from "./uat.js";
 import { milestoneReviewSchema } from "./milestone-review.js";
 import { prdRequirementsSchema } from "./requirement.js";
 import { SPEC_KINDS } from "./spec-kind.js";
+import { TASK_KINDS } from "./done-contract.js";
 import { specAcceptanceCriteriaSchema } from "./acceptance.js";
 import { handoffExtraSchema } from "./session.js";
 import { WEIGHT_TABLE_KINDS } from "./decision-record.js";
@@ -374,33 +375,21 @@ export const taskExtraSchema = z
      */
     ac_scope: acScopeArraySchema.optional(),
     /**
-     * Declares that this task's tests were written RED FIRST — the test file
-     * was executed and OBSERVED FAILING before its implementation landed
-     * (task-red-first-discipline-is-asked-for-in-prose-but-never). A task
-     * carrying `red_first: true` is held to an ADDITIONAL floor at
-     * `TaskWorkflowService.done` time, alongside the pre-existing
-     * `result: "pass"` floor: at least one `"expected-fail"`/`"fail"`
-     * evidence entry must be present, proving the claimed RED run was
-     * actually RECORDED — not merely performed and then forgotten (the exact
-     * gap this field closes; see the origin task's "Why this is a mechanism
-     * gap" section). A task that never sets this flag is completely
-     * unaffected — `done()`'s additional floor only evaluates when
-     * `red_first === true`; anything else (absent, `false`, or a malformed
-     * non-boolean value from a legacy/corrupted row) reads as "not declared"
-     * (mirrors `readClaim`/`readEvidence`'s "malformed → safe default"
-     * contract, never a crash).
-     *
-     * Written exclusively via `TaskWorkflowService.declareRedFirst`
-     * (`lore red-first <task>`) — deliberately NO create-time
-     * `lore create task --red-first` flag (this claim is commonly made
-     * AFTER a task already exists, once its tests are written) and
-     * deliberately NO `lore set --red-first` (wholesale `extra` replace,
-     * same reason `file_anchors`/`claim`/`verification_evidence`/`ac_scope`
-     * each have a dedicated writer instead).
+     * LEGACY, no longer read or written: the red requirement is the stored done contract's `red_required`
+     * (waived only at `lore approve --red-waiver`). The key stays in the schema so a task that carries it
+     * still parses.
      *
      * Source: task-red-first-discipline-is-asked-for-in-prose-but-never
      */
     red_first: z.boolean().optional(),
+    /**
+     * The task kind (`code` | `check` | `corpus`, ledger D28). Required by every creation surface (`lore create task --kind`,
+     * `lore issue adopt --kind`, the HTTP create route); stays OPTIONAL in this shape because tasks created before the kind
+     * existed carry none and must still parse. Writable on a draft only (`lore set <task> --kind`); once the task is
+     * approved the kind is immutable (`DEDICATED_EXTRA_KEYS`, refusal `kind-locked`).
+     * Source: spec-done-contract-compiled-at-approve-task-kinds-write-sets AC-DCS1-4.
+     */
+    kind: z.enum(TASK_KINDS).optional(),
     /**
      * Bi-temporal validity metadata (SPEC-043 D1) — a task is a SECOND
      * eligible type alongside knowledge/adr as of

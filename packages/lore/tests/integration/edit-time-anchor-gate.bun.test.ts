@@ -118,7 +118,7 @@ function buildFixture(): Fixture {
   const newTask = (title: string, anchors: string[]): string =>
     slugOf(
       mustLore(
-        ["create", "task", "--title", title, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", ...anchors.flatMap((a) => ["--anchor", a])],
+        ["create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", ...anchors.flatMap((a) => ["--anchor", a])],
         repo,
       ),
     );
@@ -190,21 +190,34 @@ function taskState(slug: string): TaskState {
     const doc = db.query("SELECT id, version, extra FROM docs WHERE slug = ?").get(slug) as { id: string; version: number; extra: string } | null;
     if (doc === null) throw new Error(`no doc ${slug}`);
     const rows = db.query("SELECT COUNT(*) AS n FROM versions WHERE doc_id = ?").get(doc.id) as { n: number };
-    const anchors = (JSON.parse(doc.extra) as { file_anchors?: string[] }).file_anchors ?? [];
+    // reason: an edit-time declaration extends the claim's write set, never the task's approved anchors (AC-DCS1-12); the write set is
+    // the task's file anchors until the claim declares its own.
+    const extra = JSON.parse(doc.extra) as { file_anchors?: string[]; claim?: { write_set?: string[] } };
+    const anchors = extra.claim?.write_set ?? extra.file_anchors ?? [];
     return { version: doc.version, anchors, versionRows: rows.n };
   } finally {
     db.close();
   }
 }
 
-/** The newest version row of `slug`, non-body columns. */
-function latestVersionRow(slug: string): Record<string, unknown> {
+/** The task's approved anchors (`extra.file_anchors`), which an edit-time declaration never touches. */
+function taskFileAnchors(slug: string): string[] {
+  const db = new Database(join(fx.repo, ".lore", "lore.db"), { readonly: true });
+  try {
+    const doc = db.query("SELECT extra FROM docs WHERE slug = ?").get(slug) as { extra: string } | null;
+    if (doc === null) throw new Error(`no doc ${slug}`);
+    return (JSON.parse(doc.extra) as { file_anchors?: string[] }).file_anchors ?? [];
+  } finally {
+    db.close();
+  }
+}
+
+/** The newest audit row of `slug`. */
+function latestAuditRow(slug: string): Record<string, unknown> {
   const db = new Database(join(fx.repo, ".lore", "lore.db"), { readonly: true });
   try {
     const doc = db.query("SELECT id FROM docs WHERE slug = ?").get(slug) as { id: string };
-    const row = db.query("SELECT * FROM versions WHERE doc_id = ? ORDER BY version DESC LIMIT 1").get(doc.id) as Record<string, unknown>;
-    const { extra: _extra, content: _content, ...columns } = row;
-    return columns;
+    return db.query("SELECT * FROM audit WHERE doc_id = ? ORDER BY id DESC LIMIT 1").get(doc.id) as Record<string, unknown>;
   } finally {
     db.close();
   }
@@ -248,19 +261,24 @@ describe("edit-time anchor gate (task-skill-design-implementers-declare-out-of-a
     expect(taskState(fx.taskA).anchors).toEqual(expect.arrayContaining(before.anchors));
   });
 
-  it("AC-EAG-b: an edit to a free out-of-anchor path is allowed and the path becomes an anchor (one version, the helper's run)", () => {
+  it("AC-EAG-b: an edit to a free out-of-anchor path is allowed and the path joins the claim write set (one write, the helper's run)", () => {
     const before = taskState(fx.taskA);
+    const filesBefore = taskFileAnchors(fx.taskA);
     const r = runHook({ cwd: fx.wtA, target: join(fx.wtA, "free/old.ts") });
     expect(r.status, r.stderr).toBe(0);
     const after = taskState(fx.taskA);
     expect(after.anchors).toContain("free/old.ts");
     expect(after.anchors).toEqual(expect.arrayContaining(before.anchors));
     expect(after.version).toBe(before.version + 1);
-    expect(after.versionRows).toBe(before.versionRows + 1);
-    const row = latestVersionRow(fx.taskA);
+    // reason: the declaration extends the CLAIM's write set (AC-DCS1-12), a working-state write: it bumps the document version and
+    // writes an audit row, and adds no versions row (the task's approved anchors are untouched, which the 50-anchor cap needs).
+    expect(after.versionRows).toBe(before.versionRows);
+    expect(taskFileAnchors(fx.taskA)).toEqual(filesBefore);
+    const row = latestAuditRow(fx.taskA);
     // the writer's name derives from the helper's RUN (BR-1055), no longer from a name the caller supplied
-    expect(row["created_by"]).toBe(nameOfAgentRun(RUN_A as RunId));
+    expect(row["actor"]).toBe(nameOfAgentRun(RUN_A as RunId));
     expect(JSON.stringify(row)).toContain(RUN_A);
+    expect(JSON.stringify(row)).toContain("free/old.ts");
   });
 
   it("AC-EAG-b (STATE): editing the declared path again writes nothing more", () => {
@@ -363,12 +381,10 @@ describe("edit-time anchor gate (task-skill-design-implementers-declare-out-of-a
       expect(runHook({ cwd: fx.wtA, target: join(fx.wtA, "free/old.ts"), path: fx.bareBin }).status).toBe(0);
     });
 
-    it("AC-EAG-g: `lore anchor rm` removes the path from the file at once (a removed path is not allowed from a stale file)", () => {
-      const rm = runLore(["anchor", "rm", fx.taskA, "free/old.ts"], fx.wtA, RUN_A, ACTOR_A);
-      expect(rm.exitCode, rm.stderr).toBe(0);
-      expect(readScope(fx.wtA).claims[0]!.anchors).not.toContain("free/old.ts");
-      expect(runHook({ cwd: fx.wtA, target: join(fx.wtA, "free/old.ts"), path: fx.bareBin }).status).toBe(2);
-    }, 120_000);
+    // reason: the retired case here was `lore anchor rm` taking a declared path back out of the scope file. A declared path now lives in
+    // the claim's write set (AC-DCS1-12), which `anchor rm` (a verb on the task's approved anchors) never edits, and no verb removes a
+    // declared path from a live claim: the write set ends with the claim. The scope file is therefore a function of the claim's write set
+    // alone, which the AC-EAG-g case above (the declared path is in the file) and AC-EAG-h (no file, fall back to the lore read) pin.
 
     it("AC-EAG-h: a missing scope file (claim made before the file existed) falls back to the lore read: in-anchor allowed, no lore -> denied", () => {
       const aside = `${scopeFileOf(fx.wtB)}.aside`;

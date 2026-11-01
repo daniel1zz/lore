@@ -158,14 +158,14 @@ function firstWriteAttested(bin: string, root: string, project: string, claudeHo
   const reg = runHook(sessionStart.command, { session_id: FIXTURE_SESSION, cwd: project, hook_event_name: "SessionStart", source: "startup" }, project, hookEnv);
   if (reg.status !== 0) return { exit: reg.status ?? "-", verdict: { pass: false, reason: `run-register hook exited ${String(reg.status)}: ${reg.stderr.slice(0, 160)}` } };
 
-  const created = runBin(bin, ["create", "task", "--adhoc", "--ac-scope", "", "--title", "First Write Probe Task", "--json"], project, env);
+  const created = runBin(bin, ["create", "task", "--adhoc", "--kind", "code", "--ac-scope", "", "--title", "First Write Probe Task", "--json"], project, env);
   if (created.exitCode !== 0) return { exit: created.exitCode, verdict: { pass: false, reason: `create task failed: ${created.stderr.slice(0, 160)}` } };
   const slug = findString(JSON.parse(created.stdout), "slug");
   if (slug === undefined) return { exit: 0, verdict: { pass: false, reason: "create task --json carried no slug" } };
 
   const pre = runHook(
     preBash.command,
-    { session_id: FIXTURE_SESSION, cwd: project, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: `lore claim ${slug}` } },
+    { session_id: FIXTURE_SESSION, cwd: project, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: `lore claim ${slug} --worktree fresh-install-probe` } },
     project,
     hookEnv,
   );

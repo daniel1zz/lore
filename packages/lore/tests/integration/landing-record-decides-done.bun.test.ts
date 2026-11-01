@@ -95,21 +95,19 @@ function cherryPickOntoMain(branch: string): void {
   git(["checkout", "-q", "--detach", "main"]);
 }
 
-function recordPass(task: string): void {
-  mustRun(["evidence", task, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"]);
-}
-
 /**
- * A claimed task on `branch`. With `evidence: true` (the default) its pass is already on record, so the landing's done
- * walk (BR-1356) archives it at once; with `evidence: false` the landing leaves it unarchived for a later `lore done`.
+ * A task approved with its stored contract and claimed on `branch`. A landing runs the contract oracles itself and records their rows
+ * (AC-DCS2-1), so no pass is recorded here. With `evidence: true` (the default) the red run is waived at approve, so the landing's done
+ * walk (BR-1356) archives the task at once; with `evidence: false` the red run stays required and no runner has produced one, so the
+ * landing leaves the task unarchived (red-first) for a later `lore done`.
  */
 function createClaimedTask(title: string, branch: string, evidence = true): string {
   taskCounter += 1;
   const task = parseSlug(
-    mustRun(["create", "task", "--title", `${title} ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"]),
+    mustRun(["create", "task", "--kind", "code", "--title", `${title} ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"]),
   );
+  mustRun(evidence ? ["approve", task, "--red-waiver", "the red run is not the subject of this test"] : ["approve", task]);
   mustRun(["claim", task, "--worktree", branch]);
-  if (evidence) recordPass(task);
   return task;
 }
 
@@ -124,7 +122,11 @@ beforeEach(() => {
   mustRun(["init"]);
   patchLoreConfig(
     dir,
-    ["workflow:", "  gates:", '    "plan-close":', "      enabled: false", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"', ""].join("\n"),
+    [
+      "workflow:", "  gates:", '    "plan-close":', "      enabled: false", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"',
+      // approve compiles each task's done contract from these commands (a code task needs all three)
+      "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"', "",
+    ].join("\n"),
   );
   const prd = parseSlug(mustRun(["create", "prd", "--title", "Landing PRD", "--content", "root", "--no-ai"]));
   planSlug = parseSlug(mustRun(["create", "plan", "--title", "Landing Plan", "--parent", prd, "--content", "x", "--no-ai"]));
@@ -170,7 +172,6 @@ describe("AC-LRD-1 — lore done decides from the recorded landing only", () => 
     git(["add", "late.txt"]);
     git(["commit", "-q", "-m", "committed after the landing"]);
     git(["checkout", "-q", "--detach", "main"]);
-    recordPass(task);
 
     const refused = runLore(["done", task]);
 

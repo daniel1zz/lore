@@ -203,8 +203,8 @@ describe(`${ID}: the CLI exits 4 for the same refusals and --issue writes the ca
   it(
     `${ID}: lore link --type resolves exits exactly 4`,
     async () => {
-      const a = await lore(["create", "task", "--title", "link from", "--adhoc", "--ac-scope", "", "--content", "b", "--no-ai", "--json"]);
-      const b = await lore(["create", "task", "--title", "link to", "--adhoc", "--ac-scope", "", "--content", "b", "--no-ai", "--json"]);
+      const a = await lore(["create", "task", "--title", "link from", "--adhoc", "--kind", "code", "--ac-scope", "", "--content", "b", "--no-ai", "--json"]);
+      const b = await lore(["create", "task", "--title", "link to", "--adhoc", "--kind", "code", "--ac-scope", "", "--content", "b", "--no-ai", "--json"]);
       expect(a.exitCode, a.stderr).toBe(0);
       expect(b.exitCode, b.stderr).toBe(0);
       const from = (JSON.parse(a.stdout) as { data: { slug: string } }).data.slug;
@@ -230,7 +230,7 @@ describe(`${ID}: the CLI exits 4 for the same refusals and --issue writes the ca
     `${ID}: lore create task --issue 7 --issue 9 exits 0 and writes extra.issues == [{repo_id,7},{repo_id,9}]`,
     async () => {
       const run = await lore([
-        "create", "task", "--title", "carrier task", "--adhoc", "--ac-scope", "", "--content", "b", "--no-ai",
+        "create", "task", "--title", "carrier task", "--adhoc", "--kind", "code", "--ac-scope", "", "--content", "b", "--no-ai",
         "--issue", "7", "--issue", "9", "--json",
       ]);
       expect(run.exitCode, run.stderr).toBe(0);
@@ -251,7 +251,7 @@ describe(`${ID}: the CLI exits 4 for the same refusals and --issue writes the ca
     `${ID}: lore create task --issue 99 (not listed) exits exactly 4 and writes nothing`,
     async () => {
       const before = (await listDocs()).length;
-      const run = await lore(["create", "task", "--title", "ghost carrier", "--adhoc", "--ac-scope", "", "--content", "b", "--no-ai", "--issue", "99"]);
+      const run = await lore(["create", "task", "--title", "ghost carrier", "--adhoc", "--kind", "code", "--ac-scope", "", "--content", "b", "--no-ai", "--issue", "99"]);
       expect(run.exitCode, run.stderr).toBe(4);
       expect((await listDocs()).length).toBe(before);
     },
@@ -262,7 +262,7 @@ describe(`${ID}: the CLI exits 4 for the same refusals and --issue writes the ca
     `${ID}: --issue 0, a repeated --issue 7, and 51 --issue values each exit exactly 4 and write nothing`,
     async () => {
       const before = (await listDocs()).length;
-      const base = ["create", "task", "--title", "bad refs", "--adhoc", "--ac-scope", "", "--content", "b", "--no-ai"];
+      const base = ["create", "task", "--title", "bad refs", "--adhoc", "--kind", "code", "--ac-scope", "", "--content", "b", "--no-ai"];
       const zero = await lore([...base, "--issue", "0"]);
       expect(zero.exitCode, zero.stderr).toBe(4);
       const duplicate = await lore([...base, "--issue", "7", "--issue", "7"]);
@@ -286,7 +286,7 @@ describe(`${ID}: the CLI exits 4 for the same refusals and --issue writes the ca
   it(
     `${ID}: a task created without --issue carries no extra.issues (regression)`,
     async () => {
-      const run = await lore(["create", "task", "--title", "plain task", "--adhoc", "--ac-scope", "", "--content", "b", "--no-ai", "--json"]);
+      const run = await lore(["create", "task", "--title", "plain task", "--adhoc", "--kind", "code", "--ac-scope", "", "--content", "b", "--no-ai", "--json"]);
       expect(run.exitCode, run.stderr).toBe(0);
       const extra = (JSON.parse(run.stdout) as { data: { extra: Record<string, unknown> } }).data.extra;
       expect(extra).not.toHaveProperty("issues");

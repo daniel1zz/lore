@@ -121,7 +121,7 @@ function claimFromWorktree(name: string, actor: string, scope: string | undefine
   taskCounter += 1;
   const task = slugOf(
     mustRun(
-      ["create", "task", "--title", `WRC Task ${name} ${taskCounter}`, "--parent", fx.plan, "--plan-id", fx.plan, "--content", "x", "--no-ai"],
+      ["create", "task", "--kind", "code", "--title", `WRC Task ${name} ${taskCounter}`, "--parent", fx.plan, "--plan-id", fx.plan, "--content", "x", "--no-ai"],
       fx.repo,
     ).stdout,
   );

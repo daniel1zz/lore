@@ -4,7 +4,7 @@
 /**
  * AC-HR-1 oracle — every escalating producer records a readable detail: one table row per class
  * (governance-loosen, worktree-remove, stash-drop, run-end-stale, process-reap, override-judgment,
- * override-attestation, ac-exempt, verify-new-command).
+ * ac-exempt, verify-new-command; the override-attestation class is retired, D45).
  *
  * Throwaway corpora only (mkdtemp + `lore init`, cwd and HOME inside the temp tree), never the repo's `.lore/`. Most rows
  * drive the real CLI (`bun run src/index.ts`); the stash and run-reap rows drive the real service in-process over the
@@ -399,24 +399,6 @@ const PRODUCERS: readonly ProducerRow[] = [
     },
   },
   {
-    cls: "override-attestation",
-    verdict: "milestone",
-    label: "lore done --override-attestation",
-    drive: (corpus) => {
-      mustOk(corpus, ["create", "prd", "--title", "Root PRD", "--content", "x", "--json"]);
-      const task = (JSON.parse(mustOk(corpus, ["create", "task", "--title", "Manual Task", "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"])) as { data: { slug: string } }).data.slug;
-      mustOk(corpus, ["evidence", task, "--oracle", "manual", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"]);
-      expectAppliedWithoutPendingDecision(lore(corpus, ["done", task, "--override-attestation", "verified by hand in staging", "--declare-no-new-tests", "this task adds no test"]));
-      return { document: task };
-    },
-    summaryWords: (e) => [e["document"] as string],
-    checkChange: (change, e) => {
-      expect(change["document"]).toBe(e["document"]);
-      expect(change["override"]).toBe("attestation");
-      expect(change["reason"]).toBe("verified by hand in staging");
-    },
-  },
-  {
     cls: "ac-exempt",
     verdict: "milestone",
     label: "lore ac exempt",
@@ -446,7 +428,7 @@ const PRODUCERS: readonly ProducerRow[] = [
       const spec = slugOf(mustOk(corpus, ["create", "spec", "--title", "Hr2 Spec", "--no-ai", "--content", "body"]));
       mustOk(corpus, ["ac", "add", spec, "AC-HR2-1", "--statement", "A command that has never been attested on its task.", "--mode", "script", "--oracle", "other", "--command", "echo hr2-new-command"]);
       const plan = slugOf(mustOk(corpus, ["create", "plan", "--title", "Hr2 Plan", "--parent", spec, "--no-ai", "--content", "body"]));
-      const task = slugOf(mustOk(corpus, ["create", "task", "--title", "Hr2 Task", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body", "--ac-scope", "AC-HR2-1"]));
+      const task = slugOf(mustOk(corpus, ["create", "task", "--kind", "code", "--title", "Hr2 Task", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body", "--ac-scope", "AC-HR2-1"]));
       // reason: the seeded verify-new-command prior (0.95) lets this ask through as auto; tightening a threshold is not a loosening, so it applies at once.
       mustOk(corpus, ["autonomy", "set", "verify-new-command", "--threshold", "0.99"]);
       expectRefusedWithPendingDecision(lore(corpus, ["verify", plan, "--task", task, "--allow-new-commands"]));

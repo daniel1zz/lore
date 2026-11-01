@@ -97,7 +97,7 @@ describe("AC-SI-12: real session-start hook -> compiled dist/lore -> seat claims
     );
     taskSlug = parseSlug(
       mustRun(
-        ["create", "task", "--title", "Seat hook task", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"],
+        ["create", "task", "--title", "Seat hook task", "--kind", "code", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"],
         mainRepo,
         scratch,
       ),

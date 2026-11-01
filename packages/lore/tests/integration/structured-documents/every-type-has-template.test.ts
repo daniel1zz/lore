@@ -352,7 +352,7 @@ describe("AC-ST-8: the filled blank of every type and kind creates in a fresh co
         : docType === "adr" ? ["--parent", created["prd"]!, "--decision-status", "accepted"]
         : docType === "plan" ? ["--parent", created["spec-feature"]!]
         : docType === "knowledge" ? ["--sub-type", kind!, "--parent", created["prd"]!]
-        : docType === "task" ? ["--plan-id", created["plan"]!]
+        : docType === "task" ? ["--kind", "code", "--plan-id", created["plan"]!]
         : [];
       created[kind === undefined ? docType : `${docType}-${kind}`] = await write([...base, ...extra]);
     });

@@ -29,6 +29,7 @@ import type { CreateDocInput } from "@lore/core";
 import { sessionIdOfActor } from "../../../helpers/session-actor";
 import { createLiveApp } from "../../../helpers/live-app";
 import { DEFAULT_TEST_RUN, registerTestRun } from "../../../helpers/test-run-identity";
+import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../../../helpers/clean-tree-repo";
 
 const PACKAGE_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const ENTRY = join(PACKAGE_ROOT, "src", "index.ts");
@@ -56,8 +57,11 @@ export interface StoredClaim {
 export const R1 = "cc:rid-sess-one";
 export const R2 = "cc:rid-sess-two";
 
+/** Corpus directories that are git repositories (see {@link createCorpus} `gitBacked`): their HOME lies outside, so caches never dirty the tree. */
+const gitBackedDirs = new Set<string>();
+
 function cleanEnv(dir: string, actor?: string): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = { ...process.env, HOME: dir, CLAUDECODE: "1" };
+  const env: Record<string, string | undefined> = { ...process.env, HOME: gitBackedDirs.has(dir) ? FIXTURE_HOME_OUTSIDE_REPO : dir, CLAUDECODE: "1" };
   // The ambient identity/session of whoever runs this suite must never decide a verdict.
   for (const name of ["LORE_ACTOR", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID", "LORE_GATE_BYPASS"]) {
     delete env[name];
@@ -131,12 +135,21 @@ export interface Corpus {
   cleanup(): void;
 }
 
-export async function createCorpus(opts: { claimGates?: "enabled" | "disabled" } = {}): Promise<Corpus> {
+export async function createCorpus(opts: { claimGates?: "enabled" | "disabled"; gitBacked?: boolean } = {}): Promise<Corpus> {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "rid-claim-")));
+  // `gitBacked`: a clean git repository on main with the three `workflow.done_contract` commands, for suites whose tasks are approved,
+  // claimed on a branch, landed and judged by `lore done` (the done-contract model needs a commit to compile at and to land on).
+  if (opts.gitBacked === true) {
+    makeCleanTreeRepo(dir);
+    gitBackedDirs.add(dir);
+  }
   // Deliberately NOT a git repository: `lore release` on a task whose claim recorded no
   // --worktree is refused from inside a git repo (uncommitted-worktree guard, unrelated to
   // run identity). The corpus lives under the OS tmpdir, outside any repository.
   mustRun(["init"], dir);
+  if (opts.gitBacked === true) {
+    patchLoreConfig(dir, ["workflow:", "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"', ""].join("\n"));
+  }
   // Pre-flight gates (anchor overlap, actor-identity guard on os-fallback names) are not under
   // test: disable the two claim gates so ONLY the claim-conflict decision can refuse a claim.
   // `claimGates: "enabled"` keeps them ON for suites whose subject IS the claim gate (BR-1056 overlap by run).
@@ -169,7 +182,7 @@ export async function createCorpus(opts: { claimGates?: "enabled" | "disabled" }
       if (kind === "task") {
         return slugOf(
           mustRun(
-            ["create", "task", "--title", `RID Task ${counter}`, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", ...anchors.flatMap((a) => ["--anchor", a])],
+            ["create", "task", "--kind", "code", "--title", `RID Task ${counter}`, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", ...anchors.flatMap((a) => ["--anchor", a])],
             dir,
           ).stdout,
         );
@@ -198,7 +211,17 @@ export async function createCorpus(opts: { claimGates?: "enabled" | "disabled" }
 
 /** `by` is the RESOLVED writer name the spawn runs as (`sessionActorFor(...)`), injected through the session tier. */
 export function claim(dir: string, target: string, by: string, opts: { run?: string; steal?: boolean; worktree?: string } = {}): RunResult {
-  return runLore(["claim", target, ...(opts.steal === true ? ["--steal"] : []), ...(opts.worktree !== undefined ? ["--worktree", opts.worktree] : [])], dir, opts.run, by);
+  return runLore(["claim", target, ...(opts.steal === true ? ["--steal"] : []), ...claimWorktreeArgs(target, opts.worktree)], dir, opts.run, by);
+}
+
+/**
+ * The `--worktree` argument of a task claim. A code task is claimed on a branch (AC-DCS1-14: a claim naming no branch is refused
+ * `work-needs-branch`), so a caller that names none gets a working-copy name of its own per task, which keeps these fixtures'
+ * claims about holders and leases rather than about where the work is. A phase claim has no branch.
+ */
+export function claimWorktreeArgs(target: string, worktree: string | undefined): string[] {
+  if (worktree !== undefined) return ["--worktree", worktree];
+  return target.startsWith("task-") ? ["--worktree", `wt-${target}`] : [];
 }
 
 export function release(dir: string, target: string, by: string, opts: { run?: string; force?: boolean } = {}): RunResult {

@@ -163,7 +163,7 @@ beforeAll(() => {
   if (phase.exitCode !== 0) throw new Error(`phase add failed: ${phase.stderr}`);
 
   const perType: Array<[keyof typeof live, string[]]> = [
-    ["task", ["task", "--parent", planSlug, "--plan-id", planSlug, "--phase", "P1"]],
+    ["task", ["task", "--kind", "code", "--parent", planSlug, "--plan-id", planSlug, "--phase", "P1"]],
     ["knowledge", ["knowledge", "--sub-type", "reference", "--parent", prdSlug]],
     ["adr", ["adr", "--decision-status", "accepted", "--parent", prdSlug]],
   ];

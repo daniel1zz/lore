@@ -9,7 +9,7 @@
  * Halves: (1) the human-always set of the class table AND of the governed seed is exactly {push-force,
  * archive-ref-prune, governance-loosen}, `report-issue` is no class; (2) worktree-remove with only regenerable ignored
  * paths is auto with no pending decision; (3) stash-drop of an archived stash is auto with no pending decision, even
- * when its owner run is live; (4) override-judgment / override-attestation / ac-exempt record a `milestone` decision, open
+ * when its owner run is live; (4) override-judgment / ac-exempt (override-attestation is retired, D45) record a `milestone` decision, open
  * no pending decision, and the override port lets the override through.
  * Controls: the three human classes DO open a pending decision; a worktree holding data outside the regenerable set
  * still escalates; verify-new-command is still decided by score; the chain verifies after every write.
@@ -31,7 +31,7 @@ import { StashPruneService, type GitRunner } from "../../src/service/stash-prune
 import { actedStore } from "../live-invocation.js";
 
 const HUMAN_CLASSES = ["archive-ref-prune", "governance-loosen", "push-force"] as const;
-const MILESTONE_CLASSES = ["ac-exempt", "override-attestation", "override-judgment"] as const;
+const MILESTONE_CLASSES = ["ac-exempt", "override-judgment"] as const;
 
 let dir = "";
 let store: SQLiteStore;
@@ -183,7 +183,7 @@ describe("AC-LG-8 three human classes: migration 032 widens the verdict CHECK wi
 });
 
 describe("AC-LG-8 three human classes: override classes are decided by the milestone review", () => {
-  it("override-judgment / override-attestation / ac-exempt record a `milestone` decision and open no pending decision", async () => {
+  it("override-judgment / ac-exempt record a `milestone` decision and open no pending decision", async () => {
     for (const classId of MILESTONE_CLASSES) {
       const subject = { id: `doc-${classId}#x`, version: "1" };
       const outcome = await decisions.decide(classId, subject, OVERRIDE_MEASURED_FACTS, {

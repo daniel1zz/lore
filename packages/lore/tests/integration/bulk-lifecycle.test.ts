@@ -1,4 +1,5 @@
 // @reads assets/project/lore-config-template.yaml
+// @spawns-external git -- builds the throwaway repo's landing branch (execFileSync git in landAttested)
 /**
  * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part A; AC-LG-1..AC-LG-4; BR-1366, BR-1367)
  *
@@ -11,7 +12,12 @@
  * row), REGRESSION (`archive --apply` exits 1 on a failed candidate; archived -> deprecated stays invalid).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// reason: each task a case lands (approve, claim, branch commit, landing, contract passes) costs several CLI runs
+vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
+import { execFileSync } from "node:child_process";
+import { landTask, type TaskWorld } from "./support/land-task.js";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -102,19 +108,34 @@ async function versionsOf(slugs: string[]): Promise<number[]> {
 async function createTask(title: string): Promise<string> {
   counter += 1;
   const r = await runLore(
-    ["create", "task", "--title", `${title} ${counter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"],
+    ["create", "task", "--kind", "code", "--title", `${title} ${counter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"],
     tmpDir,
   );
   expect(r.exitCode, `${r.stdout}\n${r.stderr}`).toBe(0);
   return slugOf(r.stdout);
 }
 
-async function addAttestedPass(taskSlug: string): Promise<void> {
-  const r = await runLore(
-    ["evidence", taskSlug, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"],
-    tmpDir,
-  );
-  expect(r.exitCode, `${r.stdout}\n${r.stderr}`).toBe(0);
+const wtRoots: string[] = [];
+let landingSeq = 0;
+
+/**
+ * The floors judge the stored contract (AC-DCS1-7): the task is approved, claimed on a branch of its own and landed on main;
+ * with `passes` it also holds a runner pass for every contract oracle (the old `addAttestedPass`), without it none. The claim is then
+ * released, so a bulk verb sees an unclaimed task. A task that went through this is no longer `draft` (approve moved it on).
+ */
+async function landAttested(taskSlug: string, passes = true): Promise<void> {
+  landingSeq += 1;
+  const branch = `bulk-${landingSeq}`;
+  const wtRoot = mkdtempSync(join(tmpdir(), "lore-bulk-lifecycle-wt-"));
+  wtRoots.push(wtRoot);
+  const world: TaskWorld = {
+    dir: tmpDir,
+    git: (args) => execFileSync("git", [...args], { cwd: tmpDir, encoding: "utf8" }).trim(),
+    lore: (args) => runLore([...args], tmpDir),
+  };
+  await landTask(world, { slug: taskSlug, branch, worktree: join(wtRoot, branch), claimValue: "branch", session: "bulk", recordPasses: passes });
+  const released = await runLore(["release", taskSlug], tmpDir);
+  expect(released.exitCode, released.stderr).toBe(0);
 }
 
 /**
@@ -132,7 +153,7 @@ async function warmCommandModules(): Promise<void> {
     const prd = slugOf((await runLore(["create", "prd", "--title", "Warm PRD", "--content", "root", "--no-ai"], dir)).stdout);
     const plan = slugOf((await runLore(["create", "plan", "--title", "Warm Plan", "--parent", prd, "--content", "x", "--no-ai"], dir)).stdout);
     const task = slugOf(
-      (await runLore(["create", "task", "--title", "Warm Task", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"], dir)).stdout,
+      (await runLore(["create", "task", "--kind", "code", "--title", "Warm Task", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"], dir)).stdout,
     );
     await runLore(["evidence", task, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"], dir);
     await runLore(["get", task, "--json"], dir);
@@ -154,7 +175,14 @@ beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-bulk-lifecycle-test-"));
   makeCleanTreeRepo(tmpDir);
   expect((await runLore(["init"], tmpDir)).exitCode).toBe(0);
-  patchLoreConfig(tmpDir, "workflow:\n  review:\n    judgment_required_types: []\n");
+  // approve compiles each task's done contract from these commands (a code task needs all three)
+  patchLoreConfig(
+    tmpDir,
+    [
+      "workflow:", "  review:", "    judgment_required_types: []",
+      "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"', "",
+    ].join("\n"),
+  );
   const prd = await runLore(["create", "prd", "--title", "Bulk PRD", "--content", "root", "--no-ai"], tmpDir);
   expect(prd.exitCode).toBe(0);
   prdSlug = slugOf(prd.stdout);
@@ -165,30 +193,32 @@ beforeEach(async () => {
 
 afterEach(() => {
   rmSync(tmpDir, { recursive: true, force: true });
+  for (const root of wtRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 describe("bulk lifecycle: preview then apply", () => {
   it("preview then apply: ids preview exits 3 writing nothing; --where selects the same rows; usage errors exit 2", async () => {
     const [a, b, c] = [await createTask("Alpha"), await createTask("Beta"), await createTask("Gamma")] as [string, string, string];
-    // archive goes through the same `lore done` floors as every other write: an archived task holds an attested pass.
-    for (const slug of [a, b, c]) await addAttestedPass(slug);
+    // archive goes through the same `lore done` floors as every other write: an archived task is landed and holds its contract passes.
+    for (const slug of [a, b, c]) await landAttested(slug);
+    const start = await statusOf(a, tmpDir); // approve moved the tasks past draft
     const versionsBefore = await versionsOf([a, b, c]);
 
     const preview = await bulkJson(["archive", a, b, c], tmpDir);
     expect(preview.exitCode).toBe(3);
     expect(preview.mode).toBe("preview");
     expect(preview.rows.map((r) => r.slug).sort()).toEqual([a, b, c].sort());
-    expect(preview.rows.every((r) => r.target === "archived" && r.status === "draft")).toBe(true);
+    expect(preview.rows.every((r) => r.target === "archived" && r.status === start)).toBe(true);
     // STATE: a preview writes nothing.
-    expect(await statusesOf([a, b, c])).toEqual(["draft", "draft", "draft"]);
+    expect(await statusesOf([a, b, c])).toEqual([start, start, start]);
     expect(await versionsOf([a, b, c])).toEqual(versionsBefore);
 
     // --where selects the same rows through the lore list filters.
-    const byWhere = await bulkJson(["archive", "--where", "type=task,status=draft"], tmpDir);
+    const byWhere = await bulkJson(["archive", "--where", `type=task,status=${start}`], tmpDir);
     expect(byWhere.exitCode).toBe(3);
     expect(byWhere.rows.map((r) => r.slug).sort()).toEqual([a, b, c].sort());
     // BOUNDARY: nothing matches -> exit 0.
-    expect((await bulkJson(["archive", "--where", "type=task,status=active"], tmpDir)).exitCode).toBe(0);
+    expect((await bulkJson(["archive", "--where", "type=task,status=in-review"], tmpDir)).exitCode).toBe(0);
     // older-than keeps only rows older than N days: every fixture row is minutes old.
     expect((await bulkJson(["archive", "--where", "type=task,older-than=30d"], tmpDir)).exitCode).toBe(0);
 
@@ -198,13 +228,13 @@ describe("bulk lifecycle: preview then apply", () => {
     expect((await runLore(["bulk", "archive", "--apply", "--reason", "x"], tmpDir)).exitCode).toBe(2);
     expect((await runLore(["bulk", "nuke", a], tmpDir)).exitCode).toBe(2);
     expect((await runLore(["bulk", "archive", "--where", "colour=red"], tmpDir)).exitCode).toBe(2);
-    expect(await statusOf(a, tmpDir)).toBe("draft");
+    expect(await statusOf(a, tmpDir)).toBe(start);
   });
 
   it("preview then apply: apply writes each row once with the reason on its audit, re-apply SKIPS, an unknown id FAILS", async () => {
     const [a, b, c] = [await createTask("Alpha"), await createTask("Beta"), await createTask("Gamma")] as [string, string, string];
-    // archive goes through the same `lore done` floors as every other write: an archived task holds an attested pass.
-    for (const slug of [a, b, c]) await addAttestedPass(slug);
+    // archive goes through the same `lore done` floors as every other write: an archived task is landed and holds its contract passes.
+    for (const slug of [a, b, c]) await landAttested(slug);
     const versionsBefore = await versionsOf([a, b, c]);
 
     const apply = await bulkJson(["archive", a, b, c, "--apply", "--reason", "sprint cleanup"], tmpDir);
@@ -258,7 +288,7 @@ describe("bulk lifecycle: preview then apply", () => {
     const other = await runLore(["create", "plan", "--title", "Other Plan", "--parent", prdSlug, "--content", "x", "--no-ai"], tmpDir);
     const otherSlug = slugOf(other.stdout);
     const foreign = await runLore(
-      ["create", "task", "--title", "Foreign", "--parent", otherSlug, "--plan-id", otherSlug, "--content", "x", "--no-ai"],
+      ["create", "task", "--kind", "code", "--title", "Foreign", "--parent", otherSlug, "--plan-id", otherSlug, "--content", "x", "--no-ai"],
       tmpDir,
     );
     const foreignSlug = slugOf(foreign.stdout);
@@ -301,8 +331,10 @@ describe("bulk lifecycle: preview then apply", () => {
 describe("bulk lifecycle: row fails alone", () => {
   it("row fails alone: a stale row and a gate-refused row FAIL, the third is written, exit 1", async () => {
     const [ok, stale, gated] = [await createTask("Fine"), await createTask("Moves"), await createTask("NoEvidence")] as [string, string, string];
-    await addAttestedPass(ok);
-    await addAttestedPass(stale);
+    await landAttested(ok);
+    await landAttested(stale);
+    await landAttested(gated, false); // landed, but no runner pass of its contract: the attested-pass floor refuses it
+    const start = await statusOf(stale, tmpDir);
 
     // The preview the apply is pinned to.
     const preview = await bulkJson(["done", ok, stale, gated], tmpDir);
@@ -310,7 +342,9 @@ describe("bulk lifecycle: row fails alone", () => {
     const pinned = new Map(preview.rows.map((r) => [r.slug, r.version]));
 
     // `stale` changes after the preview: its version moves.
-    expect((await runLore(["set", stale, "--title", "Moved after preview"], tmpDir)).exitCode).toBe(0);
+    // reason: an approved task's title is locked (record-edit gate), so its version is moved by a working-state write, a note of evidence
+    const moved = await runLore(["evidence", stale, "--oracle", "manual", "--command", "echo moved", "--result", "pass", "--output-tail", "moved after the preview"], tmpDir);
+    expect(moved.exitCode, moved.stderr).toBe(0);
     const staleVersionNow = await versionOf(stale, tmpDir);
     expect(staleVersionNow).toBeGreaterThan(pinned.get(stale) ?? 0);
 
@@ -331,8 +365,8 @@ describe("bulk lifecycle: row fails alone", () => {
 
     // The failed rows wrote nothing: statuses unchanged and the stale row kept only the title edit's version.
     expect(await statusOf(ok, tmpDir)).toBe("archived");
-    expect(await statusOf(stale, tmpDir)).toBe("draft");
-    expect(await statusOf(gated, tmpDir)).toBe("draft");
+    expect(await statusOf(stale, tmpDir)).toBe(start);
+    expect(await statusOf(gated, tmpDir)).toBe(start);
     expect(await versionOf(stale, tmpDir)).toBe(staleVersionNow);
     // No retry: asking again does not rescue the stale row (its pinned version is still behind).
     const retry = await bulkJson(["done", `${stale}@${pinned.get(stale)}`, "--apply"], tmpDir);
@@ -371,7 +405,7 @@ describe("bulk lifecycle: draft can be abandoned", () => {
 
   it("draft can be abandoned: archived -> deprecated is INVALID_TRANSITION (set exits 4, bulk row FAILED, exit 1)", async () => {
     const task = await createTask("Already archived");
-    await addAttestedPass(task);
+    await landAttested(task);
     expect((await bulkJson(["archive", task, "--apply", "--reason", "done with it"], tmpDir)).exitCode).toBe(0);
     expect((await runLore(["set", task, "--status", "deprecated"], tmpDir)).exitCode).toBe(4);
     const bulk = await bulkJson(["deprecate", task, "--apply", "--reason", "too late"], tmpDir);
@@ -385,34 +419,48 @@ describe("bulk lifecycle: draft can be abandoned", () => {
 describe("bulk lifecycle: archive --apply exit code", () => {
   it("lore done refuses a task with no attested pass (the CLI half of the former lore_done parity case)", async () => {
     const without = await createTask("Refused via CLI");
-    expect(await statusOf(without, tmpDir)).toBe("draft");
+    await landAttested(without, false); // landed, with no runner pass of its contract
+    const before = await statusOf(without, tmpDir);
     const cliRefusal = await runLore(["done", without], tmpDir);
     expect(cliRefusal.exitCode).toBe(4);
     expect(cliRefusal.stderr).toContain("[floor: attested-pass]");
-    expect(await statusOf(without, tmpDir)).toBe("draft");
+    expect(await statusOf(without, tmpDir)).toBe(before);
   });
 
-  it("lore archive --apply exits 1 when a candidate failed (INVALID_TRANSITION), 0 when none did", async () => {
-    patchLoreConfig(tmpDir, 'workflow:\n  gates:\n    "plan-close":\n      enabled: false\n');
+  // reason: the retired case made `archive --apply` exit 1 with a FAILED row by parking a straggler in review (in-review -> archived
+  // is no lifecycle step). A task that holds a contract has been approved and can no longer be parked in review; the failing candidate
+  // is a task parked in review that was never approved: it holds no contract, so `lore done` cannot judge it and its row is FAILED.
+  it("lore archive --apply exits 1 when a candidate failed (no contract to judge), 0 when none did", async () => {
+    patchLoreConfig(
+      tmpDir,
+      [
+        "workflow:", "  gates:", '    "plan-close":', "      enabled: false",
+        "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"', "",
+      ].join("\n"),
+    );
     expect((await runLore(["set", planSlug, "--status", "approved"], tmpDir)).exitCode).toBe(0);
-    // An open task under an archived plan is an R4 candidate; in-review -> archived is not a legal step. BR-1379 no
-    // longer lets the write path create it under an archived plan, so the plan is archived directly afterwards.
-    const straggler = await createTask("Straggler in review");
-    await addAttestedPass(straggler);
-    expect((await runLore(["set", straggler, "--status", "in-review"], tmpDir)).exitCode).toBe(0);
+    // An open task under an archived plan is an R4 candidate. BR-1379 no longer lets the write path create it under an archived
+    // plan, so the plan is archived directly afterwards.
+    const straggler = await createTask("Straggler in review, never approved");
+    const parked = await runLore(["set", straggler, "--status", "in-review"], tmpDir);
+    expect(parked.exitCode, parked.stderr).toBe(0);
+    const good = await createTask("Straggler that lands");
+    await landAttested(good);
     archivePlanWithoutCascade(tmpDir, planSlug);
-    expect((await runLore(["archive", "--sweep"], tmpDir)).exitCode).toBe(3);
-
     const apply = await runLore(["archive", "--apply"], tmpDir);
-    expect(apply.exitCode).toBe(1);
+    expect(apply.exitCode, apply.stdout + apply.stderr).toBe(1);
     expect(apply.stdout).toContain("FAILED");
     expect(apply.stdout).toContain(straggler);
+    expect(apply.stdout).toContain("holds no done contract");
+    // the failed row wrote nothing; the landed straggler is archived by the same apply
     expect(await statusOf(straggler, tmpDir)).toBe("in-review");
+    expect(await statusOf(good, tmpDir)).toBe("archived");
 
-    // Control: a corpus whose candidates all succeed still exits 0.
+    // Control: once the unjudgeable straggler is abandoned, nothing fails and the apply exits 0.
     expect((await runLore(["set", straggler, "--status", "draft"], tmpDir)).exitCode).toBe(0);
+    expect((await runLore(["set", straggler, "--status", "deprecated"], tmpDir)).exitCode).toBe(0);
     const ok = await runLore(["archive", "--apply"], tmpDir);
-    expect(ok.exitCode).toBe(0);
-    expect(ok.stdout).toContain("OK");
+    expect(ok.exitCode, ok.stdout + ok.stderr).toBe(0);
+    expect(ok.stdout).not.toContain("FAILED");
   });
 });

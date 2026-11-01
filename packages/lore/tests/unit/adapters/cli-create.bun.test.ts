@@ -294,6 +294,7 @@ describe("lore create — happy path", () => {
         title: "Do the thing",
         parent: planSlug,
         "plan-id": planSlug,
+        kind: "code",
         ai: false,
       });
     } catch (e: unknown) {
@@ -618,6 +619,7 @@ describe("lore create — boundary cases", () => {
         title: "Do X",
         parent: planSlug,
         "plan-id": planId, // ULID, not slug
+        kind: "code",
         ai: false,
       });
     } catch (e: unknown) {
@@ -856,6 +858,7 @@ describe("lore create — state verification", () => {
         title: "Implement feature",
         parent: planSlug,
         "plan-id": planSlug, // slug input
+        kind: "code",
         ai: false,
       });
     } catch (e: unknown) {

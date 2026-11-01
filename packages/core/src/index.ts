@@ -52,6 +52,8 @@ export * from "./assessment.js";
 export * from "./milestone-review.js";
 export * from "./decision-record.js";
 export * from "./known-defects.js";
+export * from "./done-contract.js";
+export * from "./execution-log.js";
 export * from "./spec-kind.js";
 export * from "./spec-kind-audit.js";
 export * from "./review-judgment.js";

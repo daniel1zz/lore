@@ -54,7 +54,7 @@ async function createPlanAndTask(cs: CorpusService): Promise<{ planId: string; t
     title: "Task",
     parent_id: plan.id,
     content: "# Task",
-    extra: { plan_id: plan.id },
+    extra: { plan_id: plan.id, kind: "code" },
   } as CreateDocInput);
   return { planId: plan.id, taskId: task.id };
 }
@@ -150,10 +150,12 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
     );
     await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") }, () => "2026-07-11T09:10:00.000Z");
 
-    const acquire = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") }, () => "2026-07-11T09:20:00.000Z");
+    // reason: a code task is claimed only on a branch (AC-DCS1-14), so the new holder names its own working copy; nothing of
+    // alice's machine/branch may carry over.
+    const acquire = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob"), worktree: "wt-bob" }, () => "2026-07-11T09:20:00.000Z");
     expect(acquire.ok).toBe(true);
     if (!acquire.ok) return;
-    expect(acquire.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-11T09:20:00.000Z", harness_run: runOfName("bob") });
+    expect(acquire.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-11T09:20:00.000Z", worktree: "wt-bob", start_head: FAKE_HEAD_SHA, harness_run: runOfName("bob") });
   });
 
   // STATE — --steal starts fresh, no inherited fields from the stolen-from holder
@@ -169,12 +171,12 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
 
     const steal = await taskWorkflowService.claim(
       taskId,
-      { by: "bob", harnessRun: runOfName("bob"), steal: true },
+      { by: "bob", harnessRun: runOfName("bob"), worktree: "wt-bob", steal: true },
       () => "2026-07-11T09:05:00.000Z",
     );
     expect(steal.ok).toBe(true);
     if (!steal.ok) return;
-    expect(steal.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-11T09:05:00.000Z", harness_run: runOfName("bob") });
+    expect(steal.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-11T09:05:00.000Z", worktree: "wt-bob", start_head: FAKE_HEAD_SHA, harness_run: runOfName("bob") });
   });
 
   // STATE — a stale takeover BY THE SAME ACTOR still starts fresh (staleness breaks
@@ -193,12 +195,12 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
     // not a fresh same-holder refresh, EVEN THOUGH `by` is identical.
     const takeover = await taskWorkflowService.claim(
       taskId,
-      { by: "alice", harnessRun: runOfName("alice") },
+      { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice-2" },
       () => "2026-07-08T03:20:00.000Z",
     );
     expect(takeover.ok).toBe(true);
     if (!takeover.ok) return;
-    expect(takeover.value.extra["claim"]).toEqual({ by: "alice", at: "2026-07-08T03:20:00.000Z", harness_run: runOfName("alice") });
+    expect(takeover.value.extra["claim"]).toEqual({ by: "alice", at: "2026-07-08T03:20:00.000Z", worktree: "wt-alice-2", start_head: FAKE_HEAD_SHA, harness_run: runOfName("alice") });
   });
 
   // REGRESSION — a stale takeover by a DIFFERENT actor also starts fresh (the
@@ -215,25 +217,26 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
 
     const takeover = await taskWorkflowService.claim(
       taskId,
-      { by: "bob", harnessRun: runOfName("bob") },
+      { by: "bob", harnessRun: runOfName("bob"), worktree: "wt-bob" },
       () => "2026-07-08T03:20:00.000Z", // 200 min later, stale
     );
     expect(takeover.ok).toBe(true);
     if (!takeover.ok) return;
-    expect(takeover.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-08T03:20:00.000Z", harness_run: runOfName("bob") });
+    expect(takeover.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-08T03:20:00.000Z", worktree: "wt-bob", start_head: FAKE_HEAD_SHA, harness_run: runOfName("bob") });
   });
 
-  // REGRESSION — legacy claims without machine/worktree still validate, render, refresh
-  it("a legacy claim (no machine/worktree field at all) still validates and refreshes", async () => {
+  // REGRESSION — legacy claims without a machine field still validate, render, refresh. A claim with no working copy at all can no
+  // longer be refreshed: a code task is claimed only on a branch (AC-DCS1-14), so the legacy shape here names its worktree.
+  it("a legacy claim (no machine field at all) still validates and refreshes", async () => {
     const { store, taskWorkflowService } = makeServices();
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const { taskId } = await createPlanAndTask(corpusService);
 
     // Simulate a pre-SPEC-042 legacy claim written directly to the store (no
-    // machine/worktree keys present at all, not merely undefined).
+    // machine key present at all, not merely undefined).
     const taskResult = await store.find(taskId);
     if (!taskResult.ok || taskResult.value === null) throw new Error("task not found");
-    const legacyClaim = { by: "carol", at: "2026-07-05T00:00:00.000Z", branch: "legacy-branch", start_head: FAKE_HEAD_SHA, harness_run: runOfName("carol") };
+    const legacyClaim = { by: "carol", at: "2026-07-05T00:00:00.000Z", branch: "legacy-branch", worktree: "legacy-wt", start_head: FAKE_HEAD_SHA, harness_run: runOfName("carol") };
     expect(taskClaimSchema.safeParse(legacyClaim).success).toBe(true);
     const updateResult = await store.update(taskId, {
       extra: { ...taskResult.value.extra, claim: legacyClaim },
@@ -243,11 +246,12 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
     const refresh = await taskWorkflowService.claim(taskId, { by: "carol", harnessRun: runOfName("carol") }, () => "2026-07-05T01:00:00.000Z");
     expect(refresh.ok).toBe(true);
     if (!refresh.ok) return;
-    // carry-forward on a legacy claim: branch inherited, no machine/worktree keys appear
+    // carry-forward on a legacy claim: branch and worktree inherited, no machine key appears
     expect(refresh.value.extra["claim"]).toEqual({
       by: "carol",
       at: "2026-07-05T01:00:00.000Z",
       branch: "legacy-branch",
+      worktree: "legacy-wt",
       start_head: FAKE_HEAD_SHA,
       harness_run: runOfName("carol"),
     });

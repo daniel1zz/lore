@@ -403,7 +403,7 @@ function falsifyFixture(command: string): { plan: string; task: string; acId: st
   );
   const plan = slugOf(must(lore(["create", "plan", "--title", "AU11 Falsify Plan", "--parent", spec, "--no-ai", "--content", "body"]), "create plan").stdout);
   const task = slugOf(
-    must(lore(["create", "task", "--title", "AU11 Falsify Task", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body", "--ac-scope", acId]), "create task").stdout,
+    must(lore(["create", "task", "--kind", "code", "--title", "AU11 Falsify Task", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body", "--ac-scope", acId]), "create task").stdout,
   );
   return { plan, task, acId };
 }

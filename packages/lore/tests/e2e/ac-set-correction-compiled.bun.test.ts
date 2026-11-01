@@ -109,7 +109,7 @@ describe("lore ac set --correction, compiled binary (AC-CC-2)", () => {
       await mustLore(["create", "plan", "--title", "Correction Plan", "--parent", spec, "--content", "## Plan\n\nbody", "--no-ai"]),
     );
     const task = parseSlug(
-      await mustLore(["create", "task", "--title", "Correction Task", "--plan-id", plan, "--ac-scope", AC_ID, "--content", "## Task\n\nbody", "--no-ai"]),
+      await mustLore(["create", "task", "--title", "Correction Task", "--kind", "code", "--plan-id", plan, "--ac-scope", AC_ID, "--content", "## Task\n\nbody", "--no-ai"]),
     );
     await mustLore(["evidence", task, "--oracle", "test", "--result", "pass", "--command", "echo evidence-ok", "--capture", "--ac", AC_ID]);
   });

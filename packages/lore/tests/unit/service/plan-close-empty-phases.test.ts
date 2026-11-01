@@ -25,6 +25,7 @@ import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
+import { LANDING_COMMIT, landedTaskExtra } from "./done-contract-unit-fixture.js";
 function makeServices() {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -53,7 +54,8 @@ async function createTaskInPhase(cs: CorpusService, plan: DocRecord, title: stri
     title,
     parent_id: plan.id,
     content: "body",
-    extra: { plan_id: plan.id, phase },
+    // reason: `done` judges the stored contract and the landing (AC-DCS1-7); the fixture stores the shapes approve and integrate write.
+    extra: { plan_id: plan.id, phase, ...landedTaskExtra() },
   } as CreateDocInput);
   if (!created.ok) throw new Error(`task create failed: ${JSON.stringify(created.error)}`);
   return created.value;
@@ -74,7 +76,7 @@ async function archive(tw: TaskWorkflowService, taskId: string): Promise<DoneRes
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "runner",
-      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, recorded_at_landing: LANDING_COMMIT },
       capture_source: "runner",
     },
     "2026-08-01T09:00:00.000Z",
@@ -121,7 +123,7 @@ describe("plan-close empty declared phases (AC-CRIT-11)", () => {
       title: "t",
       parent_id: plan.id,
       content: "body",
-      extra: { plan_id: plan.id },
+      extra: { plan_id: plan.id, ...landedTaskExtra() },
     } as CreateDocInput);
     if (!created.ok) throw new Error("task create failed");
 

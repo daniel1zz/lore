@@ -112,7 +112,7 @@ import type { PlanCloseCascadeResult } from "../../../service/corpus-service.js"
 import type { IssueCloseItem } from "../../../service/issue-close-on-archive.js";
 import { emitIssueCloseItems } from "../issue-close-output.js";
 import type { DocStatus, Priority, SpecKind } from "@lore/core";
-import { SPEC_KINDS } from "@lore/core";
+import { SPEC_KINDS, TASK_KINDS, formatTaskKindRequiredMessage, isTaskKind } from "@lore/core";
 import {
   ACCEPTED_DECISION_STATUS_VALUE,
   checkDecisionStatusValue,
@@ -188,7 +188,7 @@ export default defineLoreCommand({
     },
     kind: {
       type: "string",
-      description: `[spec only] Spec kind: ${SPEC_KINDS.join(" | ")}. Source: SPEC-032`,
+      description: `Spec kind: ${SPEC_KINDS.join(" | ")} (Source: SPEC-032), or a DRAFT task's kind: ${TASK_KINDS.join(" | ")} (AC-DCS1-4).`,
     },
     slug: {
       type: "string",
@@ -554,22 +554,32 @@ export default defineLoreCommand({
         }
         const targetDoc = getForKind.value.doc;
 
-        if (targetDoc.type !== "spec") {
-          inv.io.stderr.write(
-            `Error: --kind is only valid for type 'spec' (got '${targetDoc.type}').\n`,
-          );
-          exitCli(2);
-        }
+        if (targetDoc.type === "task") {
+          // AC-DCS1-4: a task's kind changes only while it is a draft; the write itself (CorpusService.set, the
+          // DEDICATED_EXTRA_KEYS guard) refuses an approved task with `kind-locked`, so no status check is copied here.
+          if (!isTaskKind(args.kind)) {
+            inv.io.stderr.write(`Error: ${formatTaskKindRequiredMessage(args.kind, "--kind")}\n`);
+            exitCli(2);
+          }
+          patch["extra"] = { ...targetDoc.extra, kind: args.kind };
+        } else {
+          if (targetDoc.type !== "spec") {
+            inv.io.stderr.write(
+              `Error: --kind is only valid for type 'spec' or 'task' (got '${targetDoc.type}').\n`,
+            );
+            exitCli(2);
+          }
 
-        if (!SPEC_KINDS.includes(args.kind as SpecKind)) {
-          inv.io.stderr.write(
-            `Error: Invalid --kind '${args.kind}'.\n` +
-              `  Valid values: ${SPEC_KINDS.join(" | ")}\n`,
-          );
-          return 4;
-        }
+          if (!SPEC_KINDS.includes(args.kind as SpecKind)) {
+            inv.io.stderr.write(
+              `Error: Invalid --kind '${args.kind}'.\n` +
+                `  Valid values: ${SPEC_KINDS.join(" | ")}\n`,
+            );
+            return 4;
+          }
 
-        patch["extra"] = { ...targetDoc.extra, spec_kind: args.kind };
+          patch["extra"] = { ...targetDoc.extra, spec_kind: args.kind };
+        }
       }
 
       // --decision-status accepted (spec-adr-decision-status-has-a-create-surface-and-no-cli-update

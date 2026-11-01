@@ -107,7 +107,8 @@ import { createRealProcessTablePort } from "./adapters/process-table-port.js";
 import type { RunAncestryProbe } from "./service/run-identity-verify.js";
 import { RunReapService } from "./service/run-reap-service.js";
 import { ensureVerifiedIdentity, resolveWriteActorFor, withVerifiedWriteContext } from "./store/write-context-store.js";
-import { PlanIntegrationBranchService } from "./service/plan-integration-branch-service.js";
+import { LandService, type LandPorts } from "./service/land-service.js";
+import { PlanIntegrationBranchService, createPlanBranchGit } from "./service/plan-integration-branch-service.js";
 import { MilestoneReviewService } from "./service/milestone-review-service.js";
 import { SuiteResultService } from "./service/suite-result-service.js";
 import { randomUUID } from "node:crypto";
@@ -136,6 +137,20 @@ import { PlanOutlineExemptMigrationService } from "./service/plan-outline-exempt
 import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
 import { armMainTree, buildBaselineDeclarationPort } from "./adapters/cli/absent-declarations.js";
+import { DoneContractService } from "./service/done-contract-service.js";
+import { DoneContractMigrationService } from "./service/done-contract-migration-service.js";
+import { CloseTaskMigrationService } from "./service/close-task-migration-service.js";
+import { ExecutionLogService } from "./service/execution-log-service.js";
+import { createRealMigrationGit } from "./adapters/real-done-contract-migration-git.js";
+import { TaskFinishService } from "./service/task-finish-service.js";
+import { TaskStartService } from "./service/task-start-service.js";
+import { DispatchService, type DispatchAssets } from "./service/dispatch-service.js";
+import { IntegrateOracleService } from "./service/integrate-oracle-service.js";
+import { IntegrateQueue, QUEUE_WAIT_SECONDS_DEFAULT } from "./service/integrate-queue.js";
+import { FlakyLedgerService } from "./service/issue-filing-service.js";
+import { createGhFlakyLedgerPort, createUnconfiguredFlakyLedgerPort } from "./service/flaky-ledger-port.js";
+import { createRealOracleGit } from "./adapters/real-oracle-git.js";
+import { createRealDoneContractGit } from "./adapters/real-done-contract-git.js";
 import { realpathNative } from "./adapters/real-realpath-port.js";
 import { ConfigService } from "./service/config-service.js";
 import { GlobalConfigService } from "./service/global-config-service.js";
@@ -364,6 +379,36 @@ export interface App {
    */
   verifyRunnerService?: VerifyRunnerService;
   /**
+   * `lore finish` (AC-DCS1-15..17): runs the stored done contract's oracles in the claim worktree and records the finish in one
+   * write. Wired by {@link wireDoneContract} at both composition sites; optional like the services it composes.
+   */
+  taskFinishService?: TaskFinishService;
+  /**
+   * `lore start` (AC-DCS1-13, AC-DCS1-14): creates the task's worktree on the contract base, installs, claims and prints the
+   * contract. Wired by {@link wireDoneContract} at both composition sites.
+   */
+  taskStartService?: TaskStartService;
+  createDispatchService?: (assets: DispatchAssets) => DispatchService;
+  /**
+   * `lore integrate`'s evidence at landing (AC-DCS2-1..4): selects the landing tasks, runs the union of their contract oracles on the
+   * merged tree and records the rows. Wired by {@link wireDoneContract} at both composition sites, so no capability exists without
+   * its command; absent when the verify runner is not composed.
+   */
+  integrateOracleService?: IntegrateOracleService;
+  /**
+   * The FIFO merge queue of `lore integrate` (AC-DCS2-5) and, later, the fold of `lore land` (AC-DCS2-8): builds the queue over the git
+   * common dir of the repository the caller found, reading process identity from the real process table and the wait limit from
+   * `workflow.integrate.queue_wait_seconds` (default 1800). A factory, not an instance: the common dir is a git fact the command
+   * resolves when it runs, so composing the app never spawns git. Wired by {@link wireDoneContract} at both composition sites.
+   */
+  createIntegrateQueue?: (options: { readonly commonDir: string; readonly log: (line: string) => void }) => IntegrateQueue;
+  /**
+   * `lore land` (AC-DCS2-7..9, AC-DCS2-19): builds the service over the store and the execution log writer; the command binds what only
+   * it can (the git of the repository, the queue it shares with its integrate, the integrate and done runs). Wired by
+   * {@link wireDoneContract}.
+   */
+  createLandService?: (ports: Omit<LandPorts, "store" | "log">) => LandService;
+  /**
    * The suite-result store (BR-1497): one full-suite result per commit, looked up before it is run. Optional like its
    * siblings so hand-built App stubs stay valid; both composition roots wire it.
    */
@@ -479,6 +524,21 @@ export interface App {
    * hand-built-App-stub reason as `specParentMigrationService`; always present in production.
    */
   planOutlineExemptMigrationService?: PlanOutlineExemptMigrationService;
+  /**
+   * DoneContractMigrationService — `lore migrate done-contract [--apply]` (AC-DCS1-22, AC-DCS1-23): compiles the contract of
+   * every in-flight task through the approve-time compile, all or nothing. Wired by {@link wireDoneContract}.
+   */
+  doneContractMigrationService?: DoneContractMigrationService;
+  /**
+   * CloseTaskMigrationService — `lore migrate close-tasks [--apply]` (AC-DCS2-13): resolves every close task of the old protocol
+   * and hands each plan left with no open task to the one plan close. Always present in production; the CLI guards `=== undefined`.
+   */
+  closeTaskMigrationService?: CloseTaskMigrationService;
+  /**
+   * ExecutionLogService — the standalone writer of `extra.execution_log` (AC-DCS2-14): a plan's evidence-moved entries and the
+   * `superseded` entry of every task holding a corrected or superseded criterion. Wired by {@link wireDoneContract}.
+   */
+  executionLogService?: ExecutionLogService;
   /**
    * OutlineSectionsRetireMigrationService — `lore migrate outline-sections [--apply]`: removes the stored
    * `extra.outline` from every PRD (the outline command family is gone), through the corpus write route. Same
@@ -1002,7 +1062,7 @@ function buildAppFromSqlite(
   );
   corpusService.setApprovalPort({ approve: (id, o) => reviewService.approve(id, o) });
   corpusService.setDoneFloorPort({ checkDoneFloors: (id) => taskWorkflowService.checkDoneFloors(id) });
-  // reason: AC-AU-7 — the self-grantable overrides (approve --override-*, done --override-attestation) ask decide();
+  // reason: AC-AU-7 — the self-grantable overrides (approve --override-*, ac exempt, verify new command) ask decide();
   // both composition roots wire it (a root that forgets leaves those overrides granted to whoever types them).
   const overrideDecisionPort = buildOverrideDecisionPort(store);
   // reason: built before the retired-AC service because that service's deprecation-rejection revival reuses this one instance.
@@ -1014,7 +1074,6 @@ function buildAppFromSqlite(
   reviewService.setReviewRoundCap(new ReviewRoundCap({ store, judgments: judgmentService, decisions: new DecisionService({ store, executorRun: null }) }));
   // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
   reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
-  taskWorkflowService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
   // `lore rule` verbs so a claim-scoped authoring guard armed on it covers both.
@@ -1150,7 +1209,7 @@ function buildAppFromSqlite(
     recordLockService,
     // reason: PlanIntegrationBranchService is store-only, same shape as RequirementService — the sole writer of
     // `extra.integration_branch`.
-    planIntegrationBranchService: new PlanIntegrationBranchService(store, corpusService),
+    planIntegrationBranchService: new PlanIntegrationBranchService(store, corpusService, createPlanBranchGit(repoRoot)),
     // reason: MilestoneReviewService takes narrow ports (BR-1372): the plan bundle, cited-rule state, the decision
     // log, the judge call, the guarded review-doc create seam and the link verb — never the full services.
     retiredAcService,
@@ -1461,7 +1520,7 @@ function buildAppFromTurso(
   );
   corpusService.setApprovalPort({ approve: (id, o) => reviewService.approve(id, o) });
   corpusService.setDoneFloorPort({ checkDoneFloors: (id) => taskWorkflowService.checkDoneFloors(id) });
-  // reason: AC-AU-7 — the self-grantable overrides (approve --override-*, done --override-attestation) ask decide();
+  // reason: AC-AU-7 — the self-grantable overrides (approve --override-*, ac exempt, verify new command) ask decide();
   // both composition roots wire it (a root that forgets leaves those overrides granted to whoever types them).
   const overrideDecisionPort = buildOverrideDecisionPort(store);
   // reason: built before the retired-AC service because that service's deprecation-rejection revival reuses this one instance.
@@ -1473,7 +1532,6 @@ function buildAppFromTurso(
   reviewService.setReviewRoundCap(new ReviewRoundCap({ store, judgments: judgmentService, decisions: new DecisionService({ store, executorRun: null }) }));
   // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
   reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
-  taskWorkflowService.setOverrideDecisionPort(overrideDecisionPort);
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
   // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
   // `lore rule` verbs so a claim-scoped authoring guard armed on it covers both.
@@ -1604,7 +1662,7 @@ function buildAppFromTurso(
     recordLockService,
     // reason: PlanIntegrationBranchService is store-only, same shape as RequirementService — the sole writer of
     // `extra.integration_branch`.
-    planIntegrationBranchService: new PlanIntegrationBranchService(store, corpusService),
+    planIntegrationBranchService: new PlanIntegrationBranchService(store, corpusService, createPlanBranchGit(repoRoot)),
     // reason: MilestoneReviewService takes narrow ports (BR-1372): the plan bundle, cited-rule state, the decision
     // log, the judge call, the guarded review-doc create seam and the link verb — never the full services.
     retiredAcService,
@@ -1808,6 +1866,66 @@ function wireStructuredWrite(app: App, config: LoreConfig | undefined): void {
     // app.ts composition root, whose import block is held by another task's claim; the default is `false` either way.
     requireStructuredCreate: config?.workflow?.structured_documents?.require_create ?? false,
   });
+}
+
+/**
+ * Hands the done-contract compile to the approval path (AC-DCS1-1, AC-DCS1-2): `ReviewService.approve` of a task compiles and
+ * stores its contract through this port. One wiring, called at BOTH composition sites (SQLite and Turso); the three commands
+ * come from `workflow.done_contract` (any may be absent: a code task then refuses with the matching cause).
+ */
+function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | undefined, repoRoot: string, ambient: AppAmbient): void {
+  const commands = config?.workflow?.done_contract ?? {};
+  const contracts = new DoneContractService(store, commands, createRealDoneContractGit(repoRoot), app.corpusService);
+  app.reviewService.setDoneContractPort(contracts);
+  // reason: AC-DCS2-15 — a task past done is reviewed by the contract check of the workflow service, never by the AI judge.
+  app.reviewService.setContractCheckPort(app.taskWorkflowService);
+  // reason: AC-DCS2-14 — the log writer shares the one write route; AcService appends `superseded` entries through it.
+  app.executionLogService = new ExecutionLogService(store, app.corpusService, app.taskWorkflowService);
+  app.acService?.attachExecutionLog(app.executionLogService);
+  // reason: AC-DCS1-22 — the migration compiles through the SAME service approve uses, and writes through the one write route.
+  app.doneContractMigrationService = new DoneContractMigrationService(store, app.corpusService, contracts, createRealMigrationGit(repoRoot));
+  // reason: AC-DCS2-13 — the close-task migration writes through the one write route and removes links through the corpus service.
+  app.closeTaskMigrationService = new CloseTaskMigrationService(store, app.corpusService);
+  // reason: AC-DCS1-11 — a write-set addition runs a test file with the same template the approve-time contract used.
+  app.taskWorkflowService.setTestFileTemplate(commands.test_file);
+  // reason: AC-DCS1-15 — finish composes the workflow service (the one write) and the verify runner (the one measurement).
+  if (app.verifyRunnerService !== undefined) {
+    app.taskFinishService = new TaskFinishService({ store, workflow: app.taskWorkflowService, verify: app.verifyRunnerService });
+    // reason: AC-DCS2-1..4 — integrate composes the workflow service (the one write), the verify runner (the one measurement) and the
+    // flaky ledger, which reaches GitHub only when `feedback.upstream.repo` names a repository (else every ledger call is refused, named).
+    const upstream = resolveFeedbackUpstreamCfg(config);
+    const ledgerPort =
+      upstream !== undefined && isGithubUpstreamCfg(upstream)
+        ? createGhFlakyLedgerPort(new GhRunner({ execFile: createNodeGhExecFile(ambient.cwd), env: ambient.env }), upstream.repo)
+        : createUnconfiguredFlakyLedgerPort();
+    app.integrateOracleService = new IntegrateOracleService({
+      store,
+      workflow: app.taskWorkflowService,
+      verify: app.verifyRunnerService,
+      ledger: new FlakyLedgerService(ledgerPort),
+      git: createRealOracleGit(ambient.env),
+      projectRoot: repoRoot,
+    });
+  }
+  // reason: AC-DCS2-5 — landings take their turn in one FIFO queue; the holder is identified by pid plus process start time, read from the
+  // same process-table port run reaping uses (fixed /bin/ps, retried empty reads, timeout).
+  const queueProcesses = createRealProcessTablePort({ env: ambient.env, cwd: ambient.cwd });
+  app.createIntegrateQueue = ({ commonDir, log }) =>
+    new IntegrateQueue({
+      commonDir,
+      pid: process.pid,
+      inspect: (pid) => queueProcesses.inspect(pid),
+      waitSeconds: config?.workflow?.integrate?.queue_wait_seconds ?? QUEUE_WAIT_SECONDS_DEFAULT,
+      log,
+    });
+  // reason: AC-DCS2-8 — land composes the store, the execution log writer (the `folded` entry) and the ports of the command.
+  const logWriter = app.executionLogService;
+  app.createLandService = (ports) => new LandService({ ...ports, store, log: logWriter });
+  // reason: AC-DCS1-13 — start composes the workflow service (the lease check and the one claim write).
+  // reason: AC-DCS2-16 — start recompiles through the SAME service approve uses and stores a changed contract through the one write route.
+  app.taskStartService = new TaskStartService({ store, workflow: app.taskWorkflowService, contracts });
+  // reason: AC-DCS2-6 — dispatch reads the stored contract through the store; the command binds the assets root of the running binary.
+  app.createDispatchService = (assets) => new DispatchService({ store, assets });
 }
 
 /**
@@ -2165,6 +2283,7 @@ function createAppUnscoped(
     );
     wireStructuredWrite(sqliteApp, config);
     wireIssueCloseOnArchive(sqliteApp, sqliteStore, config, ambient);
+    wireDoneContract(sqliteApp, sqliteStore, config, repoRoot, ambient);
     wirePlanCloseIssues(sqliteApp, config, ambient, dbPath);
     return sqliteApp;
   }
@@ -2279,6 +2398,7 @@ function createAppUnscoped(
       );
     wireStructuredWrite(tursoApp, config);
     wireIssueCloseOnArchive(tursoApp, store, config, ambient);
+    wireDoneContract(tursoApp, store, config, repoRoot, ambient);
     wirePlanCloseIssues(tursoApp, config, ambient, dbPath);
     return { ok: true, value: tursoApp };
   } catch (e) {

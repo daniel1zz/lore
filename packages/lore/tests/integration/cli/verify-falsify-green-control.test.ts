@@ -224,7 +224,7 @@ function createPlan(dir: string, title: string, parentSlug: string): string {
 }
 
 function createTask(dir: string, planSlug: string, title: string, acScope: readonly string[]): string {
-  const args = ["create", "task", "--title", title, "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"];
+  const args = ["create", "task", "--kind", "code", "--title", title, "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"];
   for (const acId of acScope) args.push("--ac-scope", acId);
   const r = runLore(args, dir);
   if (r.exitCode !== 0) throw new Error(`create task failed: ${r.stderr}`);
@@ -440,7 +440,7 @@ async function buildInMemoryFixture(): Promise<InMemoryFixture> {
     title: "Launch-Fail Task",
     parent_id: plan.value.id,
     content: "body",
-    extra: { plan_id: plan.value.id },
+    extra: { kind: "code", plan_id: plan.value.id },
   } as CreateDocInput);
   if (!task.ok) throw new Error(`task create failed: ${JSON.stringify(task.error)}`);
 

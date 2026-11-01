@@ -270,15 +270,10 @@ function checkEvidenceCompleteness(doc: DocRecord): CheckResult {
   if (doc.type !== "task") {
     return { check: "evidence_completeness", outcome: "skipped", detail: "not a task doc" };
   }
-  const raw = doc.extra["verification_evidence"];
-  if (Array.isArray(raw) && raw.length > 0) {
-    return { check: "evidence_completeness", outcome: "pass" };
-  }
-  return {
-    check: "evidence_completeness",
-    outcome: "fail",
-    detail: "task has no verification_evidence entries",
-  };
+  // reason: AC-DCS2-15 (#195, #408) — the AI review judges a task that is not yet done on its INTENT; a task cannot hold evidence
+  // before it is claimed, so demanding it here rejected every unstarted task. A finished task never reaches this check: it is
+  // reviewed by its contract (ReviewService.reviewTaskByState), and `lore done` holds the evidence floors.
+  return { check: "evidence_completeness", outcome: "skipped", detail: "a task's evidence is judged by its done contract at lore done, not by the intent review" };
 }
 
 // ─── Public entry point ─────────────────────────────────────────────────────

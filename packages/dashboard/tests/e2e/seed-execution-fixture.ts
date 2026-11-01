@@ -107,7 +107,7 @@ async function main(): Promise<void> {
       title: taskATitle,
       parent_id: activePlan.id,
       content: "## Task A",
-      extra: { plan_id: activePlan.id, file_anchors: [anchorPath] },
+      extra: { plan_id: activePlan.id, kind: "code", file_anchors: [anchorPath] },
     } as CreateDocInput),
     "create task A",
   );
@@ -119,7 +119,7 @@ async function main(): Promise<void> {
       title: taskBTitle,
       parent_id: activePlan.id,
       content: "## Task B",
-      extra: { plan_id: activePlan.id, file_anchors: [anchorPath] },
+      extra: { plan_id: activePlan.id, kind: "code", file_anchors: [anchorPath] },
     } as CreateDocInput),
     "create task B",
   );

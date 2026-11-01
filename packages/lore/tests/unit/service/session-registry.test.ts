@@ -115,9 +115,17 @@ async function createTask(cs: CorpusService, planId: string, title: string, anch
     title,
     parent_id: planId,
     content: `# ${title}`,
-    extra: { plan_id: planId, ...(anchors !== undefined ? { file_anchors: anchors } : {}) },
+    extra: { plan_id: planId, kind: "code", ...(anchors !== undefined ? { file_anchors: anchors } : {}) },
   } as CreateDocInput);
   return task.id;
+}
+
+/** Writes a claim with no machine and no worktree key straight into the store (the shape of a pre-SPEC-042 record). */
+async function seedLegacyClaim(store: StoreInterface, taskId: string, by: string): Promise<void> {
+  const found = await store.find(taskId);
+  if (!found.ok || found.value === null) throw new Error("task not found");
+  const written = await store.update(taskId, { extra: { ...found.value.extra, claim: { by, at: new Date().toISOString() } } });
+  if (!written.ok) throw new Error(`legacy claim seed failed: ${JSON.stringify(written.error)}`);
 }
 
 // ─── TaskWorkflowService.ready — sessions / anchor_conflicts / anchorless ─────
@@ -162,14 +170,15 @@ describe("TaskWorkflowService.ready — sessions (SPEC-042 D1, D7)", () => {
 
   // STATE — legacy machine-less claims by ONE actor group into ONE session
   it("legacy machine-less/worktree-less claims by one actor group into ONE session", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
+    const { store, corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const taskOneId = await createTask(corpusService, planId, "Task One");
     const taskTwoId = await createTask(corpusService, planId, "Task Two");
 
-    // No machine/worktree passed at all — mirrors a pre-SPEC-042 caller.
-    await taskWorkflowService.claim(taskOneId, { by: "agent:t1" });
-    await taskWorkflowService.claim(taskTwoId, { by: "agent:t1" });
+    // reason: no claim can be made without a branch any more (AC-DCS1-14), so the pre-SPEC-042 shape (no machine, no worktree
+    // key at all) is written straight to the store, exactly as an old record sits in a corpus.
+    await seedLegacyClaim(store, taskOneId, "agent:t1");
+    await seedLegacyClaim(store, taskTwoId, "agent:t1");
 
     const report = await taskWorkflowService.ready(planId);
     expect(report.ok).toBe(true);
@@ -188,8 +197,8 @@ describe("TaskWorkflowService.ready — sessions (SPEC-042 D1, D7)", () => {
     const taskOneId = await createTask(corpusService, planId, "Task One");
     const taskTwoId = await createTask(corpusService, planId, "Task Two");
 
-    await taskWorkflowService.claim(taskOneId, { by: "agent:t1" }, () => "2026-07-08T00:00:00.000Z");
-    await taskWorkflowService.claim(taskTwoId, { by: "agent:t2" }, () => "2026-07-08T00:00:00.000Z");
+    await taskWorkflowService.claim(taskOneId, { by: "agent:t1", worktree: "wt-1" }, () => "2026-07-08T00:00:00.000Z");
+    await taskWorkflowService.claim(taskTwoId, { by: "agent:t2", worktree: "wt-2" }, () => "2026-07-08T00:00:00.000Z");
 
     // 200 minutes later — past the 120min TTL.
     const report = await taskWorkflowService.ready(planId, () => "2026-07-08T03:20:00.000Z");
@@ -204,7 +213,7 @@ describe("TaskWorkflowService.ready — sessions (SPEC-042 D1, D7)", () => {
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId, "Solo Task");
 
-    await taskWorkflowService.claim(taskId, { by: "agent:t1", machine: "hostA" });
+    await taskWorkflowService.claim(taskId, { by: "agent:t1", machine: "hostA", worktree: "wt-solo" });
 
     const report = await taskWorkflowService.ready(planId);
     expect(report.ok).toBe(true);
@@ -233,7 +242,7 @@ describe("TaskWorkflowService.ready — sessions (SPEC-042 D1, D7)", () => {
     const anchoredTaskId = await createTask(corpusService, planId, "Anchored Task", ["src/a"]);
     const bareTaskId = await createTask(corpusService, planId, "Bare Task"); // no anchors
 
-    await taskWorkflowService.claim(bareTaskId, { by: "agent:t2" });
+    await taskWorkflowService.claim(bareTaskId, { by: "agent:t2", worktree: "wt-bare" });
 
     const report = await taskWorkflowService.ready(planId);
     expect(report.ok).toBe(true);
@@ -250,7 +259,7 @@ describe("TaskWorkflowService.ready — sessions (SPEC-042 D1, D7)", () => {
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId, "Bare Task"); // no anchors anywhere
 
-    await taskWorkflowService.claim(taskId, { by: "agent:t1" });
+    await taskWorkflowService.claim(taskId, { by: "agent:t1", worktree: "wt-t1" });
 
     const report = await taskWorkflowService.ready(planId);
     expect(report.ok).toBe(true);
@@ -265,8 +274,8 @@ describe("TaskWorkflowService.ready — sessions (SPEC-042 D1, D7)", () => {
     const planId = await createPlan(seed.corpusService);
     const taskOneId = await createTask(seed.corpusService, planId, "Task One", ["src/a"]);
     const taskTwoId = await createTask(seed.corpusService, planId, "Task Two");
-    await seed.taskWorkflowService.claim(taskOneId, { by: "agent:t1", machine: "hostA" });
-    await seed.taskWorkflowService.claim(taskTwoId, { by: "agent:t2", machine: "hostB" });
+    await seed.taskWorkflowService.claim(taskOneId, { by: "agent:t1", machine: "hostA", worktree: "wt-a" });
+    await seed.taskWorkflowService.claim(taskTwoId, { by: "agent:t2", machine: "hostB", worktree: "wt-b" });
 
     const { proxy, counts } = countingProxy(rawStore);
     const wrapped = new TaskWorkflowService(proxy, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
@@ -300,8 +309,8 @@ describe("SessionService.bootstrap — active_sessions (SPEC-042 D8)", () => {
     const taskAId = await createTask(corpusService, planAId, "Task A");
     const taskBId = await createTask(corpusService, planBId, "Task B");
 
-    await taskWorkflowService.claim(taskAId, { by: "agent:t1", machine: "hostA" });
-    await taskWorkflowService.claim(taskBId, { by: "agent:t2", machine: "hostB" });
+    await taskWorkflowService.claim(taskAId, { by: "agent:t1", machine: "hostA", worktree: "wt-a" });
+    await taskWorkflowService.claim(taskBId, { by: "agent:t2", machine: "hostB", worktree: "wt-b" });
 
     const result = await sessionService.bootstrap("alice");
     expect(result.ok).toBe(true);
@@ -318,7 +327,7 @@ describe("SessionService.bootstrap — active_sessions (SPEC-042 D8)", () => {
     const { corpusService, taskWorkflowService, sessionService } = makeServices();
     const planId = await createPlan(corpusService, "Archived Plan");
     const taskId = await createTask(corpusService, planId, "Task");
-    await taskWorkflowService.claim(taskId, { by: "agent:t1" });
+    await taskWorkflowService.claim(taskId, { by: "agent:t1", worktree: "wt-t1" });
 
     // reason: SPEC-002 §3 lifecycle only allows archived via approved (draft→
     // archived is illegal, enforced by CorpusService.set's INVALID_TRANSITION
@@ -351,7 +360,7 @@ describe("SessionService.bootstrap — active_sessions (SPEC-042 D8)", () => {
     const seed = makeServices(rawStore);
     const planId = await createPlan(seed.corpusService);
     const taskId = await createTask(seed.corpusService, planId, "Task");
-    await seed.taskWorkflowService.claim(taskId, { by: "agent:t1", machine: "hostA" });
+    await seed.taskWorkflowService.claim(taskId, { by: "agent:t1", machine: "hostA", worktree: "wt-a" });
 
     const { proxy, counts } = countingProxy(rawStore);
     const wrapped = new SessionService(proxy, {

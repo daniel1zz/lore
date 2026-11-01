@@ -188,7 +188,7 @@ describe("lore create task — task-create admission gate (AC-ACS-1, AC-ACS-7)",
     const { planSlug, acId } = buildScriptFixture("Refuse");
 
     const result = runLore(
-      ["create", "task", "--title", "Unscoped Task", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"],
+      ["create", "task", "--kind", "code", "--title", "Unscoped Task", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"],
       tmpDir,
     );
 
@@ -203,7 +203,7 @@ describe("lore create task — task-create admission gate (AC-ACS-1, AC-ACS-7)",
     const { planSlug } = buildScriptFixture("NoWrite");
 
     runLore(
-      ["create", "task", "--title", "Ghost Task", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"],
+      ["create", "task", "--kind", "code", "--title", "Ghost Task", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"],
       tmpDir,
     );
 
@@ -223,6 +223,8 @@ describe("lore create task --ac-scope — the same creation WITH --ac-scope (AC-
       [
         "create",
         "task",
+        "--kind",
+        "code",
         "--title",
         "Scoped Task",
         "--parent",
@@ -254,6 +256,8 @@ describe("lore create task --ac-scope — the same creation WITH --ac-scope (AC-
       [
         "create",
         "task",
+        "--kind",
+        "code",
         "--title",
         "Multi Scoped Task",
         "--parent",
@@ -287,6 +291,8 @@ describe("lore create task --ac-scope \"\" — explicit empty value (AC-ACS-3)",
       [
         "create",
         "task",
+        "--kind",
+        "code",
         "--title",
         "Explicitly Empty Task",
         "--parent",
@@ -320,7 +326,7 @@ describe("lore create task — a plan whose spec has no script-mode ACs adds no 
     const planSlug = createPlan("HumanOnly Plan", specSlug);
 
     const result = runLore(
-      ["create", "task", "--title", "Unscoped OK Task", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"],
+      ["create", "task", "--kind", "code", "--title", "Unscoped OK Task", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"],
       tmpDir,
     );
 
@@ -335,7 +341,7 @@ describe("lore create task — a plan whose spec has no script-mode ACs adds no 
     const planSlug = createPlan("NoAc Plan", specSlug);
 
     const result = runLore(
-      ["create", "task", "--title", "No AC Task", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"],
+      ["create", "task", "--kind", "code", "--title", "No AC Task", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"],
       tmpDir,
     );
 
@@ -347,7 +353,7 @@ describe("lore create task — a plan whose spec has no script-mode ACs adds no 
     const planSlug = createPlan("Vacuum Plan", prdSlug);
 
     const result = runLore(
-      ["create", "task", "--title", "Vacuum Task", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"],
+      ["create", "task", "--kind", "code", "--title", "Vacuum Task", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"],
       tmpDir,
     );
 
@@ -380,7 +386,7 @@ describe("lore create task --adhoc — --ac-scope requiredness covers the ad-hoc
     createPrd("Adhoc Root PRD");
 
     const countBefore = docCount();
-    const args = ["create", "task", "--title", "Adhoc Task", "--adhoc", "--no-ai", "--content", "body"];
+    const args = ["create", "task", "--kind", "code", "--title", "Adhoc Task", "--adhoc", "--no-ai", "--content", "body"];
 
     const refused = runLore(args, tmpDir);
 
@@ -416,6 +422,8 @@ describe("lore create task --adhoc — --ac-scope requiredness covers the ad-hoc
       [
         "create",
         "task",
+        "--kind",
+        "code",
         "--title",
         "Adhoc Declared Task",
         "--adhoc",
@@ -440,7 +448,7 @@ describe("lore create task --adhoc — --ac-scope requiredness covers the ad-hoc
     declareScriptAc(specSlug, "AC-NOSPEC-1");
 
     const result = runLore(
-      ["create", "task", "--title", "Adhoc No Spec Task", "--adhoc", "--no-ai", "--content", "body", "--ac-scope", "AC-NOSPEC-1"],
+      ["create", "task", "--kind", "code", "--title", "Adhoc No Spec Task", "--adhoc", "--no-ai", "--content", "body", "--ac-scope", "AC-NOSPEC-1"],
       tmpDir,
     );
 
@@ -455,7 +463,7 @@ describe("lore create task --adhoc — --ac-scope requiredness covers the ad-hoc
     const { planSlug } = buildScriptFixture("AdhocConflictOrder");
 
     const result = runLore(
-      ["create", "task", "--title", "Conflicted Task", "--adhoc", "--plan-id", planSlug, "--no-ai", "--content", "body"],
+      ["create", "task", "--kind", "code", "--title", "Conflicted Task", "--adhoc", "--plan-id", planSlug, "--no-ai", "--content", "body"],
       tmpDir,
     );
 

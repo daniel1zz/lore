@@ -86,11 +86,14 @@ function makeBranch(name: string): void {
   git(["checkout", "-q", "--detach", "main"]);
 }
 
+/** An approved code task (integrate lands only approved tasks, and approve fixes the contract; the red run is not this file's subject). */
 function createTask(title: string): string {
   taskCounter += 1;
-  return parseSlug(
-    mustRun(["create", "task", "--title", `${title} ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"]),
+  const task = parseSlug(
+    mustRun(["create", "task", "--title", `${title} ${taskCounter}`, "--kind", "code", "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"]),
   );
+  mustRun(["approve", task, "--red-waiver", "the red run is not the subject of this test"]);
+  return task;
 }
 
 function integrate(branch: string): RunResult {
@@ -102,7 +105,14 @@ beforeEach(() => {
   makeCleanTreeRepo(dir);
   appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n");
   mustRun(["init"]);
-  patchLoreConfig(dir, ["workflow:", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"', ""].join("\n"));
+  patchLoreConfig(
+    dir,
+    [
+      "workflow:", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"',
+      // approve compiles each task's contract from these commands (a code task needs all three)
+      "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"', "",
+    ].join("\n"),
+  );
   const prd = parseSlug(mustRun(["create", "prd", "--title", "Claimants PRD", "--content", "root", "--no-ai"]));
   planSlug = parseSlug(mustRun(["create", "plan", "--title", "Claimants Plan", "--parent", prd, "--content", "x", "--no-ai"]));
   git(["checkout", "-q", "--detach", "main"]);
@@ -162,7 +172,7 @@ describe("AC-LRD-2 — lore integrate records a landing on every claimant", () =
     expect(landingOf(first)).toEqual(firstLanding);
   }, 300_000);
 
-  it("(2b) an already-integrated branch records the branch head itself as the landed commit, with the claim's base as the range start", () => {
+  it("(2b) an already-integrated branch records the first-parent main commit containing the branch head as the landed commit (D44), with the claim's base as the range start", () => {
     makeBranch("feat-head");
     const first = createTask("HeadFirst");
     const tip = git(["rev-parse", "feat-head"]);
@@ -179,16 +189,32 @@ describe("AC-LRD-2 — lore integrate records a landing on every claimant", () =
     expect(again.text).toContain("already integrated");
     const landing = landingOf(task);
     expect(landing?.branch_head).toBe(tip);
-    expect(landing?.landing_commit).toBe(tip);
+    // D44 (BR-1496, BR-1508): the landing commit is the earliest first-parent commit of main containing the tip (the merge commit
+    // the first claimant's integrate made), no longer the branch head itself
+    const firstParentCommits = git(["rev-list", "--first-parent", "--reverse", "main"]).split("\n");
+    const expectedLanding = firstParentCommits.find((commit) => {
+      try {
+        git(["merge-base", "--is-ancestor", tip, commit]);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    expect(expectedLanding).toBeDefined();
+    expect(landing?.landing_commit).toBe(expectedLanding);
+    expect(landing?.landing_commit).not.toBe(tip);
     expect(landing?.main_after).toBe(mainTip);
     expect(landing?.main_before).not.toBe(mainTip);
   }, 300_000);
 
-  it("(2c) integrate-service.ts reconstructs nothing from main's history", () => {
+  it("(2c) integrate-service.ts places an already-integrated branch through the ONE first-parent mapping, never its own ancestry walk (D44)", () => {
     const source = readFileSync(join(PROJECT_ROOT, "src", "service", "integrate-service.ts"), "utf8");
     expect(source).not.toContain("locateExistingLanding");
     expect(source).not.toContain("ancestry-path");
-    expect(source).not.toContain('"rev-list"');
+    // reason: D44 supersedes "reconstructs nothing from main's history" (BR-1336): the landing commit IS the earliest first-parent
+    // commit of main containing the tip (BR-1496, BR-1508), found by the injected `findFirstParentCommitContaining`, not re-derived here.
+    expect(source).toContain("firstParentContaining");
+    expect(source).not.toContain("base_from_claim");
   });
 
   it("(3) a branch no claim named is refused (BR-1348): no task belongs to it, so no landing could name one", () => {
@@ -258,16 +284,14 @@ describe("AC-LRD-2 — lore integrate records a landing on every claimant", () =
     expect(recorded?.start_head).toBe(before);
     expect(recorded?.tip).toBe(recorded?.branch_head);
 
-    mustRun(["claim", task, "--worktree", "feat-five"]);
+    // under the done contract integrate closes the landed task itself (it holds every contract pass the landing's run recorded), so the
+    // task is terminal: a later re-claim is refused and `lore done` is the no-op of an archived task; neither rewrites the record
+    const reclaim = runLore(["claim", task, "--worktree", "feat-five"]);
+    expect(reclaim.exitCode).toBe(4);
+    expect(reclaim.text).toContain("archived");
     expect(landingOf(task)).toEqual(recorded);
-    mustRun(["release", task]);
-    expect(landingOf(task)).toEqual(recorded);
-    mustRun(["claim", task]);
-    expect(landingOf(task)).toEqual(recorded);
-    mustRun(["evidence", task, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"]);
-    mustRun(["release", task]);
-    mustRun(["set", planSlug, "--status", "approved"]);
-    mustRun(["done", task]);
+    const closedAgain = runLore(["done", task]);
+    expect(closedAgain.exitCode, closedAgain.text).toBe(0);
     expect(landingOf(task)).toEqual(recorded);
   }, 300_000);
 });

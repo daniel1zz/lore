@@ -137,7 +137,7 @@ async function verifyFixture(name: string): Promise<{ home: string; cwd: string;
   const plan = slugOf((await run(["create", "plan", "--title", "Stdin plan", "--parent", spec, "--no-ai", "--content", "body"])).stdout);
   await run(["ac", "add", spec, "AC-STDIN-1", "--statement", "the command prints a marker", "--mode", "script", "--oracle", "other", "--command", "echo es-stdin-marker"]);
   const taskSlug = slugOf(
-    (await run(["create", "task", "--title", "Stdin task", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body", "--ac-scope", "AC-STDIN-1"])).stdout,
+    (await run(["create", "task", "--title", "Stdin task", "--kind", "check", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body", "--ac-scope", "AC-STDIN-1"])).stdout,
   );
   return { home, cwd, plan, taskSlug };
 }

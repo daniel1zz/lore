@@ -123,7 +123,7 @@ async function makeCorpus(): Promise<Corpus> {
 /** A carrier task naming #5 (`--issue` writes `extra.issues`); returns its slug. */
 async function createCarrier(corpus: Corpus): Promise<string> {
   const created = await mustRun(corpus, [
-    "create", "task", "--adhoc", "--ac-scope", "", "--title", "Carrier of five", "--no-ai", "--content", "Carrier.", "--issue", "5", "--json",
+    "create", "task", "--kind", "code", "--adhoc", "--ac-scope", "", "--title", "Carrier of five", "--no-ai", "--content", "Carrier.", "--issue", "5", "--json",
   ]);
   return (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
 }

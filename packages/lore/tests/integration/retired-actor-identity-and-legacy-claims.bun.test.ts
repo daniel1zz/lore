@@ -191,7 +191,7 @@ describe("AC-HID-4: the store refuses a claim that names no run", () => {
     const prd = corpus.slugOf(corpus.setup(["create", "prd", "--title", "Store PRD", "--content", "root", "--no-ai"]));
     const plan = corpus.slugOf(corpus.setup(["create", "plan", "--title", "Store Plan", "--parent", prd, "--content", "x", "--no-ai"]));
     task = corpus.slugOf(
-      corpus.setup(["create", "task", "--title", "Store task", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"]),
+      corpus.setup(["create", "task", "--kind", "code", "--title", "Store task", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"]),
     );
   });
 
@@ -268,7 +268,7 @@ describe("AC-HID-4: the schema upgrade expires the claims that name no run", () 
     const prd = corpus.slugOf(corpus.setup(["create", "prd", "--title", "Upgrade PRD", "--content", "root", "--no-ai"]));
     const plan = corpus.slugOf(corpus.setup(["create", "plan", "--title", "Upgrade Plan", "--parent", prd, "--content", "x", "--no-ai"]));
     const make = (title: string): string =>
-      corpus.slugOf(corpus.setup(["create", "task", "--title", title, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"]));
+      corpus.slugOf(corpus.setup(["create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"]));
     legacy = make("Legacy lease");
     nullRun = make("Null-run lease");
     attested = make("Attested lease");
@@ -341,7 +341,7 @@ describe("AC-HID-4: the schema upgrade expires the claims that name no run", () 
   });
 
   it("the upgraded corpus is usable and a fresh claim names its run", () => {
-    expect(corpus.lore(["claim", legacy], AGENT_RUN).exitCode).toBe(0);
+    expect(corpus.lore(["claim", legacy, "--worktree", "wt-legacy-upgraded"], AGENT_RUN).exitCode).toBe(0);
     expect((docRow(corpus, legacy).extra["claim"] as { harness_run: string }).harness_run).toBe(AGENT_RUN.run);
   });
 });

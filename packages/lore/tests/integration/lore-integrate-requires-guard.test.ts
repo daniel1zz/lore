@@ -109,7 +109,7 @@ describe("AC-MG-2 integrate lands with the guard in force", () => {
     claimBranchTask((args) => {
       const run = spawnSync("bun", ["run", INDEX_TS, ...args], { cwd: fx.repo, env: fx.env("claim"), encoding: "utf8" });
       return { status: run.status ?? 1, out: `${run.stdout}${run.stderr}` };
-    }, fx.repo, branch);
+    }, fx.repo, branch, "code");
     const before = fx.main();
     const tip = fx.git(["rev-parse", branch]);
     const r = await fx.integrate(branch, "mg2-lands");

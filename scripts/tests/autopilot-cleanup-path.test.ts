@@ -2,7 +2,7 @@
 // @reads assets/context/worktree-dispatch.md
 // @reads assets/context/autopilot-cleanup-path-missing.md
 /**
- * CL-4: the shipped orchestrator guidance trusts `lore done` to remove a merged agent worktree and sweeps at round end,
+ * CL-4: the shipped orchestrator guidance trusts `lore land` (which runs `lore done`) to remove a merged agent worktree and sweeps at round end,
  * instead of telling the orchestrator to run `git worktree remove` by hand after the merge.
  * Six dimensions: HAPPY (SKILL.md names the sweep, no manual removal) / NEGATIVE (a manual `git worktree remove` line is
  * reported as `<file>:<line>`) / BOUNDARY (a prohibition line mentioning the command is not an instruction) /
@@ -40,9 +40,11 @@ describe("autopilot cleanup path (CL-4)", () => {
     expect(read(SKILL)).toMatch(/round end[^\n]*`lore worktree sweep --apply`|`lore worktree sweep --apply`[^\n]*round end/i);
   });
 
-  it("STATE: SKILL.md tells the orchestrator to read lore done's worktree line and follow a `kept` reason", () => {
+  it("STATE: SKILL.md tells the orchestrator that `lore land` cleans the worktree and to follow a `kept` reason", () => {
+    // reason: `lore land` (AC-DCS1-24) folds, integrates, archives and cleans in one command and prints `land: archived <slug>`,
+    // not `lore done`'s `worktree: removed|gone|kept` line, so the land flow's equivalent is the `kept <path>: <reason>` clause.
     const text = read(SKILL);
-    expect(text).toMatch(/worktree: removed/);
+    expect(text).toMatch(/`lore land <task>`[^\n]*removes the worktree/);
     expect(text).toMatch(/kept <path>: <reason>/);
   });
 

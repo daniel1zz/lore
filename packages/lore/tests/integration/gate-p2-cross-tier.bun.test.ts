@@ -277,7 +277,7 @@ async function createTask(planId: string): Promise<{ taskId: string; taskSlug: s
       title: "Gate P2 Task",
       parent_id: planId,
       content: "Task body.",
-      extra: { plan_id: planId },
+      extra: { kind: "code", plan_id: planId },
     } as CreateDocInput);
     if (!taskResult.ok) throw new Error(`task create failed: ${JSON.stringify(taskResult.error)}`);
     return { taskId: taskResult.value.id, taskSlug: taskResult.value.slug };
@@ -305,7 +305,7 @@ async function createTaskWithAnchors(
       title,
       parent_id: planId,
       content: "Task body.",
-      extra: { plan_id: planId, file_anchors: anchors },
+      extra: { kind: "code", plan_id: planId, file_anchors: anchors },
     } as CreateDocInput);
     if (!taskResult.ok) throw new Error(`task create failed: ${JSON.stringify(taskResult.error)}`);
     return { taskId: taskResult.value.id, taskSlug: taskResult.value.slug };

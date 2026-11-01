@@ -19,20 +19,12 @@
  *                                             to `archived` (spec-workflow-hardening-
  *                                             evidence-red-vocabulary-claim-worktree
  *                                             §M3, AC-WH-3); idempotent on an
- *                                             already-terminal task; ALSO refuses a
- *                                             `extra.red_first: true` task with no
- *                                             red evidence row (task-red-first-
- *                                             discipline-is-asked-for-in-prose-but-never),
- *                                             AND (opt-OUT default for every task that
- *                                             never declares red_first) a declared-
- *                                             ac_scope task with no red row and no
- *                                             `noNewTestsReason` declaration (task-a-
- *                                             non-empty-output-tail-can-be-hand-
- *                                             authored-prose-and-the)
- *   declareRedFirst(idOrSlug, opts, now?)  → sets extra.red_first: true (`lore
- *                                             red-first <task>`) — the ONLY writer
- *                                             for that flag (task-red-first-
- *                                             discipline-is-asked-for-in-prose-but-never)
+ *                                             already-terminal task; judges EVERY task by
+ *                                             its stored done contract
+ *                                             (`extra.done_contract`, compiled at approve)
+ *                                             in the order of {@link DONE_FLOOR_ORDER},
+ *                                             through ONE function
+ *                                             (`evaluateStoredContractFloors`)
  *   ready(planIdOrSlug, now?)              → computed readiness report (zero writes)
  *   readyAdhoc(now?)                       → OPEN ad-hoc (planless) task listing (zero
  *                                             writes, SPEC-069 D2) — the `--adhoc`
@@ -230,55 +222,16 @@
  *   independent" contract) but AFTER the already-terminal idempotent short-circuit
  *   (AC-4: idempotency must never regress retroactively against evidence authored
  *   before this floor armed).
- * @invariant `done()`'s audited escape hatch (`DoneOpts.overrideReason`) bypasses
- *   ONLY the attestation floor immediately above — never the red-first or
- *   unfiltered-test-file-run floors, which read `result`/`command` and are
- *   attestation-agnostic already. For verification `lore verify` structurally
- *   cannot perform (`--oracle manual` browser/visual checks; any oracle with no
- *   script-mode AC to bind to) — mirrors this repo's `lore approve
- *   --override-judgment`/`lore outline exempt --reason` shape: an explicit,
- *   mandatory free-text justification, written VERBATIM onto every lifecycle
- *   step's audit entry as `details.override_reason` (+ `details
- *   .attestation_overridden: true`) this call produces — never silent, never
- *   defaulted, no env-var form. A blank/whitespace-only reason is refused
- *   VALIDATION_ERROR here too (belt-and-suspenders — `commands/done.ts` already
- *   refuses it as a CLI usage error, exit 2, before this service is ever called;
- *   this second check protects any OTHER caller, e.g. a test or a future adapter,
- *   that constructs `DoneOpts` directly). `overrideReason` is silently IGNORED
- *   (never checked, never persisted) when an attested pass already satisfies the
- *   floor above — the escape hatch is for tasks that structurally cannot attest,
- *   not a blanket "always audit" switch.
- * @invariant `done()`'s red-first floor is OPT-IN ONLY (`extra.red_first: true`,
- *   set exclusively by `declareRedFirst`) — a task that never makes that call is
- *   entirely unaffected by IT, but is instead governed by the FOURTH, INDEPENDENT
- *   "no-new-tests" floor immediately below (task-a-non-empty-output-tail-can-be-
- *   hand-authored-prose-and-the): the red-first discipline inverted to opt-OUT.
- *   A task that has DECLARED `extra.ac_scope` at all — keyed on the declaration's
- *   PRESENCE, so an EXPLICITLY EMPTY `[]` arms it too (task-the-ac-scope-re-keying-
- *   left-the-red-first-floor-unarmed) — with zero `"expected-fail"`/`"fail"`
- *   evidence rows and NO `extra.red_first: true` declaration cannot archive without
- *   an explicit `DoneOpts.noNewTestsReason` (mandatory, non-blank, persisted
- *   verbatim onto every step's audit `details` as `no_new_tests_reason` +
- *   `no_new_tests_declared: true` — the SAME audited-escape shape as
- *   `overrideReason`). Mutually exclusive with the red-first floor by construction
- *   ({@link requiresNoNewTestsDeclaration} short-circuits `false` whenever
- *   `extra.red_first` is declared), so a task that DOES opt in keeps working
- *   BYTE-IDENTICALLY (AC6 control) — this floor never adds a SECOND requirement on
- *   top of that one.
- * @invariant `done()` also refuses over an UNMET unfiltered-test-file-run floor
- *   (task-every-ac-oracle-is-t-scoped-so-the-file-passes-is-attested) — a FIFTH,
- *   INDEPENDENT floor evaluated after the four above (so none can mask another). For EVERY declared test-file
- *   anchor (`extra.file_anchors`, filtered to {@link isTestFileAnchor} — a
- *   directory-scoped anchor names no single file and is unaffected), at least one
- *   `oracle:"test"` `result:"pass"` evidence row must run that exact file with no
- *   recognised case-name filter ({@link commandRunsFileUnfiltered}). A task
- *   declaring zero test-file anchors has nothing to attest and is a clean pass —
- *   mirrors the red-first floor's "never sets the flag → never reaches this check"
- *   shape. Rationale: a `-t`-scoped AC oracle attests only the ONE assertion it
- *   binds to, never that the file, taken as a whole, passes together (two tests
- *   sharing mutable fixture state can each pass individually under `-t` and fail
- *   when the file runs unfiltered — `knowledge-assessment-implementation-lore-ac-
- *   set-the-dangling-ac`'s finding).
+ * @invariant `done()` has NO override: the attestation floor above cannot be waived
+ *   (the `--override-attestation` escape hatch was retired, decision D45). A task that
+ *   cannot meet its stored contract goes through a contract amendment.
+ * @invariant `done()` judges a task ONLY by its stored contract (AC-DCS1-7): the red
+ *   requirement is the contract's `red_required` (waived at approve, never at done),
+ *   the whole-file runs are the contract's `test:<path>` oracles (plus `added_oracles`),
+ *   the other oracles are the `ac:<id>` oracles (judged by the AC's CURRENT live
+ *   command) and `typecheck`. A task holding no contract is refused, never judged by
+ *   its fields. The floors run in {@link DONE_FLOOR_ORDER} and the first unmet one is
+ *   reported. The evidence rule is chosen by kind (AC-DCS1-27, `evidence-binding.ts`).
  * @invariant `addEvidence` (self-reported `result: "pass"` only) and `release`
  *   (unconditionally) both refuse when the claim's recorded
  *   `extra.claim.worktree` has UNCOMMITTED tracked-file changes
@@ -314,19 +267,24 @@
  *         silence/opt-in review this fix answers)
  */
 
-import { requireOverrideAuto, type OverrideDecisionPort } from "./override-decision.js";
 import { spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute, relative } from "node:path";
 import { z } from "zod";
-import { err, ok, checkScopeDeclaredOnSpec, extractGoverningSpecRef, governingSpecMissingError, classifyEvidenceStamps, findMissingOracleFiles, hasPassOnRecord, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result, readClaimRecord } from "@lore/core";
+import { err, ok, checkScopeDeclaredOnSpec, extractGoverningSpecRef, governingSpecMissingError, classifyEvidenceStamps, unboundReasonOfReading, findMissingOracleFiles, hasPassOnRecord, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result, readClaimRecord } from "@lore/core";
 import type { AuditEntry, LoreError } from "@lore/core";
 import {
   evidenceEntrySchema,
+  doneContractSchema,
+  specAcceptanceCriteriaSchema,
+  type DoneContract,
+  type DoneContractOracle,
   taskClaimSchema,
   extractHeldClaim,
   isClaimStale,
   isClaimStaleForRun,
+  isFinishedInForce,
+  markClaimFinished,
   isValidTransition,
   evaluateReadiness,
   buildTaskClaim,
@@ -334,6 +292,8 @@ import {
   deriveSessions,
   sessionIdDiscriminator,
   normalizeFileAnchors,
+  normalizeWriteSet,
+  effectiveWriteSet,
   extractFileAnchors,
   fileAnchorPath,
   anchorsOverlap,
@@ -364,7 +324,8 @@ import {
   type FileAnchorResolutionReport,
   type NonResolvingFileAnchor,
 } from "@lore/core";
-import type { DocId, DocRecord, DocStatus, StampBindingContext } from "@lore/core";
+import type { DocId, DocRecord, DocStatus, ExecutionLogEntry, StampBindingContext } from "@lore/core";
+import { readExecutionLog, withExecutionLogEntries } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
@@ -378,6 +339,10 @@ import { resolveDoc } from "./resolve.js";
 //   lives in `plan-membership.ts`'s SSOT note — do not reintroduce one
 //   (task-three-byte-identical-copies-of-isplanmember-survive).
 import { isPlanMember } from "./plan-membership.js";
+import { describeLoreError } from "./gate-enforcer.js";
+import { deriveWriteSetAdditions, withAddedOracles } from "./done-contract-service.js";
+import { commitContainment } from "./landing-evidence.js";
+import { createGitRunner, deletedByDiff, missingOracleFiles, pathExistsAt, treesIdentical, type GitRunner, type TestFileOracle } from "./evidence-binding.js";
 import { claimedNamesOf, isTaskOfIntegrationBranch, planIntegrationBranches } from "./branch-membership.js";
 import type { StampOutcome } from "./git-state-stamp.js";
 import { loadStampBindingContext, readRecordedCorpusRev } from "./stamp-binding-reader.js";
@@ -391,6 +356,7 @@ import {
   resolveClaimHead,
   type AnchorRemovalVerdict,
   type ListedWorktree,
+  type ProbeResult,
   type RecordedWorktree,
   type WorktreeGitProbe,
   type WorktreeOutcome,
@@ -449,8 +415,8 @@ function refuseClaim(taskSlug: string, name: "work-needs-branch" | "worktree-wit
       field: "worktree",
       message:
         `The worktree named for task "${taskSlug}" has no readable branch (detached HEAD or an unreadable ref), so the start of the work ` +
-        `cannot be measured [claim: ${name}]. Check out a branch in that worktree and claim again, or claim without --worktree when the ` +
-        "task anchors no file (corpus-only work). Nothing was written.",
+        `cannot be measured [claim: ${name}]. Check out a branch in that worktree and claim again. ` +
+        "A check or corpus task is never claimed: finish it from the shared checkout with `lore finish`. Nothing was written.",
       value: name,
       rule: "BR-1468",
     });
@@ -459,12 +425,27 @@ function refuseClaim(taskSlug: string, name: "work-needs-branch" | "worktree-wit
     code: "VALIDATION_ERROR",
     field: "worktree",
     message:
-      `Task "${taskSlug}" declares file anchors, so its work changes files and needs its own branch [claim: ${name}]. ` +
-      `Create a worktree and claim with \`lore claim ${taskSlug} --worktree <branch>\`; only a task with no file anchors ` +
-      "(corpus-only work) may be claimed without one.",
+      `Task "${taskSlug}" is a code task: its work changes files and needs its own branch [claim: ${name}]. ` +
+      `Create a worktree and claim with \`lore claim ${taskSlug} --worktree <branch>\` (or \`lore start ${taskSlug}\`). ` +
+      "A check or corpus task is never claimed: finish it from the shared checkout with `lore finish`.",
     value: name,
     rule: "BR-1468",
   });
+}
+
+/**
+ * Refuses a claim under a name of the done-contract spec (AC-DCS1-14); nothing is written. The name opens the message so a
+ * caller and a test match it without parsing `details`.
+ */
+function refuseClaimByKind(name: "kind-has-no-claim" | "kind-missing" | "shared-branch", message: string): Result<never, LoreError> {
+  return err({ code: "VALIDATION_ERROR", field: "claim", message: `${name}: ${message}`, value: { refusal: name } });
+}
+
+/** The kind of a task: its stored contract's kind, else the kind it was created with; `undefined` for a task that has neither. */
+export function readTaskKind(task: DocRecord): "code" | "check" | "corpus" | undefined {
+  const stored = doneContractSchema.safeParse(task.extra["done_contract"]);
+  const kind = stored.success ? stored.data.kind : task.extra["kind"];
+  return kind === "code" || kind === "check" || kind === "corpus" ? kind : undefined;
 }
 
 // ─── Public Types ──────────────────────────────────────────────────────────
@@ -502,6 +483,12 @@ export interface ClaimOpts {
    * per call — never carried forward on a refresh.
    */
   corpusScope?: string;
+  /**
+   * The files this claim declares it will touch (`lore claim --write-set`, repeatable; anchor grammar, no count cap).
+   * It judges overlap only (AC-DCS1-10). Absent ⇒ the task's approved anchors are the write set; a same-holder refresh that
+   * omits it keeps the recorded one.
+   */
+  writeSet?: readonly string[];
   /** Override even a fresh (non-stale) claim held by someone else. */
   steal?: boolean;
   /**
@@ -569,52 +556,9 @@ export interface DoneOpts {
   /** See {@link ClaimOpts.source}. */
   source?: string;
   /**
-   * Audited escape hatch for the attested-pass floor (adr-lore-done-requires-a-
-   * runner-attested-pass-the-sixth-false) — a mandatory free-text justification
-   * for archiving WITHOUT a runner-attested `result: "pass"` evidence row, for
-   * verification `lore verify` structurally cannot perform (`--oracle manual`
-   * browser/visual checks; any oracle with no script-mode AC to bind to).
-   * Written VERBATIM to every lifecycle step's audit entry as
-   * `details.override_reason` (+ `details.attestation_overridden: true`) — never
-   * silent, never defaulted, no env-var form (mirrors `lore approve
-   * --override-judgment`/`lore outline exempt --reason`'s audited-escape shape).
-   * `commands/done.ts` refuses a blank/whitespace-only value as a CLI usage
-   * error (exit 2) before this service is ever called; `done()` refuses it too
-   * (VALIDATION_ERROR) as a belt-and-suspenders check for any OTHER caller that
-   * constructs `DoneOpts` directly (see `done()`'s own JSDoc). IGNORED entirely
-   * when an attested pass already satisfies the floor — this does not relax the
-   * independent red-first / unfiltered-test-file-run floors below it.
-   */
-  overrideReason?: string;
-  /**
-   * Audited escape hatch for the NO-NEW-TESTS floor (task-a-non-empty-output-
-   * tail-can-be-hand-authored-prose-and-the) — the red-first discipline INVERTED
-   * to opt-OUT: a task that has DECLARED `extra.ac_scope` at all (an EXPLICITLY
-   * EMPTY `[]` included — task-the-ac-scope-re-keying-left-the-red-first-floor-
-   * unarmed) with ZERO
-   * `"fail"`/`"expected-fail"` evidence rows and no `extra.red_first: true`
-   * declaration (that path is the PRE-EXISTING, unaffected opt-in floor, see
-   * {@link overrideReason}'s sibling check in `done()`'s JSDoc) cannot archive
-   * without this mandatory, non-blank, free-text justification for why no new
-   * RED test was recorded (CLI: `--declare-no-new-tests "<reason>"` — deliberately
-   * NOT `--no-new-tests`, which citty's mri parser would parse as a boolean
-   * negation and silently discard the value) — same audited shape as
-   * `overrideReason` above (`lore approve --override-judgment`/`lore outline
-   * exempt --reason`): written
-   * VERBATIM to every lifecycle step's audit entry as `details.no_new_tests_reason`
-   * (+ `details.no_new_tests_declared: true`), never silent, never defaulted, no
-   * env-var form. `commands/done.ts` refuses a blank/whitespace-only value as a
-   * CLI usage error (exit 2); `done()` refuses it too as a belt-and-suspenders
-   * check. IGNORED entirely when this floor does not apply (no `ac_scope` KEY at
-   * all, red_first already declared, or a red evidence row already exists) — never a
-   * blanket "always audit" switch, mirroring {@link overrideReason}'s own
-   * ignored-when-unneeded contract.
-   */
-  noNewTestsReason?: string;
-  /**
    * Free-text justification for this close (`lore bulk done --reason`, spec-lean-governance-batch-verbs-judgment-only-at-
-   * milestones BR-1366): written verbatim to every lifecycle step's audit entry as `details.reason`. Unlike
-   * {@link overrideReason} it relaxes NO floor — it is a note, never an escape hatch. Absent adds no key.
+   * milestones BR-1366): written verbatim to every lifecycle step's audit entry as `details.reason`. It relaxes NO floor —
+   * it is a note, never an escape hatch. Absent adds no key.
    */
   reason?: string;
   /**
@@ -623,6 +567,25 @@ export interface DoneOpts {
    * guard-lore-done-and-a D2). Absent = unknown: never the owner of anything.
    */
   callerSession?: string;
+  /**
+   * `true` = this archive does not start the automatic plan close even when it leaves the plan with no open task: the caller (a landing,
+   * `lore integrate` / `lore land`) starts the review batch itself as its LAST step, after the rebuild and the schema migration, so the
+   * batch runs main's binary over the migrated corpus (BR-1379). Absent = the archive that completes a plan starts the close.
+   */
+  deferPlanClose?: boolean;
+}
+
+/**
+ * The trigger of the automatic plan close (AC-DCS2-11): what `TaskWorkflowService.done` calls once, after the archive that left a plan with
+ * no non-terminal task. It starts the detached review batch through the existing starter and returns at once; it never waits for verify,
+ * apply or assess, and never fails the archive (a start that could not happen is a line, not an error).
+ */
+export interface PlanCloseTrigger {
+  /**
+   * @param planSlug - the plan every task of which is now archived or deprecated
+   * @returns the one line the caller prints about what the trigger did; `undefined` when it has nothing to say
+   */
+  afterLastArchive(planSlug: string): Promise<string | undefined>;
 }
 
 /**
@@ -672,18 +635,62 @@ type PlanTerminalityFact =
   | { kind: "fully_terminal_with_empty_phases"; plan_slug: string; empty_phases: string[] }
   | ({ kind: "membership_disagreement" } & PlanMembershipDisagreement);
 
-/** The `lore done` floors, by stable id (order = evaluation order). */
-export type DoneFloorId =
-  | "attested-pass"
-  | "red-first"
-  | "no-new-tests"
-  | "unfiltered-test-file"
-  // reason: DCL-1 (e) — evaluated by `evaluateDoneFloors` right after `attested-pass`.
-  | "latest-attested-fail"
-  // reason: BR-1291 — async (needs git); evaluated by `findNotLandedFloor` before `missing-oracle-file`.
-  | "not-landed"
-  // reason: AC-TG-6 — evaluated after the four synchronous floors, by `findMissingOracleFileFloor` (async: resolves criteria).
-  | "missing-oracle-file";
+/** One test-file oracle that left a task's evaluation set because its landing deleted the file (AC-DCS1-30). */
+export type DoneContractRemovedOracle = NonNullable<DoneContract["removed_oracles"]>[number];
+
+/** One oracle of the set a done judges: the contract's id and the command a pass row must have run (the AC's live command for an `ac:` oracle). */
+export interface EvaluatedOracle {
+  readonly id: string;
+  /** Absent for an oracle with no command of its own (`corpus:files-unchanged`). */
+  readonly command: string | undefined;
+  /** The oracle kind of the live criterion, for an `ac:` oracle that resolved; absent for every other oracle. */
+  readonly oracleKind?: EvidenceEntry["oracle"];
+  /** Why the command could not be resolved (an `ac:` oracle whose AC no governing spec declares); such an oracle is never passed. */
+  readonly unresolved?: string;
+}
+
+/** Whether one pass row counts for the contract (AC-DCS1-27), and why not. */
+interface RowBinding {
+  readonly counts: boolean;
+  readonly cause?: "evidence-stale" | "evidence-unmeasurable";
+  readonly detail?: string;
+}
+
+/** One floor's step: its refusal (or an `err` for a usage error), or `undefined` when the floor is met. */
+type FloorStep = Result<{ refusal: DoneFloorRefusal }, LoreError> | undefined;
+
+/** What judging a task against its stored contract produced; `done()` writes `removed` in the same write as the archive. */
+interface ContractJudgement {
+  readonly refusal: DoneFloorRefusal | null;
+  readonly removed: DoneContractRemovedOracle[];
+  readonly landing: LandingMeasure;
+}
+
+/**
+ * The sentence the attested-pass floor adds when pass rows exist but none counts: the stale cause (with the changed paths) when
+ * any row ran on different code, else the unmeasurable cause. `rows` newest first. `undefined` when every row counts.
+ */
+function describeBindingFailures(rows: readonly RowBinding[]): string | undefined {
+  const stale = rows.find((row) => row.cause === "evidence-stale");
+  if (stale !== undefined) return `evidence-stale: the code changed since the row ran (changed paths: ${stale.detail ?? "unknown"})`;
+  const unmeasurable = rows.find((row) => row.cause === "evidence-unmeasurable");
+  if (unmeasurable !== undefined) return `evidence-unmeasurable: ${unmeasurable.detail ?? "git could not answer"}`;
+  return undefined;
+}
+
+/** The `lore done` floors in the fixed order they are evaluated (BR-209); the first unmet one is the one reported. */
+export const DONE_FLOOR_ORDER = [
+  "not-landed",
+  "missing-oracle-file",
+  "attested-pass",
+  "latest-attested-fail",
+  "red-first", "unfiltered-test-file",
+  "contract-oracles",
+  "foreign-claim",
+] as const;
+
+/** The `lore done` floors, by stable id. */
+export type DoneFloorId = (typeof DONE_FLOOR_ORDER)[number];
 
 /** One floor's refusal: the id plus the exact LoreError `done()` returns (`details.floor` set). */
 /** What {@link TaskWorkflowService.measureLanding} measured about one task's claimed work. */
@@ -760,6 +767,11 @@ export interface DoneResult {
    */
   plan_membership_disagreement?: PlanMembershipDisagreement;
   /**
+   * The line the plan-close trigger reported (AC-DCS2-11): present ONLY when this archive left its plan with no non-terminal task and the
+   * caller wired a {@link PlanCloseTrigger}. The batch it started runs detached; the archive never waited for it.
+   */
+  plan_close_start?: string;
+  /**
    * Issue #106 / BR-961 — one outcome per worktree this task's claims recorded, from the cleanup
    * pass that runs AFTER a real archive walk (absent on the idempotent no-op branch). Never an
    * error: a kept / not-measured worktree is reported here and `done` still succeeds.
@@ -771,16 +783,15 @@ export interface DoneResult {
    */
   commit_range_note?: string;
   /**
-   * Anchored test files the `unfiltered-test-file` floor accepted WITHOUT a run because this task's own claimed
-   * branch deleted them (task-done-floor-accepts-an-anchored-test-file-the-task-deleted). Absent when none.
+   * Test-file oracles that left the evaluation set because this task's own landing deleted the file (AC-DCS1-30); the same
+   * entries were written to `done_contract.removed_oracles` in the write of the done. Absent when none.
    */
-  removed_test_anchors?: string[];
+  removed_oracles?: DoneContractRemovedOracle[];
   /**
-   * Declared `extra.ac_scope` ids whose criterion is superseded (D15), each with the superseding criterion. Such an id
-   * is satisfied by supersession: the ac_scope no-new-tests floor does not demand a red run for it. The CLI prints one
-   * line per entry so the archive visibly names the supersession. Absent when the scope holds none.
+   * Why the claim still open at the done could not be released after the archive (the archive itself is committed). Absent
+   * when the claim was released or there was none.
    */
-  superseded_scope?: SupersededScopeEntry[];
+  claim_release_failure?: string;
   /**
    * The post-archive GitHub issue step's lines (spec-archiving-the-work-that-resolves-a-defect-report-
    * closes D4) — present only after a real archive walk with the archive port wired; possibly empty.
@@ -823,7 +834,7 @@ export interface DoneResult {
  */
 export type EvidenceInput = Omit<
   EvidenceEntry,
-  "recorded_at" | "attestation" | "result" | "capture_source" | "ac_oracle_generation" | "milestone_refresh"
+  "recorded_at" | "attestation" | "result" | "capture_source" | "ac_oracle_generation" | "milestone_refresh" | "flaky" | "ledger_error"
 > & {
   result: Exclude<EvidenceEntry["result"], "inconclusive">;
   /**
@@ -888,6 +899,31 @@ export type VerifiedEvidenceInput = Omit<
 > & {
   capture_source: CaptureSource;
 };
+
+/** What {@link TaskWorkflowService.recordFinishRun} writes: the whole outcome of one `lore finish`, in one corpus write. */
+export interface FinishRunWrite {
+  /** The task slug or id. */
+  readonly taskSlug: string;
+  /** The task version `lore finish` read before it ran anything; the write is refused (exit 5) when the task moved on. */
+  readonly expectedVersion: number;
+  /**
+   * The run that holds the claim; the write is refused (exit 5) when another run holds it by the time of the write. `null` for a
+   * check or corpus task, which holds no claim (AC-DCS1-19): the write then touches no claim.
+   */
+  readonly holderRun: string | null;
+  /** Who is recorded as the writer of the rows and the version. */
+  readonly by: string;
+  /** Every runner-attested row of the run (each stamped by the runner with the commit it ran on). */
+  readonly entries: readonly VerifiedEvidenceInput[];
+  /** The write-set additions derived again for this run; merged into the contract in the same write. */
+  readonly additions: readonly DoneContractOracle[];
+  /** Set iff no item is unmet: the claim is marked finished at this commit (the `preRunHead`). */
+  readonly finished_commit?: string;
+  /** Called just before the write: HEAD still the commit the run read, tree still clean. A failure is exit 5. */
+  readonly recheck: () => { readonly ok: true } | { readonly ok: false; readonly path: string; readonly reason: string };
+  /** The one reading of "now" for every row and the version. */
+  readonly nowIso: string;
+}
 
 /** Options for {@link TaskWorkflowService.setAnchors}/`addAnchors`/`removeAnchors` (SPEC-042 D3). */
 export interface AnchorMutationOpts {
@@ -1030,6 +1066,7 @@ export function buildClaimConflictError(
   claim: TaskClaim,
   holder: ClaimHolder,
   nowIso: string,
+  finishedCommit?: string,
 ): LoreError {
   return {
     code: "CLAIM_CONFLICT",
@@ -1037,6 +1074,7 @@ export function buildClaimConflictError(
     holder: claim.by,
     age_minutes: ageMinutesBetween(nowIso, claim.at),
     holder_run: holder.harnessRun,
+    ...(finishedCommit !== undefined ? { finished_commit: finishedCommit } : {}),
   };
 }
 
@@ -1059,7 +1097,12 @@ export async function resolveEffectiveClaimStaleness(
   nowIso: string,
   ttlMinutes: number,
   endedRuns: Map<string, boolean>,
+  tipOf?: ClaimTipPort,
 ): Promise<Result<boolean, LoreError>> {
+  // reason: AC-DCS1-18 — a finished claim (its branch tip still equals the finished commit) keeps its lease until `lore done`:
+  // never stale by age, never stale because its run ended. The same predicate the run-end, claim and overlap paths call.
+  const measuredTip = tipOf?.(claim);
+  if (isFinishedInForce(claim, measuredTip)) return ok(false);
   let runEnded = false;
   const run = claim.harness_run ?? null;
   if (run !== null) {
@@ -1103,10 +1146,11 @@ export async function claimIsLive(
   nowIso: string,
   ttlMinutes: number,
   endedRuns: Map<string, boolean>,
+  tipOf?: ClaimTipPort,
 ): Promise<Result<boolean, LoreError>> {
   const claim = extractHeldClaim(task);
   if (claim === undefined) return ok(false);
-  const stale = await resolveEffectiveClaimStaleness(store, claim, nowIso, ttlMinutes, endedRuns);
+  const stale = await resolveEffectiveClaimStaleness(store, claim, nowIso, ttlMinutes, endedRuns, tipOf);
   if (!stale.ok) return stale;
   return ok(!stale.value);
 }
@@ -1119,13 +1163,14 @@ export async function resolveEffectiveStalenessByDoc(
   docs: readonly DocRecord[],
   nowIso: string,
   ttlMinutes: number,
+  tipOf?: ClaimTipPort,
 ): Promise<Result<Map<DocId, boolean>, LoreError>> {
   const staleByDoc = new Map<DocId, boolean>();
   const endedRuns = new Map<string, boolean>();
   for (const doc of docs) {
     // reason: a terminal task holds no claim (one definition: `extractHeldClaim`).
     if (extractHeldClaim(doc) === undefined) continue;
-    const live = await claimIsLive(store, doc, nowIso, ttlMinutes, endedRuns);
+    const live = await claimIsLive(store, doc, nowIso, ttlMinutes, endedRuns, tipOf);
     if (!live.ok) return live;
     staleByDoc.set(doc.id, !live.value);
   }
@@ -1144,13 +1189,20 @@ export async function applyEffectiveSiblingStaleness<C extends { siblingClaims?:
   siblings: readonly DocRecord[],
   nowIso: string,
   ttlMinutes: number,
+  finished?: FinishedClaimProbe,
+  candidate?: DocRecord,
 ): Promise<Result<C, LoreError>> {
-  const staleByDoc = await resolveEffectiveStalenessByDoc(store, siblings, nowIso, ttlMinutes);
+  const staleByDoc = await resolveEffectiveStalenessByDoc(store, siblings, nowIso, ttlMinutes, finished?.tipOf);
   if (!staleByDoc.ok) return staleByDoc;
   const staleBySlug = new Map<string, boolean>();
   for (const sibling of siblings) {
     const stale = staleByDoc.value.get(sibling.id);
     if (stale !== undefined) staleBySlug.set(sibling.slug, stale);
+    // reason: AC-DCS1-18 — a finished claim stops counting in overlap only once its finished commit is folded into the base the
+    // claiming task lands on; until then it blocks like any live claim. The same predicate decides the ready report.
+    if (finished !== undefined && candidate !== undefined && siblingFinishedAndFolded(sibling, candidate, finished)) {
+      staleBySlug.set(sibling.slug, true);
+    }
   }
   return ok({
     ...anchorCtx,
@@ -1175,14 +1227,36 @@ export async function buildEffectiveAnchorGateContext(
   siblings: readonly DocRecord[],
   nowIso: string,
   ttlMinutes: number,
+  candidateWriteSet?: readonly string[],
+  finished?: FinishedClaimProbe,
 ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>> {
   return applyEffectiveSiblingStaleness(
     store,
-    buildAnchorGateContext(by, candidate, [...siblings], nowIso, ttlMinutes),
+    buildAnchorGateContext(by, candidate, [...siblings], nowIso, ttlMinutes, candidateWriteSet),
     siblings,
     nowIso,
     ttlMinutes,
+    finished,
+    candidate,
   );
+}
+
+/** Where a claim's branch ends now (`undefined` when it cannot be measured): the one input of {@link isFinishedInForce}. */
+export type ClaimTipPort = (claim: TaskClaim) => string | undefined;
+
+/** The two git facts the finished-claim rules read: the tip of a claim's branch, and whether a commit is folded into a base. */
+export interface FinishedClaimProbe {
+  readonly tipOf: ClaimTipPort;
+  /** Whether `finishedCommit` is an ancestor of the tip of the base branch `claimingTask` lands on (its contract's base, else main). */
+  readonly foldedInto: (finishedCommit: string, claimingTask: DocRecord) => boolean;
+}
+
+/** Whether `sibling` holds a finished claim (in force) whose finished commit is already folded into the base `claimingTask` lands on. */
+function siblingFinishedAndFolded(sibling: DocRecord, claimingTask: DocRecord, finished: FinishedClaimProbe): boolean {
+  const claim = extractHeldClaim(sibling);
+  if (claim === undefined || claim.finished_commit === undefined) return false;
+  if (!isFinishedInForce(claim, finished.tipOf(claim))) return false;
+  return finished.foldedInto(claim.finished_commit, claimingTask);
 }
 
 /** History wording for the run on a claim/release: the run id, or `none` for a lease or caller with no run. */
@@ -1228,17 +1302,6 @@ function readEvidence(task: DocRecord): EvidenceEntry[] {
   return parsed.success ? parsed.data : [];
 }
 
-/**
- * Reads task.extra.red_first (task-red-first-discipline-is-asked-for-in-
- * prose-but-never). Mirrors `readClaim`/`readEvidence`'s "malformed → safe
- * default" contract — anything other than the literal boolean `true`
- * (absent, `false`, or a corrupted non-boolean value from a legacy row)
- * reads as "not declared", never a thrown error.
- */
-export function readRedFirstDeclared(task: DocRecord): boolean {
-  return task.extra["red_first"] === true;
-}
-
 /** The two evidence `result` values that count as proof a RED run happened (SPEC red-first). */
 function isRedRunResult(result: EvidenceEntry["result"]): boolean {
   return result === "expected-fail" || result === "fail";
@@ -1258,7 +1321,7 @@ function isRunnerProducedRow(entry: EvidenceEntry): boolean {
  * A hand-typed `lore evidence --result expected-fail` (no `--capture`, no verify) proves nothing ran
  * (DCL-1 (d); local report "red-first floor ignores capture_source", #11).
  */
-function isRunnerProducedRedRun(entry: EvidenceEntry): boolean {
+export function isRunnerProducedRedRun(entry: EvidenceEntry): boolean {
   return isRedRunResult(entry.result) && isRunnerProducedRow(entry);
 }
 
@@ -1318,14 +1381,13 @@ function isRunnerCaptured(entry: EvidenceEntry): boolean {
  * — do NOT "fix" that gap by weakening this floor.
  */
 const ATTESTATION_FLOOR_REPAIRS =
-  "Three repairs: (1) `lore verify <plan>` runs the plan's declared script-mode acceptance " +
+  "Two repairs: (1) `lore verify <plan>` runs the plan's declared script-mode acceptance " +
   "criteria itself and attests the pass; for an `--adhoc` task (no plan) the equivalent is " +
   "`lore verify --task <task>`, which needs a NON-EMPTY `extra.ac_scope` to resolve a governing " +
   'spec from. (2) `lore evidence <task> --oracle <kind> --command "<cmd>" --result pass --capture` ' +
   "— the runner spawns YOUR command and attests its exit code; the route for a task declaring an " +
-  "EMPTY `ac_scope`, which `lore verify` cannot reach. (3) " +
-  '`lore done --override-attestation "<reason>"`, the audited escape hatch for verification ' +
-  "neither route can perform (a manual/browser oracle).";
+  "EMPTY `ac_scope`, which `lore verify` cannot reach. There is no waiver: a task that cannot " +
+  "meet its contract goes through a contract amendment.";
 
 /**
  * The ONE sentence every evidence-floor refusal carries (DCL-1 (g), SSOT): the two routes that make a
@@ -1459,7 +1521,7 @@ function declaredTestFileAnchors(task: DocRecord): string[] {
  * The task's declared test-file anchors (task-every-ac-oracle-is-t-scoped-
  * so-the-file-passes-is-attested) still lacking an attested UNFILTERED
  * `result:pass` run — `done()`'s THIRD, independent evidence floor. Mirrors
- * `readRedFirstDeclared`/`isRedRunResult` immediately above: a small, pure,
+ * `isRedRunResult` above: a small, pure,
  * synchronous predicate over already-read data, never a store call of its
  * own.
  *
@@ -1518,93 +1580,11 @@ export function findMissingUnfilteredTestFileRuns(
   );
 }
 
-/**
- * `done()`'s FOURTH, independent floor (task-a-non-empty-output-tail-can-be-hand-
- * authored-prose-and-the) — the red-first floor's opt-IN behaviour, inverted to
- * opt-OUT for every task that never opted in. A task with zero rows satisfying
- * {@link isRedRunResult} and no explicit no-new-tests declaration cannot archive
- * silently just because it never called `lore red-first` — the exact hole T6
- * (this task's own motivating measurement) fell through.
- *
- * Deliberately MUTUALLY EXCLUSIVE with `readRedFirstDeclared`'s own floor
- * (`done()`'s pre-existing check immediately above this function's call site) —
- * a task that DID declare `extra.red_first: true` returns `false` here
- * unconditionally, leaving that EXISTING floor as the sole authority for it
- * (AC6 control: the opt-in path must keep working byte-identically, so this
- * function must never add a SECOND requirement on top of it).
- *
- * Scoped to a task that has DECLARED an `extra.ac_scope` at all (SPEC-038
- * §Design Decisions — the same declared-scope field `lore verify`'s
- * declared-scope selection already consumes), keyed on the DECLARATION'S
- * PRESENCE and never on the array's LENGTH. An absent key means no AC decision
- * has been made yet, which mirrors the sibling floors' own "nothing declared ->
- * nothing to check" shape ({@link findMissingUnfilteredTestFileRuns}'s "no
- * test-file anchors" boundary, the red-first floor's own "never sets the flag"
- * boundary).
- *
- * ⛔ An EXPLICITLY EMPTY scope (`[]`) ARMS this floor — do not "simplify" the
- * guard below back to `acScope === undefined || acScope.length === 0`
- * (task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed). Measured
- * history: this predicate originally short-circuited on both shapes, and then
- * `--ac-scope` became REQUIRED on the `--adhoc` branch (task-an-ad-hoc-task-can-
- * never-reach-the-attestation-path-that) with `--ac-scope ""` as the explicit-
- * empty declaration — making `[]` the DOMINANT ad-hoc shape and leaving this
- * floor unarmed for precisely the shape that re-keying created. Seven live tasks
- * were in that state when it was measured.
- *
- * The keying decision, recorded so it is not re-litigated blind: an empty scope
- * genuinely claims no criterion, so "which ACs went red" has no answer for it —
- * but this floor's question is "was this work done red-first AT ALL", which is
- * answerable either way, and an author who typed `--ac-scope ""` has already
- * been asked one AC question and answered it explicitly. The alternative the
- * governing task offered — keying on "this task touched source files" via
- * `extra.file_anchors` — was REJECTED: anchors are declared BEFORE the work and
- * are opt-in, a doc-only task legitimately anchors `.md` files, and it would arm
- * the floor for every absent-scope task at once (a far wider retroactive
- * refusal than the shape actually measured as broken). ⛔ Also rejected outright:
- * making `--ac-scope ""` synthesize a placeholder criterion — a fabricated id
- * would corrupt `lore verify`'s spec resolution to buy a predicate's
- * convenience.
- *
- * @param task - The already-resolved task DocRecord
- * @param evidence - `readEvidence(task)` — already read by the caller
- * @returns `true` iff this floor applies AND is currently UNSATISFIED (an
- *   explicit no-new-tests declaration, or a red evidence row, is required
- *   before archiving); `false` when the floor doesn't apply (no `ac_scope` key
- *   at all, or `extra.red_first: true` already governs this task) or is already
- *   satisfied by a genuine red row
- * @example
- * requiresNoNewTestsDeclaration(
- *   { extra: { ac_scope: ["AC-1"] } } as DocRecord,
- *   [],
- * ); // => true — declared AC, zero red rows, no red_first opt-in
- * @example
- * requiresNoNewTestsDeclaration({ extra: { ac_scope: [] } } as DocRecord, []);
- * // => true — an EXPLICITLY EMPTY declaration is a decision, and it arms this floor
- * @example
- * requiresNoNewTestsDeclaration({ extra: {} } as DocRecord, []); // => false — no ac_scope key at all
- */
-export function requiresNoNewTestsDeclaration(
-  task: DocRecord,
-  evidence: EvidenceEntry[],
-  supersession?: DeclaredScopeSupersession,
-): boolean {
-  if (readRedFirstDeclared(task)) return false;
-  const acScope = extractDeclaredAcScope(task);
-  if (acScope === undefined) return false;
-  // reason: a NON-EMPTY scope whose every id is superseded (D15) claims no live criterion — it is satisfied by
-  // supersession, so no red run is owed. An EMPTY scope stays armed (see the ⛔ note above), and one live id keeps
-  // the floor armed for the whole scope. `supersession` is resolved by the caller from the governing spec; absent
-  // (unresolvable) means nothing is assumed superseded — fail closed.
-  if (acScope.length > 0 && supersession !== undefined && supersession.live.length === 0) return false;
-  return !evidence.some(isRunnerProducedRedRun);
-}
-
 /** What `lore done` will demand of a task, computed before the work starts (BR-1357). */
 export interface DefinitionOfDone {
   /** Anchored test files that each need an attested UNFILTERED passing run (the `unfiltered-test-file` floor). */
   readonly unfiltered_pass_files: string[];
-  /** Whether a runner-produced red run must be on record (the `red-first` / `no-new-tests` floors). */
+  /** Whether a runner-produced red run must be on record (the `red-first` floor). */
   readonly red_required: boolean;
   /** Declared ac_scope ids that `lore verify` runs: live (not superseded) script-mode criteria. */
   readonly verify_acs: string[];
@@ -1612,9 +1592,10 @@ export interface DefinitionOfDone {
 
 /**
  * The definition of done of `task`, as DATA, from the done floors' own predicates (BR-1357): the test-file list is
- * {@link declaredTestFileAnchors} (what {@link findMissingUnfilteredTestFileRuns} reports with no evidence), and
- * `red_required` is {@link readRedFirstDeclared} or {@link requiresNoNewTestsDeclaration} evaluated with no evidence
- * (the arming test of floors 2 and 4). Pure: no store, no git, no evidence read.
+ * {@link declaredTestFileAnchors}, and `red_required` is the default a code task is approved with (a waiver is given only at
+ * `lore approve --red-waiver`, so it is unknown before approval). Pure: no store, no git, no evidence read. The compile at approve
+ * reads the anchored test files and the live script-mode ACs through this function; a task that holds a stored contract is
+ * judged by that contract, never by this recomputation.
  *
  * @param task - the task
  * @param criteria - the governing spec's criteria; `null` when they cannot be resolved (then every declared ac_scope
@@ -1624,8 +1605,6 @@ export interface DefinitionOfDone {
  */
 export function definitionOfDone(task: DocRecord, criteria: readonly AcceptanceCriterion[] | null): DefinitionOfDone {
   const scope = extractDeclaredAcScope(task);
-  const supersession =
-    scope !== undefined && scope.length > 0 && criteria !== null ? partitionDeclaredScopeBySupersession(scope, criteria) : undefined;
   const verifyAcs = (scope ?? []).filter((acId) => {
     if (criteria === null) return true;
     const criterion = criteria.find((c) => c.id === acId);
@@ -1633,7 +1612,7 @@ export function definitionOfDone(task: DocRecord, criteria: readonly AcceptanceC
   });
   return {
     unfiltered_pass_files: declaredTestFileAnchors(task),
-    red_required: readRedFirstDeclared(task) || requiresNoNewTestsDeclaration(task, [], supersession),
+    red_required: task.extra["kind"] === "code",
     verify_acs: verifyAcs,
   };
 }
@@ -2340,6 +2319,17 @@ export function measureWorktreeCleanliness(worktree: string | undefined): Worktr
 }
 
 /**
+ * Why git cannot read the state of an existing worktree: the error or exit of `git status --porcelain` there, in words. Asked only
+ * AFTER {@link measureWorktreeCleanliness} said `not-measured-not-a-repo`, so the release refusal can name its cause.
+ */
+function describeInspectionFailure(worktree: string): string {
+  const result = spawnSync("git", ["status", "--porcelain"], { cwd: worktree, encoding: "utf8", timeout: WORKTREE_GIT_TIMEOUT_MS });
+  if (result.error !== undefined) return result.error.message;
+  if (result.status !== 0) return `git status exited ${result.status}: ${String(result.stderr ?? "").trim()}`;
+  return "git answered on a second read; retry the release";
+}
+
+/**
  * `true` iff `cwd` sits inside ANY git working tree (main checkout or linked
  * worktree) — used ONLY for the Q3 opt-in-hole mismatch signal (module
  * section header above), never for the primary cleanliness predicate above.
@@ -2488,6 +2478,13 @@ export class TaskWorkflowService {
   readonly claimTtlMinutes: number;
   /** Absolute repo root that verify's `execution_root` is measured against; absent on bare unit constructions. */
   private readonly repoRoot: string | undefined;
+
+  /**
+   * `workflow.done_contract.test_file`: the command template (containing `{file}`) a write-set addition runs a test file with,
+   * the same one the approve-time contract used. Set by the composition root ({@link setTestFileTemplate}); absent on a bare
+   * construction, where deriving an addition for a changed test file fails loud instead of guessing a command.
+   */
+  private testFileTemplate: string | undefined;
 
   /**
    * Narrow port resolving the AC ids declared on a plan's parent spec — implemented
@@ -2703,14 +2700,15 @@ export class TaskWorkflowService {
   private archiveIssueClosePort: ArchiveIssueClosePort | undefined;
 
   /**
-   * Wires the decide() seam of `done --override-attestation(-cite)` (AC-AU-7). Set by the composition root;
-   * absent = a requested override is refused loudly (never granted).
+   * Hands the workflow service the trigger of the automatic plan close (AC-DCS2-11): after the archive of the LAST non-terminal task of a
+   * plan it is called once, never waited on for a review, and starts the detached review batch. Set by the command that owns the process
+   * facts a detached spawn needs (the verified caller, the binary); an unwired service (every bare construction, every read) starts none.
    */
-  setOverrideDecisionPort(port: OverrideDecisionPort): void {
-    this.overrideDecisions = port;
+  setPlanCloseTrigger(port: PlanCloseTrigger): void {
+    this.planCloseTrigger = port;
   }
 
-  private overrideDecisions: OverrideDecisionPort | undefined;
+  private planCloseTrigger: PlanCloseTrigger | undefined;
 
   // ── addEvidence ───────────────────────────────────────────────────────────
 
@@ -2784,6 +2782,83 @@ export class TaskWorkflowService {
     return result;
   }
 
+  /**
+   * The ONE corpus write of `lore finish` (AC-DCS1-15, AC-DCS1-16): every runner-attested row of the run, the write-set additions
+   * and (when no item is unmet) the finished mark of the claim, recorded together or not at all.
+   *
+   * It is a compare-and-swap on everything the run measured: the task must still be at `expectedVersion` (a write-set
+   * declaration, a release or a takeover during the run bumps it), the claim must still be held by `holderRun`, and `recheck`
+   * (HEAD unmoved, tree clean) must still hold. Any change is exit 5 and nothing is written. Each row goes through the same
+   * admission rules as {@link recordVerifiedEvidence} (collect mode of the shared append path): no attestation rule is copied.
+   *
+   * @param input - see {@link FinishRunWrite}
+   * @returns the written task, or `STALE_VERSION` / `CLAIM_CONFLICT` / `CONFLICT` (all exit 5) when the world changed during the
+   *   run, or the first row's admission error (nothing written)
+   */
+  async recordFinishRun(input: FinishRunWrite): Promise<Result<DocRecord, LoreError>> {
+    const resolved = await this.resolveTask(input.taskSlug);
+    if (!resolved.ok) return resolved;
+    const task = resolved.value;
+    if (task.version !== input.expectedVersion) {
+      return err({ code: "STALE_VERSION", id: task.id, expected: input.expectedVersion, actual: task.version });
+    }
+    const storedContract = doneContractSchema.safeParse(task.extra["done_contract"]);
+    const claim = extractHeldClaim(task);
+    if (input.holderRun === null) {
+      // reason: AC-DCS1-19 — a check or corpus task is never claimed: its rows are written with no lease at all. A code task
+      // reaches this write only through its claim, so a claim-less write onto one is refused, never defaulted.
+      if (!storedContract.success || storedContract.data.kind === "code") {
+        return err({ code: "VALIDATION_ERROR", field: "done_contract", message: `${task.slug} is not a check or corpus task; a claim-less finish write is only for those kinds.`, value: input.taskSlug });
+      }
+    } else {
+      const holder = claim === undefined ? undefined : (claim.harness_run ?? null);
+      if (claim === undefined || holder === null || holder !== input.holderRun) {
+        // reason: a lease that vanished or was taken over during the run is a lost race, exit 5, never a write onto someone else's claim.
+        const current = claim ?? { by: "(no claim)", at: input.nowIso };
+        return err(buildClaimConflictError(task.id, current, buildClaimHolder(current, false), input.nowIso));
+      }
+    }
+    const collected: EvidenceEntry[] = [];
+    for (const entry of input.entries) {
+      const prepared = await this.appendEvidenceEntry(task.id, entry, entry.recorded_by, () => input.nowIso, true, undefined, collected);
+      if (!prepared.ok) return prepared;
+    }
+    const existing = readEvidence(task);
+    if (existing.length + collected.length > 50) return evidenceLogFull(existing.length);
+
+    const newExtra: Record<string, unknown> = { ...task.extra, verification_evidence: [...existing, ...collected] };
+    if (input.holderRun !== null && claim !== undefined) {
+      let writtenClaim: TaskClaim = { ...claim, at: input.nowIso };
+      if (input.finished_commit !== undefined) writtenClaim = markClaimFinished(writtenClaim, input.finished_commit, input.nowIso);
+      newExtra["claim"] = writtenClaim;
+    }
+    if (storedContract.success && input.additions.length > 0) newExtra["done_contract"] = withAddedOracles(storedContract.data, input.additions);
+
+    const still = input.recheck();
+    if (!still.ok) return err({ code: "CONFLICT", path: still.path, message: still.reason });
+
+    return this.writeTaskExtra(
+      task,
+      newExtra,
+      input.nowIso,
+      input.by,
+      `lore finish: ${collected.length} row(s) recorded${input.finished_commit !== undefined ? `, claim finished at ${input.finished_commit.slice(0, 12)}` : ""}`,
+      "evidence",
+      {
+        finish: true,
+        rows: collected.length,
+        ...(input.finished_commit !== undefined ? { finished_commit: input.finished_commit } : {}),
+        ...(input.additions.length > 0 ? { added_oracles: input.additions.map((oracle) => oracle.id) } : {}),
+      },
+      true,
+    );
+  }
+
+  /** The write-set additions of `task`'s claim (AC-DCS1-11), derived again for `lore finish`; see {@link deriveClaimAdditions}. */
+  deriveFinishAdditions(task: DocRecord, claim: TaskClaim, contract: DoneContract): Result<DoneContractOracle[], LoreError> {
+    return this.deriveClaimAdditions(task, claim, contract);
+  }
+
   private async _addEvidenceImpl(
     idOrSlug: string,
     entry: EvidenceInput,
@@ -2803,6 +2878,17 @@ export class TaskWorkflowService {
         message: "attestation is runner-issued; use lore verify (not a valid addEvidence input field)",
         value: (entry as Record<string, unknown>)["attestation"],
       });
+    }
+    // reason: AC-DCS2-4 — `flaky` and `ledger_error` are written by `lore integrate` only; a self-report naming either is refused, not stripped.
+    for (const integrateOnly of ["flaky", "ledger_error"] as const) {
+      if (Object.prototype.hasOwnProperty.call(entry, integrateOnly)) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: integrateOnly,
+          message: `${integrateOnly} is written by lore integrate only (not a valid addEvidence input field)`,
+          value: (entry as Record<string, unknown>)[integrateOnly],
+        });
+      }
     }
 
     // Baseline slice 1 §C5 — `head_sha` / `worktree_dirty` are MEASURED by the runner
@@ -2933,6 +3019,7 @@ export class TaskWorkflowService {
     now: () => string,
     verifyRunIntent = false,
     callerCwd?: string,
+    collect?: EvidenceEntry[],
   ): Promise<Result<DocRecord, LoreError>> {
     // §M5 (AC-DC-8) — fail-loud, NOT a silent strip, and bound to the SHARED chokepoint
     // rather than the self-report path: `ac_oracle_generation` is resolved from the
@@ -3031,6 +3118,10 @@ export class TaskWorkflowService {
       recorded_corpus_rev: corpusRev.value,
       ...(attestation !== undefined ? { attestation } : {}),
       ...(isRefresh ? { milestone_refresh: true as const } : {}),
+      // reason: AC-DCS2-4 — integrate's flaky mark and the ledger failure are the trusted runner path's own fields; a self-report
+      // never reaches this assembly with them (EvidenceInput excludes both), so they are carried only for a VerifiedEvidenceInput.
+      ...(entry.flaky === true ? { flaky: true as const } : {}),
+      ...(entry.ledger_error !== undefined ? { ledger_error: entry.ledger_error } : {}),
     };
     const parsedEntry = evidenceEntrySchema.safeParse(candidate);
     if (!parsedEntry.success) {
@@ -3093,6 +3184,13 @@ export class TaskWorkflowService {
           });
         }
       }
+    }
+
+    // reason: AC-DCS1-15 — `lore finish` collects every validated row of one run and writes them together
+    // ({@link recordFinishRun}); the admission rules above are the same single copy, only the write is deferred.
+    if (collect !== undefined) {
+      collect.push(parsedEntry.data);
+      return ok(task);
     }
 
     // SPEC-069 §Design Decisions D4/D5 (W3 fix) — an evidence recorder who IS the
@@ -3245,6 +3343,14 @@ export class TaskWorkflowService {
     if (!sessionIdResult.ok) return sessionIdResult;
     const sessionId = sessionIdResult.value;
 
+    // reason: AC-DCS1-10 — the declared write set is validated with the anchor grammar before anything is read or written.
+    let declaredWriteSet: string[] | undefined;
+    if (opts.writeSet !== undefined) {
+      const normalized = normalizeWriteSet(opts.writeSet);
+      if (!normalized.ok) return normalized;
+      declaredWriteSet = normalized.value;
+    }
+
     const taskResult = await this.resolveTask(idOrSlug);
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
@@ -3262,13 +3368,25 @@ export class TaskWorkflowService {
       });
     }
 
-    // reason: BR-1468 — work that changes files needs its own branch: a no-branch claim has no tip to measure, so it is
-    // allowed only for a task that declares no file anchor (corpus-only work). A refresh that already holds a branch is fine.
-    if (
-      opts.worktree === undefined &&
-      readClaimRecord(task)?.worktree === undefined &&
-      extractFileAnchors(task).length > 0
-    ) {
+    // reason: D39 — there is no transitional path: every task has a kind, and one without it is refused by name, never guessed.
+    const taskKind = readTaskKind(task);
+    if (taskKind === undefined) {
+      return refuseClaimByKind(
+        "kind-missing",
+        `${task.slug} has no kind (code, check or corpus), so it cannot be claimed. Run \`lore migrate done-contract\` to give every task its kind and contract.`,
+      );
+    }
+    // reason: AC-DCS1-14 — a check or corpus task changes no branch and is finished from the shared checkout; it is never claimed.
+    if (taskKind === "check" || taskKind === "corpus") {
+      return refuseClaimByKind(
+        "kind-has-no-claim",
+        `${task.slug} is a ${taskKind} task: it is never claimed. Run \`lore finish ${task.slug}\` from the shared checkout.`,
+      );
+    }
+
+    // reason: BR-1468 as modified by AC-DCS1-14 — a code task changes files, so its claim needs its own branch: a no-branch
+    // claim has no tip to measure. A refresh that already holds a branch is fine.
+    if (opts.worktree === undefined && readClaimRecord(task)?.worktree === undefined) {
       return refuseClaim(task.slug, "work-needs-branch");
     }
 
@@ -3282,8 +3400,24 @@ export class TaskWorkflowService {
     // the exact same "now", within one claim() call.
     const nowIso = now();
 
-    const gateResult = await this.enforceClaimGate(task, opts, nowIso);
+    const gateResult = await this.enforceClaimGate(task, opts, nowIso, declaredWriteSet);
     if (!gateResult.ok) return gateResult;
+
+    // reason: AC-DCS1-14 — a branch tip is one claim's own: a code claim on the plan's integration branch or on a branch another
+    // live claim records is refused (named `shared-branch`, before the one-working-copy-one-task rule would refuse it under another
+    // name), so finish and landing never judge two tasks by one tip. The branch is the one the claim will record.
+    if (taskKind === "code") {
+      let recordedBranch = opts.branch;
+      if (recordedBranch === undefined && opts.worktree !== undefined) {
+        const measured = await this.detectBranch(opts.worktree);
+        if (measured.status === "measured") recordedBranch = measured.branch;
+      }
+      if (recordedBranch !== undefined) {
+        const shared = await this.findSharedBranchHolder(task, recordedBranch, nowIso);
+        if (!shared.ok) return shared;
+        if (shared.value !== undefined) return refuseClaimByKind("shared-branch", shared.value);
+      }
+    }
 
     const holderResult = await this.refuseWhileWorkingCopyHoldsUnlandedTask(task, opts);
     if (!holderResult.ok) return holderResult;
@@ -3308,7 +3442,7 @@ export class TaskWorkflowService {
       const holder = buildClaimHolder(existingClaim, stale);
       const decision = hasClaimConflict(holder, claimant);
       if (decision.kind === "conflict" && opts.steal !== true) {
-        return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso));
+        return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso, this.finishedCommitInForce(existingClaim)));
       }
       // reason: SPEC-042 D2 — carry-forward applies ONLY to a same-holder FRESH
       // refresh. A stale takeover (even by the SAME `by`) or a different holder
@@ -3376,6 +3510,7 @@ export class TaskWorkflowService {
         ...(corpusScope !== undefined ? { corpus_scope: corpusScope } : {}),
         // reason: the landing predicate's start — a branch claim's base commit, a no-branch claim's main head.
         ...(startHead !== undefined ? { start_head: startHead } : {}),
+        ...(declaredWriteSet !== undefined ? { write_set: declaredWriteSet } : {}),
         // reason: BR-1040 — the claim always names the run that took it; the store refuses one that does not (BR-1352).
         harness_run: claimant.harnessRun,
       },
@@ -3469,7 +3604,7 @@ export class TaskWorkflowService {
     // caller observing success) — documented, not eliminated: closing it fully would
     // need a corpus-level lock/daemon, explicitly out of scope (task anchor: "⛔
     // 不引入 daemon/锁表/mutex 行").
-    const postWriteGateResult = await this.enforceClaimGate(task, opts, nowIso);
+    const postWriteGateResult = await this.enforceClaimGate(task, opts, nowIso, declaredWriteSet);
     if (!postWriteGateResult.ok) {
       const rollbackResult = await this.rollbackClaim(writeResult.value, existingClaim, opts.by, now);
       if (!rollbackResult.ok) {
@@ -3506,6 +3641,61 @@ export class TaskWorkflowService {
     }
 
     return writeResult;
+  }
+
+  /**
+   * Refuses while another run holds a live claim on `task` (BR-1040): the lease check `lore start` makes FIRST, with the very
+   * predicate `claim()` uses (`hasClaimConflict` over the effective staleness), so the two verbs never disagree.
+   *
+   * @param task - the task about to be started
+   * @param party - the acting run
+   * @param nowIso - the one reading of "now"
+   * @returns `ok` when the task is free, the party's own, or held by a stale or ended run; `CLAIM_CONFLICT` (exit 5) otherwise
+   */
+  async refuseClaimHeldByAnotherRun(task: DocRecord, party: { by: string; harnessRun?: RunId | null }, nowIso: string): Promise<Result<void, LoreError>> {
+    const existingClaim = readClaimRecord(task);
+    if (existingClaim === undefined) return ok(undefined);
+    const stale = await this.isClaimEffectivelyStale(existingClaim, nowIso, new Map());
+    if (!stale.ok) return stale;
+    const holder = buildClaimHolder(existingClaim, stale.value);
+    if (hasClaimConflict(holder, buildClaimParty(party)).kind === "conflict") {
+      return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso, this.finishedCommitInForce(existingClaim)));
+    }
+    return ok(undefined);
+  }
+
+  /** The integration branch the plan of `task` declares, else `undefined` (no plan, or a plan declaring none). */
+  private async readPlanIntegrationBranch(task: DocRecord): Promise<Result<string | undefined, LoreError>> {
+    const planId = task.extra["plan_id"];
+    if (typeof planId !== "string" || planId === "") return ok(undefined);
+    const plan = await this.store.find(planId as DocRecord["id"]);
+    if (!plan.ok) return plan;
+    const branch = plan.value?.extra["integration_branch"];
+    return ok(typeof branch === "string" && branch !== "" ? branch : undefined);
+  }
+
+  /**
+   * The message naming why `branch` is shared (it is the integration branch of the plan of `task`, or another live claim
+   * records it), else `undefined`.
+   */
+  async findSharedBranchHolder(task: DocRecord, branch: string, nowIso: string): Promise<Result<string | undefined, LoreError>> {
+    const integration = await this.readPlanIntegrationBranch(task);
+    if (!integration.ok) return integration;
+    if (integration.value === branch) {
+      return ok(`branch ${branch} is the integration branch of the plan of ${task.slug}; work on its own branch (\`lore start ${task.slug}\`).`);
+    }
+    const tasks = await this.store.findMany({ type: "task" });
+    if (!tasks.ok) return tasks;
+    const endedRuns = new Map<string, boolean>();
+    for (const other of tasks.value) {
+      if (other.id === task.id) continue;
+      const held = extractHeldClaim(other);
+      if (held === undefined || (held.branch ?? held.worktree) !== branch) continue;
+      const live = await this.isClaimLive(other, nowIso, endedRuns);
+      if (!live.ok) return live;
+      if (live.value) return ok(`branch ${branch} is also recorded by the live claim of ${other.slug}; each task needs its own branch.`);
+    }
+    return ok(undefined);
   }
 
   /**
@@ -3553,7 +3743,20 @@ export class TaskWorkflowService {
 
     const integration = probe.integrationBranch(target);
     if (!integration.ok) return unreadable("the integration branch", integration.reason);
-    const ahead = probe.countCommits(target, `${integration.value}..HEAD`);
+    // reason: BR-1353 as modified by AC-DCS1-14 — a worktree cut at the plan's integration branch carries the earlier tasks'
+    // commits; those are the plan's own landed work, so only commits on neither main nor that branch count.
+    const planBranch = await this.readPlanIntegrationBranch(task);
+    if (!planBranch.ok) return planBranch;
+    let ahead: ProbeResult<number>;
+    if (planBranch.value === undefined) {
+      ahead = probe.countCommits(target, `${integration.value}..HEAD`);
+    } else {
+      const counted = createGitRunner(target)(["rev-list", "--count", "HEAD", `^${integration.value}`, `^${planBranch.value}`]);
+      const parsed = counted.ok ? Number(counted.stdout.trim()) : Number.NaN;
+      if (!counted.ok) ahead = { ok: false, reason: counted.reason };
+      else if (Number.isInteger(parsed) && parsed >= 0) ahead = { ok: true, value: parsed };
+      else ahead = { ok: false, reason: `unparseable rev-list count "${counted.stdout.trim()}"` };
+    }
     if (!ahead.ok) return unreadable(`the commit count ${integration.value}..HEAD in ${target}`, ahead.reason);
     if (ahead.value === 0) return ok(undefined);
 
@@ -3735,7 +3938,7 @@ export class TaskWorkflowService {
     const isHolder = hasClaimConflict(holder, releaser).kind === "refresh";
     const staleHolder = staleResult.value;
     if (!isHolder && !staleHolder && opts.force !== true) {
-      return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso));
+      return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso, this.finishedCommitInForce(existingClaim)));
     }
 
     // task-lore-evidence-and-lore-release-accept-an-attestation-from —
@@ -3745,11 +3948,15 @@ export class TaskWorkflowService {
     // worktree eligible for the orchestrator's routine cleanup). Checked
     // AFTER the holder/force authorization gate above — an unauthorized
     // release attempt fails for THAT reason first.
-    const worktreeError = this.checkUncommittedAttestationWorktree(task, "`lore release`", opts.callerCwd);
+    const worktreeError = this.checkUncommittedAttestationWorktree(task, "`lore release`", opts.callerCwd, true);
     if (worktreeError !== null) return err(worktreeError);
 
     const newExtra: Record<string, unknown> = { ...task.extra };
     delete newExtra["claim"];
+    // reason: AC-DCS1-11 — the write-set additions are written in the SAME corpus write that releases the claim, so they survive it.
+    const withAdditions = this.contractWithClaimAdditions(task, existingClaim);
+    if (!withAdditions.ok) return withAdditions;
+    if (withAdditions.value !== undefined) newExtra["done_contract"] = withAdditions.value;
 
     const heldRunNote = `, run ${describeClaimRun(holder.harnessRun)}`;
     const endedRunResult = await this.findEndedHolderRun(existingClaim, staleHolder);
@@ -3807,7 +4014,29 @@ export class TaskWorkflowService {
     nowIso: string,
     endedRuns: Map<string, boolean>,
   ): Promise<Result<boolean, LoreError>> {
-    return resolveEffectiveClaimStaleness(this.store, claim, nowIso, this.claimTtlMinutes, endedRuns);
+    return resolveEffectiveClaimStaleness(this.store, claim, nowIso, this.claimTtlMinutes, endedRuns, (held) => this.measureClaimTip(held));
+  }
+
+  /** The commit of `claim` when its finish is still in force (the branch tip equals it), else `undefined` (AC-DCS1-18). */
+  private finishedCommitInForce(claim: TaskClaim): string | undefined {
+    return isFinishedInForce(claim, this.measureClaimTip(claim)) ? claim.finished_commit : undefined;
+  }
+
+  /**
+   * The git facts of the finished-claim rules, measured through this service's git facts: the tip of a claim's branch, and
+   * whether a finished commit is an ancestor of the base the claiming task lands on (its stored contract's `base_branch`, else
+   * main). A fact git cannot answer reads "not folded": a finished claim then keeps blocking, never silently stops.
+   */
+  private finishedProbe(): FinishedClaimProbe {
+    return {
+      tipOf: (claim) => this.measureClaimTip(claim),
+      foldedInto: (finishedCommit, claimingTask) => {
+        const stored = doneContractSchema.safeParse(claimingTask.extra["done_contract"]);
+        const base = stored.success ? stored.data.base_branch : "main";
+        const git = createGitRunner(this.worktreeProbe.currentWorkingDirectory());
+        return git(["merge-base", "--is-ancestor", finishedCommit, base]).ok;
+      },
+    };
   }
 
   /**
@@ -3827,7 +4056,7 @@ export class TaskWorkflowService {
     tasks: readonly DocRecord[],
     nowIso: string,
   ): Promise<Result<Map<DocId, boolean>, LoreError>> {
-    return resolveEffectiveStalenessByDoc(this.store, tasks, nowIso, this.claimTtlMinutes);
+    return resolveEffectiveStalenessByDoc(this.store, tasks, nowIso, this.claimTtlMinutes, (held) => this.measureClaimTip(held));
   }
 
   /**
@@ -3849,12 +4078,14 @@ export class TaskWorkflowService {
     const tasksResult = await this.store.findMany({ type: "task" });
     if (!tasksResult.ok) return tasksResult;
     const outcomes: RunEndClaimOutcome[] = [];
+    const tipOf: ClaimTipPort = (held) => this.measureClaimTip(held);
     const held = tasksResult.value
       .filter((t) => extractHeldClaim(t)?.harness_run === runId)
       .sort((a, b) => a.slug.localeCompare(b.slug));
     for (const task of held) {
       const claim = extractHeldClaim(task);
-      if (claim === undefined || claim.orphaned_dirty !== undefined) continue;
+      // reason: AC-DCS1-18 — a finished claim keeps its lease past its run's end: `lore done` / `lore land` releases it.
+      if (claim === undefined || claim.orphaned_dirty !== undefined || isFinishedInForce(claim, tipOf(claim))) continue;
       const nowIso = now();
       const cleanliness = measureWorktreeCleanliness(claim.worktree);
       if (cleanliness.status === "measured-dirty" && claim.worktree !== undefined) {
@@ -3882,6 +4113,10 @@ export class TaskWorkflowService {
       const measuredWorktree = cleanliness.status === "measured-clean" ? claim.worktree : undefined;
       const newExtra: Record<string, unknown> = { ...task.extra };
       delete newExtra["claim"];
+      // reason: AC-DCS1-11 — a run end that releases the claim writes the same additions a release does, in the same write.
+      const withAdditions = this.contractWithClaimAdditions(task, claim);
+      if (!withAdditions.ok) return withAdditions;
+      if (withAdditions.value !== undefined) newExtra["done_contract"] = withAdditions.value;
       const worktreeNote = measuredWorktree ?? "not-measured";
       const written = await this.writeTaskExtra(
         task,
@@ -3930,39 +4165,13 @@ export class TaskWorkflowService {
    *     of them exist; a SELF-REPORTED-ONLY pass (`attestation === undefined` — the
    *     shape every CLI/MCP `lore evidence` write produces) does not count either. The
    *     refusal message names both repairs: `lore verify <plan>` (attests a pass), or
-   *     `opts.overrideReason` (the audited escape hatch below, for verification `lore
-   *     verify` structurally cannot perform). This floor bypasses via `overrideReason`
-   *     ONLY — never via a red-first or unfiltered-file-run row, which are independent;
-   *   - `opts.overrideReason` IS supplied but is blank/whitespace-only — refused here
-   *     as a defense-in-depth check (`commands/done.ts` already refuses this shape as a
-   *     CLI usage error, exit 2, before this service is ever called);
-   *   - the task declares `extra.red_first: true` (task-red-first-discipline-is-asked-
-   *     for-in-prose-but-never) and holds no `"expected-fail"`/`"fail"` evidence entry —
-   *     a SECOND, INDEPENDENT floor evaluated only for a task claiming red-first
-   *     discipline, checked AFTER the `result:pass` floor above so neither floor can
-   *     mask the other; a task that never sets the flag never reaches this check;
-   *   - the task has DECLARED `extra.ac_scope` (the KEY being present is the trigger —
-   *     an EXPLICITLY EMPTY `[]` arms this floor exactly as a populated array does,
-   *     task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed) but NEITHER
-   *     `extra.red_first: true` NOR a `"expected-fail"`/`"fail"` evidence entry
-   *     (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the) — a FOURTH,
-   *     INDEPENDENT floor: the red-first floor above INVERTED to opt-OUT for every task
-   *     that never called `lore red-first`. Mutually exclusive with the red-first floor
-   *     by construction (a task WITH `extra.red_first: true` is governed by that floor
-   *     alone — see {@link requiresNoNewTestsDeclaration}'s own JSDoc), so neither floor
-   *     can ever double-fire on the same task. Bypasses via `opts.noNewTestsReason` ONLY
-   *     (the SAME audited-escape shape as `overrideReason` — mandatory, non-blank,
-   *     persisted verbatim); a task with NO `ac_scope` key at all never reaches this
-   *     check, and the refusal message distinguishes the empty declaration from a
-   *     populated one rather than rendering an empty id list;
-   *   - `opts.noNewTestsReason` IS supplied but is blank/whitespace-only — refused here
-   *     as a defense-in-depth check (`commands/done.ts` already refuses this shape as a
-   *     CLI usage error, exit 2, before this service is ever called);
-   *   - a declared test-file anchor (task-every-ac-oracle-is-t-scoped-so-the-file-
-   *     passes-is-attested) holds no `oracle:"test"` `result:"pass"` evidence entry
-   *     whose command runs that exact file with no case-name filter — a FIFTH,
-   *     INDEPENDENT floor checked AFTER the four above, naming every unsatisfied
-   *     anchor; a task declaring no test-file anchors never reaches this check;
+   *     `lore evidence --capture`. This floor has no bypass;
+   *   - the stored contract's floors are unmet, in the order of {@link DONE_FLOOR_ORDER}:
+   *     not-landed, missing-oracle-file, attested-pass (counted by the evidence rule of
+   *     the contract's kind), latest-attested-fail, red-first (`red_required`, waivable
+   *     only at approve), unfiltered-test-file (every `test:` oracle), contract-oracles
+   *     (the `ac:` and typecheck oracles), foreign-claim. A task holding no contract is
+   *     refused: the contract is compiled at approve and never recomputed here;
    *   - a FRESH claim (same `isClaimStale` freshness test `claim()`/`ready()` use) is
    *     held by a DIFFERENT actor than `opts.by` — a STALE claim, or a fresh claim held
    *     by `opts.by` itself, never blocks.
@@ -3984,16 +4193,11 @@ export class TaskWorkflowService {
    * the freshly-read `task.status` each call).
    *
    * @param idOrSlug - Task document ULID or slug
-   * @param opts - `{ by, source?, overrideReason?, noNewTestsReason? }` — see {@link
-   *   DoneOpts.overrideReason} for the audited attestation-floor escape hatch and
-   *   {@link DoneOpts.noNewTestsReason} for the audited no-new-tests escape hatch
+   * @param opts - `{ by, source?, ... }` — see {@link DoneOpts}
    * @param now - Time seam (D10) — ONE reading shared by every step's timestamp
    * @returns `DoneResult` — see that type's own JSDoc
-   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / no runner-attested passing
-   *   evidence and no (or a blank) `overrideReason` / a red_first claim with no red
-   *   evidence row / a declared ac_scope with no red_first opt-in, no red evidence
-   *   row, and no (or a blank) `noNewTestsReason` / an unsatisfied test-file-anchor
-   *   unfiltered-run floor / fresh foreign claim / illegal lifecycle step — the last
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / an unmet floor of the stored
+   *   contract, `details.floor` naming it / a task with no stored contract / fresh foreign claim / illegal lifecycle step — the last
    *   one structurally unreachable given `computeArchiveWalk`'s own base-graph-only
    *   steps, kept as a fail-loud guard rather than a non-null assertion), STALE_VERSION
    */
@@ -4025,39 +4229,28 @@ export class TaskWorkflowService {
   }
 
   /**
-   * The four `lore done` floors as DATA — the single copy (spec-approval-and-plan-
-   * closure-go-through-the-same-checks-on D5, issue #47). Pure over `task` + its
-   * evidence: no write, no claim read. Floor order is the contract: attested-pass,
-   * red-first, no-new-tests, unfiltered-test-file; the first failing floor wins.
+   * The evidence floors of `lore done` as DATA — the single copy (spec-approval-and-plan-
+   * closure-go-through-the-same-checks-on D5, issue #47). Pure over `task`, its stored
+   * contract, the oracle set to judge and the per-row binding verdicts: no write, no
+   * claim read, no git. Floor order is {@link DONE_FLOOR_ORDER}: attested-pass,
+   * latest-attested-fail, red-first, unfiltered-test-file, contract-oracles; the first failing floor
+   * wins. The floors before (not-landed, missing-oracle-file) and after (foreign-claim) are
+   * decided by the callers that own their facts.
    *
-   * `escapes` carries the audited override reasons: an absent one means "not
-   * requested". A blank-but-present reason is a usage error returned as `err` (NOT a
-   * floor refusal). The override branches live here only because they gate floors 1
-   * and 3 mid-sequence; {@link checkDoneFloors} always passes `{}`, so it never reads
-   * them.
+   * No floor can be waived: the attested-pass floor refuses an unattested task with no escape.
    *
    * @returns `ok({refusal})` — the first failing floor with its exact LoreError
-   *   (`details.floor` set) or `null`, plus the override reasons actually consumed;
-   *   `err` only for a blank override reason
+   *   (`details.floor` set) or `null`
    */
   private evaluateDoneFloors(
     task: DocRecord,
-    escapes: { overrideReason?: string; noNewTestsReason?: string },
+    contract: DoneContract,
+    oracles: readonly EvaluatedOracle[],
+    evidence: EvidenceEntry[],
     stampBinding: StampBindingContext,
-    anchorRemovals: ReadonlyMap<string, AnchorRemovalVerdict>,
-    supersession?: DeclaredScopeSupersession,
-    counting?: CountingRule,
-  ): Result<
-    {
-      refusal: DoneFloorRefusal | null;
-      /** Anchored test files accepted as removed by this task; present on every non-refusal. */
-      removedTestAnchors?: string[];
-      overrideReason?: string;
-      noNewTestsReason?: string;
-    },
-    LoreError
-  > {
-    const evidence = readEvidence(task);
+    binding: ReadonlyMap<EvidenceEntry, RowBinding>,
+    bindingNote: string | undefined,
+  ): Result<{ refusal: DoneFloorRefusal | null }, LoreError> {
     // ⛔ WHAT SATISFIES THIS FLOOR CHANGED 2026-08-23 (SPEC-143 AC-CT-2), and the
     // comment that used to sit below asserted the opposite — it called a self-report
     // "the ONLY shape any CLI/MCP `lore evidence` write can produce", which stopped
@@ -4078,43 +4271,20 @@ export class TaskWorkflowService {
     // floor. `legacy_unbound` and every row of an UNARMED corpus still do, so arming refuses
     // nothing retroactively.
     const stampReadings = classifyEvidenceStamps(task.id, evidence, stampBinding);
-    // reason: a pass on a no-branch claim records `main_head` and is judged by the counting rule alone (head_sha == main_head);
-    // an unbound stamp there only says the shared checkout holds unrelated uncommitted files, which this work does not depend on.
-    const attestedRows = evidence.filter(
-      (e, index) =>
-        e.result === "pass" &&
-        e.attestation !== undefined &&
-        (stampReadings[index]?.stamp !== "unbound" || e.attestation.main_head !== undefined),
-    );
-    // reason: the landing predicate's counting rule (BR-199): only passes recorded after the latest claim, bound to a
-    // clean commit that is on main (or at main's head for a no-branch claim) count. BR-159 stays the one write-time
-    // refusal of a pass on a dirty claimed worktree; this rule only needs the recorded commit, not a second dirty check.
-    const hasAttestedPass = attestedRows.some((e) => counting === undefined || counting(e));
-    const excludedByLanding = !hasAttestedPass && attestedRows.length > 0 && counting !== undefined;
+    const attestedRows = evidence.filter((e, index) => e.result === "pass" && e.attestation !== undefined && unboundReasonOfReading(stampReadings[index]) === undefined);
+    // reason: AC-DCS1-27 — a pass counts only when it is bound to the code the task lands (a code task: the same git tree as the
+    // landed commit; a check or corpus task: a main commit containing the compile commit). `binding` holds that verdict per row.
+    const hasAttestedPass = attestedRows.some((e) => binding.get(e)?.counts === true);
+    const excludedByLanding = !hasAttestedPass && attestedRows.length > 0;
     const unboundPassReasons = evidence.flatMap((e, index) => {
-      const reading = stampReadings[index];
-      return e.result === "pass" && reading?.stamp === "unbound" ? [reading.reason] : [];
+      const reason = unboundReasonOfReading(stampReadings[index]);
+      return e.result === "pass" && reason !== undefined ? [reason] : [];
     });
-    let overrideReason: string | undefined;
+    const attestedPassFloor = (): FloorStep => {
     if (!hasAttestedPass) {
       // reason: adr-lore-done-requires-a-runner-attested-pass-the-sixth-false — a
-      // self-reported result:pass is not sufficient to archive. `escapes.overrideReason`
-      // is the ONE audited bypass — checked here, not before this branch, so a task
-      // that already holds an attested pass never even looks at it (never "always
-      // audit"). A zero-length trimmed reason is refused identically to an absent
-      // one, never silently treated as "no override requested".
-      if (escapes.overrideReason === undefined || escapes.overrideReason.trim() === "") {
-        if (escapes.overrideReason !== undefined) {
-          return err({
-            code: "VALIDATION_ERROR",
-            field: "overrideReason",
-            message:
-              "--override-attestation requires a non-empty, non-whitespace reason — " +
-              "the CLI usage-error check (exit 2) should have caught this before " +
-              "reaching the service; a direct caller must supply a real reason too",
-            value: escapes.overrideReason,
-          });
-        }
+      // self-reported result:pass is not sufficient to archive, and nothing waives it (D45).
+      {
         // reason: the message is built by ONE pure function over the SAME rows
         // this predicate just read (task-lore-done-s-attestation-refusal-calls-a-
         // capture-source). `code`/`field`/`value` are the predicate's identity and
@@ -4131,27 +4301,27 @@ export class TaskWorkflowService {
                 `UNBOUND (${[...new Set(unboundPassReasons)].join(", ")}): recorded after state-binding was ` +
                 `armed without a valid state stamp, so it certifies no named state. Re-run \`lore verify\` ` +
                 `or \`lore evidence ${task.slug} --oracle <kind> --command "<cmd>" --result pass --capture\` ` +
-                `on a committed tree to record a stamped row (or use --override-attestation with a reason).`
+                `on a committed tree to record a stamped row.`
               : excludedByLanding
-                ? `Task "${task.slug}" holds ${attestedRows.length} runner-attested pass row(s), but none counts: a pass counts only when ` +
-                  "it was recorded after the task's latest claim and is bound to a clean commit that is on main (a branch claim), " +
-                  "or to main's head (a no-branch claim). Re-run the oracle on a clean, committed tree after the latest claim: " +
+                ? `Task "${task.slug}" holds ${attestedRows.length} runner-attested pass row(s), but none counts: ${bindingNote ?? "no row is bound to the code the task lands"}. ` +
+                  `Re-run the oracle on a clean, committed tree whose content is the landed content: ` +
                   `\`lore evidence ${task.slug} --oracle <kind> --command "<cmd>" --result pass --capture\` (or \`lore verify\`).`
                 : buildAttestationFloorRefusal(task.slug, evidence),
           value: evidence.map((e, index) => ({
             result: e.result,
             attested: e.attestation !== undefined,
-            ...(stampReadings[index]?.stamp === "unbound" ? { unbound: true } : {}),
+            ...(unboundReasonOfReading(stampReadings[index]) !== undefined ? { unbound: true } : {}),
           })),
         });
       }
-      overrideReason = escapes.overrideReason;
     }
+    return undefined;
+    };
 
     // reason: DCL-1 (e) — per criterion the LATEST runner-produced result decides. An attested pass
     // followed by an attested fail (a regression caught by a later `lore verify` / `--capture` run) must
-    // not archive just because the earlier pass still sits in the log. Not bypassable by
-    // `--override-attestation`: that escape covers "no runner-attested pass exists", not "a runner saw it fail".
+    // not archive just because the earlier pass still sits in the log. Nothing bypasses it.
+    const latestFailFloor = (): FloorStep => {
     const failedCriteria = findCriteriaWithLatestRunFailed(evidence);
     if (failedCriteria.length > 0) {
       return doneFloorRefusal("latest-attested-fail", {
@@ -4164,124 +4334,87 @@ export class TaskWorkflowService {
         value: failedCriteria,
       });
     }
+    return undefined;
+    };
 
-    // reason: the red-first floor (task-red-first-discipline-is-asked-for-in-
-    // prose-but-never) — mirrors the result:pass floor immediately above,
-    // evaluated ONLY when the task itself claims red-first discipline. A task
-    // that never sets extra.red_first is completely unaffected (this branch
-    // never fires); a task that DOES set it needs BOTH floors independently —
-    // this one is reached only after the pass floor above already succeeded,
-    // so it can never mask (or be masked by) that check.
-    if (readRedFirstDeclared(task) && !evidence.some(isRunnerProducedRedRun)) {
+    // reason: the red requirement is the contract's (AC-DCS1-7): `red_required` was fixed at approve (true for a code task unless
+    // `lore approve --red-waiver` waived it), and done never changes it. A red row counts only when a runner produced it.
+    const redFirstFloor = (): FloorStep => {
+    if (contract.red_required && !evidence.some(isRunnerProducedRedRun)) {
       return doneFloorRefusal("red-first", {
         code: "VALIDATION_ERROR",
         field: "extra.verification_evidence",
         message:
-          `Task "${task.slug}" declares extra.red_first but holds no RUNNER-PRODUCED "expected-fail"/"fail" ` +
-          `evidence entry — lore done requires proof the test was actually run red before ` +
-          `archiving a red-first claim (record one via \`lore evidence ${task.slug} --oracle ` +
-          `<kind> --command "<cmd that exits nonzero>" --result expected-fail --capture\`). ` +
+          `Task "${task.slug}" requires a red run (its done contract has red_required: true) but holds no RUNNER-PRODUCED ` +
+          `"expected-fail"/"fail" evidence entry — lore done requires proof the test was actually run red before archiving ` +
+          `(record one via \`lore evidence ${task.slug} --oracle <kind> --command "<cmd that exits nonzero>" --result expected-fail --capture\`). ` +
+          `The red run can be waived only at approve (\`lore approve --red-waiver "<reason>"\`). ` +
           RUNNER_ROUTES_SENTENCE,
         value: evidence.map((e) => e.result),
       });
     }
+    return undefined;
+    };
 
-    // reason: the no-new-tests floor (task-a-non-empty-output-tail-can-be-hand-
-    // authored-prose-and-the) — the red-first floor's opt-IN behaviour, inverted
-    // to opt-OUT for every task that never called `lore red-first`. Mutually
-    // exclusive with the floor immediately above by construction (`readRedFirstDeclared`
-    // gates both — see `requiresNoNewTestsDeclaration`'s own JSDoc), so this can
-    // never mask or double-require against that one; AC6 control: a task that DID
-    // opt in keeps working byte-identically, since this branch returns false for it.
-    let noNewTestsReason: string | undefined;
-    if (requiresNoNewTestsDeclaration(task, evidence, supersession)) {
-      if (escapes.noNewTestsReason === undefined || escapes.noNewTestsReason.trim() === "") {
-        if (escapes.noNewTestsReason !== undefined) {
-          return err({
-            code: "VALIDATION_ERROR",
-            field: "noNewTestsReason",
-            message:
-              "--declare-no-new-tests requires a non-empty, non-whitespace reason — the CLI " +
-              "usage-error check (exit 2) should have caught this before reaching the " +
-              "service; a direct caller must supply a real reason too",
-            value: escapes.noNewTestsReason,
-          });
-        }
-        const acScope = extractDeclaredAcScope(task) ?? [];
-        // reason: the EMPTY declaration needs its own rendering (task-the-ac-
-        // scope-re-keying-left-the-red-first-floor-unarmed) — the id-list form
-        // would print `extra.ac_scope ()`, which reads like a rendering bug and
-        // tells the author nothing about which of the two shapes fired. The
-        // empty branch also has to answer the reasonable objection ("I declared
-        // no criterion, why am I being asked about ACs?") at the moment it is
-        // raised, so the refusal itself carries the floor's actual question.
-        const scopeClause =
-          acScope.length === 0
-            ? "declares an EMPTY extra.ac_scope ([] — an explicit \"no criterion claimed\", " +
-              "which is a decision and not a silence)"
-            : `declares extra.ac_scope (${acScope.join(", ")})`;
-        return doneFloorRefusal("no-new-tests", {
-          code: "VALIDATION_ERROR",
-          field: "extra.verification_evidence",
-          message:
-            `Task "${task.slug}" ${scopeClause} with no ` +
-            `RUNNER-PRODUCED "expected-fail"/"fail" evidence entry and no extra.red_first opt-in — lore done ` +
-            "requires proof a test was actually run red before archiving, or an explicit " +
-            "declaration that this task legitimately adds no new test (record a red run via " +
-            `\`lore evidence ${task.slug} --oracle <kind> --command "<cmd that exits nonzero>" --result ` +
-            'expected-fail --capture`, or use the audited `--declare-no-new-tests "<reason>"` escape hatch). ' +
-            RUNNER_ROUTES_SENTENCE,
-          value: evidence.map((e) => e.result),
-        });
-      }
-      noNewTestsReason = escapes.noNewTestsReason;
-    }
+    // reason: AC-DCS1-27 — an oracle is passed by a counted row (runner-attested, bound to the landed code) that ran the oracle's
+    // EXACT command. An oracle with no command of its own (`corpus:files-unchanged`) is matched by a row whose command is its id.
+    const countedRows = attestedRows.filter((row) => binding.get(row)?.counts === true);
+    const isPassed = (oracle: EvaluatedOracle): boolean =>
+      oracle.unresolved === undefined && countedRows.some((row) => row.command === (oracle.command ?? oracle.id));
+    const describeUnmet = (unmet: readonly EvaluatedOracle[]): string =>
+      unmet.map((oracle) => (oracle.unresolved !== undefined ? `${oracle.id} (${oracle.unresolved})` : `${oracle.id} (\`${oracle.command ?? oracle.id}\`)`)).join("; ");
 
-    // reason: the unfiltered-test-file-run floor (task-every-ac-oracle-is-t-
-    // scoped-so-the-file-passes-is-attested) — a THIRD, independent floor,
-    // checked only after BOTH floors above already succeeded, so none of the
-    // three can mask another. A task declaring no test-file anchors returns
-    // [] here and never fires this branch.
-    const allMissingRuns = findMissingUnfilteredTestFileRuns(task, evidence, this.repoRoot);
-    // reason: task-done-floor-accepts-an-anchored-test-file-the-task-deleted — an anchored test file the task's own
-    // branch deleted has nothing to run; `anchorRemovals` is the ONE verdict (measureAnchorRemoval) for both this
-    // subtraction and the "removed by this task" line `done` prints. Unmeasured stays missing (fail closed).
-    const removedTestAnchors = allMissingRuns.filter((anchor) => anchorRemovals.get(anchor)?.kind === "removed");
-    const missingUnfilteredRuns = allMissingRuns.filter((anchor) => !removedTestAnchors.includes(anchor));
-    if (missingUnfilteredRuns.length > 0) {
-      const unmeasured = missingUnfilteredRuns.flatMap((anchor) => {
-        const verdict = anchorRemovals.get(anchor);
-        return verdict?.kind === "not-measured" ? [`${anchor} (${verdict.reason})`] : [];
-      });
-      const measurementNote =
-        unmeasured.length > 0
-          ? ` Whether this task deleted them could NOT be measured, so none is assumed deleted: ${unmeasured.join("; ")}.`
-          : "";
+    // The whole-file runs: every `test:<path>` oracle needs an attested pass of the contract's own unfiltered command.
+    const unfilteredTestFileFloor = (): FloorStep => {
+    const unmetTests = oracles.filter((oracle) => oracle.id.startsWith("test:") && !isPassed(oracle));
+    if (unmetTests.length > 0) {
       return doneFloorRefusal("unfiltered-test-file", {
         code: "VALIDATION_ERROR",
         field: "extra.verification_evidence",
         message:
-          `Task "${task.slug}" declares test-file anchor(s) with no attested UNFILTERED ` +
-          `result:pass run: ${missingUnfilteredRuns.join(", ")} — lore done requires, for ` +
-          `EACH declared test-file anchor, at least one oracle:test or oracle:e2e result:pass evidence ` +
-          `row whose command runs that file with no ${UNFILTERED_RUN_CASE_FILTER_DESCRIPTION} ` +
-          `case filter AND was produced by a runner. Routes that satisfy it: (1) ` +
-          `\`lore evidence ${task.slug} --oracle test --command "<unfiltered command from the ` +
-          `repo root>" --capture\` (the runner spawns it and attests the exit code); (2) ` +
-          `\`lore verify <plan>\` on an AC whose declared command runs the file unfiltered; when ` +
-          `the file is only reachable from a package directory, \`lore verify --execution-root ` +
-          `<that directory>\` — the attested root is joined with the command's paths, so a ` +
-          `package-relative command matches the repo-relative anchor.${measurementNote}`,
-        value: missingUnfilteredRuns,
+          `Task "${task.slug}" has contract test-file oracle(s) with no attested UNFILTERED result:pass run: ${describeUnmet(unmetTests)} — ` +
+          `lore done requires, for EACH, a runner-produced pass row whose command is exactly the one shown, bound to the landed code. ` +
+          `Routes that satisfy it: \`lore evidence ${task.slug} --oracle test --command "<that command>" --result pass --capture\`, ` +
+          `or \`lore verify <plan>\` on an AC whose declared command runs the file unfiltered.`,
+        value: unmetTests.map((oracle) => oracle.id),
       });
     }
+    return undefined;
+    };
 
-    return ok({
-      refusal: null,
-      removedTestAnchors,
-      ...(overrideReason !== undefined ? { overrideReason } : {}),
-      ...(noNewTestsReason !== undefined ? { noNewTestsReason } : {}),
-    });
+    // The other contract oracles: the ac oracles (the AC's current live command) and typecheck.
+    const contractOraclesFloor = (): FloorStep => {
+    const unmetOthers = oracles.filter((oracle) => !oracle.id.startsWith("test:") && !isPassed(oracle));
+    if (unmetOthers.length > 0) {
+      return doneFloorRefusal("contract-oracles", {
+        code: "VALIDATION_ERROR",
+        field: "extra.verification_evidence",
+        message:
+          `Task "${task.slug}" has contract oracle(s) with no attested pass bound to the landed code: ${describeUnmet(unmetOthers)} — ` +
+          `lore done requires a runner-produced pass row whose command is exactly the one shown (an ac oracle is judged by the AC's ` +
+          `current command). Record it with \`lore evidence ${task.slug} --oracle <kind> --command "<that command>" --result pass --capture\` ` +
+          `or \`lore verify <plan>\`.`,
+        value: unmetOthers.map((oracle) => oracle.id),
+      });
+    }
+    return undefined;
+    };
+
+    // The floors run in the ONE fixed order of DONE_FLOOR_ORDER; the first unmet one is the verdict. The floors the callers own
+    // (not-landed, missing-oracle-file, foreign-claim) have no step here.
+    const steps: Partial<Record<DoneFloorId, () => FloorStep>> = {
+      "attested-pass": attestedPassFloor,
+      "latest-attested-fail": latestFailFloor,
+      "red-first": redFirstFloor,
+      "unfiltered-test-file": unfilteredTestFileFloor,
+      "contract-oracles": contractOraclesFloor,
+    };
+    for (const floor of DONE_FLOOR_ORDER) {
+      const verdict = steps[floor]?.();
+      if (verdict === undefined) continue;
+      return verdict;
+    }
+    return ok({ refusal: null });
   }
 
   /**
@@ -4301,54 +4434,401 @@ export class TaskWorkflowService {
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
     if (task.status === "archived" || task.status === "deprecated") return ok(null);
-    const stampBinding = await loadStampBindingContext(this.store, [task]);
-    if (!stampBinding.ok) return stampBinding;
-    const removals = await this.measureAnchorRemovals(task);
-    if (!removals.ok) return removals;
-    const supersession = await this.resolveScopeSupersession(task);
-    const measure = await this.measureLanding(task);
-    if (!measure.ok) return measure;
-    const evaluated = this.evaluateDoneFloors(task, {}, stampBinding.value, removals.value, supersession, this.countingRule(task, measure.value));
-    if (!evaluated.ok) return evaluated;
-    if (evaluated.value.refusal !== null) return ok(evaluated.value.refusal);
-    return this.findAsyncFloor(task, measure.value);
+    const evidence = readEvidence(task);
+    return this.evaluateStoredContractFloors(task, evidence);
   }
 
   /**
-   * The `missing-oracle-file` floor (spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-6; baseline
-   * AS-17): refuses while any AC this task covers (declared `extra.ac_scope` plus every evidence `ac_ref`) is a
-   * script criterion whose CURRENT command names a test file that exists under no plausible root. An attested pass
-   * recorded before the file was deleted cannot satisfy it; the ONLY exit is repointing the command
-   * (`lore ac set --command`) at an existing file — there is deliberately no override reason.
+   * The ONE evaluation of the done floors (AC-DCS1-7): `done()`, `checkDoneFloors` (so `lore set --status archived`, the
+   * plan-close cascade and `lore archive --apply`) all reach it. It judges the task by its stored contract plus `added_oracles`,
+   * never by the task's live fields.
    *
-   * Not armed (returns `ok(null)`) when the task covers no AC, when `repoRoot` is not configured (bare unit
-   * construction — nothing to resolve a relative path against), or when no governing criteria resolve.
-   *
-   * @param task - the task being archived
-   * @returns `ok(refusal)` naming each AC and its missing path(s), `ok(null)` when nothing is missing, `err` only
-   *   when criteria resolution itself fails
+   * @param task - an open task
+   * @param evidence - `readEvidence(task)`
+   * @returns the first unmet floor, or `null` when every floor before foreign-claim is met
    */
+  private async evaluateStoredContractFloors(task: DocRecord, evidence: EvidenceEntry[]): Promise<Result<DoneFloorRefusal | null, LoreError>> {
+    const judged = await this.judgeStoredContract(task, evidence);
+    if (!judged.ok) return judged;
+    return ok(judged.value.refusal);
+  }
+
   /**
-   * Ids of the governing spec's ACs declared with `--allow-missing-path` (`extra.allow_missing_path_declarations`).
-   * Plan-owned task: task -> plan -> spec. An `--adhoc` task (no structural spec link) yields the empty set, i.e.
-   * "no declaration" — the floor stays strict for it. A hop that does not resolve to the expected type is also empty.
+   * The ONE resolution of a contract oracle to the command a pass row must have run: the contract's own command for every id except
+   * `ac:<id>`, which is the CURRENT live command of that criterion across the specs governing the task (the contract's copy is never
+   * used). Shared by the done floors and by `lore integrate`, so the two always agree on which command proves an oracle.
+   *
+   * @param task - the task the oracles belong to
+   * @param oracles - the oracles to resolve (the caller has already dropped removed ones)
+   * @returns one {@link EvaluatedOracle} per input, in order; an unresolvable `ac:` oracle carries `unresolved`
    */
-  private async readAllowMissingPathAcIds(task: DocRecord): Promise<Result<Set<string>, LoreError>> {
-    const ids = new Set<string>();
-    if (task.extra["adhoc"] === true || task.parent_id === null) return ok(ids);
-    const planResult = await this.store.find(task.parent_id);
-    if (!planResult.ok) return planResult;
-    const plan = planResult.value;
-    if (plan === null || plan.type !== "plan" || plan.parent_id === null) return ok(ids);
-    const specResult = await this.store.find(plan.parent_id);
-    if (!specResult.ok) return specResult;
-    const raw = specResult.value?.extra["allow_missing_path_declarations"];
-    if (!Array.isArray(raw)) return ok(ids);
-    for (const entry of raw) {
-      const acId = (entry as { ac_id?: unknown } | null)?.ac_id;
-      if (typeof acId === "string") ids.add(acId);
+  private async evaluateOracleCommands(task: DocRecord, oracles: readonly DoneContractOracle[]): Promise<Result<EvaluatedOracle[], LoreError>> {
+    const bySpec = await this.criteriaBySpec(task);
+    if (!bySpec.ok) return bySpec;
+    const evaluated: EvaluatedOracle[] = [];
+    for (const oracle of oracles) {
+      if (oracle.id.startsWith("ac:")) {
+        const acId = oracle.id.slice("ac:".length);
+        // reason: an id is resolved across the plan's parent spec and every spec it implements; one match is used, none and
+        // several are named causes (never a guess between two specs).
+        const found = bySpec.value.flatMap((group) => {
+          const criterion = group.criteria.find((candidate) => candidate.id === acId);
+          return criterion === undefined ? [] : [{ spec: group.spec, criterion }];
+        });
+        const live = found.length === 1 ? found[0]!.criterion : undefined;
+        if (found.length > 1) evaluated.push({ id: oracle.id, command: undefined, unresolved: `ac-oracle-ambiguous: declared by ${found.map((hit) => hit.spec).join(" and ")}` });
+        else if (live === undefined) evaluated.push({ id: oracle.id, command: undefined, unresolved: "no governing spec declares this criterion any more" });
+        else if (live.verify.mode !== "script") evaluated.push({ id: oracle.id, command: undefined, unresolved: "the criterion is no longer script-mode" });
+        else evaluated.push({ id: oracle.id, command: live.verify.command, oracleKind: live.verify.oracle });
+      } else {
+        evaluated.push({ id: oracle.id, command: oracle.command });
+      }
     }
-    return ok(ids);
+    return ok(evaluated);
+  }
+
+  /**
+   * `lore integrate`'s read of the commands that prove a task's oracles (see {@link evaluateOracleCommands}).
+   *
+   * @param task - a task holding a stored contract
+   * @param oracles - the oracles to resolve
+   */
+  async liveOracleCommands(task: DocRecord, oracles: readonly DoneContractOracle[]): Promise<Result<EvaluatedOracle[], LoreError>> {
+    return this.evaluateOracleCommands(task, oracles);
+  }
+
+  /**
+   * The ONE corpus write of the evidence `lore integrate` records for a landed task (AC-DCS2-1): every runner-attested row of the
+   * task, in one write. Each row goes through the same admission rules as every runner-attested row (collect mode of the shared
+   * append path). The task is re-read here, so a caller that lost a version race simply calls again (the caller retries up to 3 times).
+   *
+   * @param taskSlug - the task slug or id
+   * @param rows - the rows, each already carrying its runner attestation with `recorded_at_landing`
+   * @param by - who is recorded as the writer of the rows and the version
+   * @param nowIso - the one reading of "now" for every row and the version
+   * @returns the written task, or `STALE_VERSION` (retry) or the first row's admission error (nothing written)
+   */
+  async recordIntegrateEvidence(
+    taskSlug: string,
+    rows: readonly VerifiedEvidenceInput[],
+    by: string,
+    nowIso: string,
+    oracleIds: readonly string[],
+  ): Promise<Result<DocRecord, LoreError>> {
+    // reason: AC-DCS2-14 — the log names oracle ids, which a row (oracle KIND + command) does not carry; one id per row, in row order.
+    if (oracleIds.length !== rows.length) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "oracleIds",
+        message: `recordIntegrateEvidence got ${rows.length} row(s) but ${oracleIds.length} oracle id(s); the execution log needs one id per row`,
+        value: oracleIds,
+      });
+    }
+    const resolved = await this.resolveTask(taskSlug);
+    if (!resolved.ok) return resolved;
+    const task = resolved.value;
+    const collected: EvidenceEntry[] = [];
+    for (const entry of rows) {
+      const prepared = await this.appendEvidenceEntry(task.id, entry, entry.recorded_by, () => nowIso, true, undefined, collected);
+      if (!prepared.ok) return prepared;
+    }
+    const existing = readEvidence(task);
+    if (existing.length + collected.length > 50) return evidenceLogFull(existing.length);
+    // reason: AC-DCS2-14 — the evidence-recorded entry and one flaky entry per flaky row ride THIS write, so an entry never exists without its rows.
+    const landingCommit = rows.find((row) => row.attestation?.recorded_at_landing !== undefined)?.attestation?.recorded_at_landing;
+    if (landingCommit === undefined) {
+      return err({ code: "VALIDATION_ERROR", field: "attestation.recorded_at_landing", message: "recordIntegrateEvidence rows carry no landing commit", value: taskSlug });
+    }
+    const logged: ExecutionLogEntry[] = [{ kind: "evidence-recorded", at: nowIso, oracles: [...oracleIds], landing_commit: landingCommit }];
+    rows.forEach((row, index) => {
+      if (row.flaky === true) {
+        logged.push({ kind: "flaky", at: nowIso, oracle: oracleIds[index] as string, landing_commit: landingCommit, ...(row.ledger_error !== undefined ? { ledger_error: row.ledger_error } : {}) });
+      }
+    });
+    return this.writeTaskExtra(
+      task,
+      withExecutionLogEntries({ ...task.extra, verification_evidence: [...existing, ...collected] }, logged),
+      nowIso,
+      by,
+      `lore integrate: ${collected.length} row(s) recorded at the landing`,
+      "evidence",
+      { integrate: true, rows: collected.length },
+      true,
+    );
+  }
+
+  /**
+   * The slug of the spec a criterion id resolves to for `task`, by the SAME resolution `done` uses ({@link criteriaBySpec}: the plan's
+   * parent spec plus every implements-linked spec). `null` when no governing spec declares the id; an id several governing specs declare is
+   * refused (`ac-oracle-ambiguous`), never guessed.
+   *
+   * @param task - the task whose governing specs are searched
+   * @param acId - the criterion id
+   */
+  async resolveCriterionSpec(task: DocRecord, acId: string): Promise<Result<string | null, LoreError>> {
+    const bySpec = await this.criteriaBySpec(task);
+    if (!bySpec.ok) return bySpec;
+    const hits = bySpec.value.filter((group) => group.criteria.some((candidate) => candidate.id === acId)).map((group) => group.spec);
+    if (hits.length > 1) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "ac_scope",
+        message: `ac-oracle-ambiguous: ${acId} in the scope of "${task.slug}" is declared by ${hits.join(" and ")}`,
+        value: acId,
+      });
+    }
+    return ok(hits[0] ?? null);
+  }
+
+  /**
+   * The deterministic contract check of a task past done (AC-DCS2-15): every oracle of its stored contract (plus the write-set
+   * additions, minus the oracles its landing removed) must hold a counting pass row by the evidence rule of AC-DCS1-27, the same
+   * predicate `lore done` applied. Writes nothing and calls no AI.
+   *
+   * @param task - a task holding a stored contract
+   * @returns the ids of the met oracles and each unmet oracle with the reason it is unmet
+   */
+  async checkContractOracles(task: DocRecord): Promise<Result<{ met: string[]; unmet: { id: string; reason: string }[] }, LoreError>> {
+    const contractResult = this.readStoredContract(task);
+    if (!contractResult.ok) return contractResult;
+    const contract = contractResult.value;
+    const removed = new Set((contract.removed_oracles ?? []).map((gone) => gone.id));
+    const oracles: DoneContractOracle[] = [];
+    for (const oracle of [...contract.oracles, ...contract.added_oracles]) {
+      if (!removed.has(oracle.id) && !oracles.some((known) => known.id === oracle.id)) oracles.push(oracle);
+    }
+    const evaluated = await this.evaluateOracleCommands(task, oracles);
+    if (!evaluated.ok) return evaluated;
+    const evidence = readEvidence(task);
+    const stampBinding = await loadStampBindingContext(this.store, [task]);
+    if (!stampBinding.ok) return stampBinding;
+    const readings = classifyEvidenceStamps(task.id, evidence, stampBinding.value);
+    const git = createGitRunner(this.worktreeProbe.currentWorkingDirectory());
+    const landedCommit = readTaskLanding(task.extra)?.landing_commit;
+    const bindings = new Map<EvidenceEntry, RowBinding>();
+    for (const [index, row] of evidence.entries()) {
+      if (row.result === "pass" && row.attestation !== undefined && unboundReasonOfReading(readings[index]) === undefined) bindings.set(row, this.bindRow(git, contract, row, landedCommit));
+    }
+    const met: string[] = [];
+    const unmet: { id: string; reason: string }[] = [];
+    for (const oracle of evaluated.value) {
+      if (oracle.unresolved !== undefined) {
+        unmet.push({ id: oracle.id, reason: oracle.unresolved });
+        continue;
+      }
+      const command = oracle.command ?? oracle.id;
+      const counted = [...bindings.entries()].some(([row, binding]) => binding.counts && row.command === command);
+      if (counted) met.push(oracle.id);
+      else unmet.push({ id: oracle.id, reason: `no counting pass row ran \`${command}\`` });
+    }
+    return ok({ met, unmet });
+  }
+
+  /** The stored contract of `task`; a task with none is refused (the contract is compiled at approve, never recomputed here). */
+  private readStoredContract(task: DocRecord): Result<DoneContract, LoreError> {
+    const stored = task.extra["done_contract"];
+    const parsed = doneContractSchema.safeParse(stored);
+    if (parsed.success) return ok(parsed.data);
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "done_contract",
+      message:
+        stored === undefined
+          ? `Task "${task.slug}" holds no done contract: the contract is compiled when the task is approved (\`lore approve ${task.slug}\`), and lore done judges only by the stored contract.`
+          : `Task "${task.slug}" holds a done contract that does not parse (${parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}).`,
+      value: stored,
+    });
+  }
+
+  /**
+   * Judges `task` against its stored contract: not-landed, missing-oracle-file, then the evidence floors
+   * ({@link evaluateDoneFloors}). Returns the verdict with everything `done()` needs to write (the removed oracles and the
+   * landing measure); nothing is written here.
+   */
+  private async judgeStoredContract(
+    task: DocRecord,
+    evidence: EvidenceEntry[],
+  ): Promise<Result<ContractJudgement, LoreError>> {
+    const contractResult = this.readStoredContract(task);
+    if (!contractResult.ok) return contractResult;
+    const contract = contractResult.value;
+    const stampBinding = await loadStampBindingContext(this.store, [task]);
+    if (!stampBinding.ok) return stampBinding;
+    // reason: AC-DCS1-19 — a check or corpus task lands nothing (route `none`) and is never claimed, so a claim it still holds (a
+    // legacy no-branch claim, converted by the migration) is not measured: its rows are judged only by the second evidence rule.
+    let landing: LandingMeasure = { armed: false, mode: "unclaimed" };
+    if (contract.kind === "code") {
+      const measured = await this.measureLanding(task);
+      if (!measured.ok) return measured;
+      landing = measured.value;
+    }
+    const refuse = (refusal: DoneFloorRefusal | null): Result<ContractJudgement, LoreError> => ok({ refusal, removed: [], landing });
+
+    const unlanded = this.notLandedRefusal(task, landing);
+    if (unlanded !== null) return refuse(unlanded);
+
+    const git = createGitRunner(this.worktreeProbe.currentWorkingDirectory());
+    const landingRecord = readTaskLanding(task.extra);
+    const landedCommit = landingRecord?.landing_commit;
+
+    // reason: AC-DCS1-7 (BR-209) — "not landed" is judged first for a code task. measureLanding is unarmed for a task whose claim
+    // history cannot be measured (never claimed, or a corpus-only claim), so the git verdict alone would let an unlanded code task
+    // reach the evidence floors, where the missing landing surfaced as an attested-pass cause. No landing record = not landed.
+    if (contract.kind === "code" && landedCommit === undefined) {
+      const claimedOn = (landing.branches ?? []).length > 0 ? (landing.branches ?? []).join(", ") : "no branch";
+      return refuse(
+        this.floorRefusalOf("not-landed", {
+          code: "VALIDATION_ERROR",
+          field: "extra.landing",
+          message:
+            `Task "${task.slug}" (claimed on ${claimedOn}) cannot be archived as landed: no landing record. A code task is done once its branch ` +
+            `is landed: run \`lore land ${task.slug}\` (or \`lore integrate <branch>\`), then re-run \`lore done ${task.slug}\`.`,
+          value: { claimed_on: claimedOn, reason: "no-landing-record" },
+        }),
+      );
+    }
+
+    // The oracle set: the contract's plus added_oracles, never fewer (AC-DCS1-11), each listed once. While the claim exists the
+    // write-set additions are derived again here (they are written at release / run end, and a done before either still sees them).
+    const heldClaim = contract.kind === "code" ? extractHeldClaim(task) : undefined;
+    let judgedContract: DoneContract = contract;
+    if (heldClaim !== undefined) {
+      const derived = this.deriveClaimAdditions(task, heldClaim, contract);
+      if (!derived.ok) return derived;
+      judgedContract = withAddedOracles(contract, derived.value);
+    }
+    const contractOracles: DoneContractOracle[] = [];
+    for (const oracle of [...judgedContract.oracles, ...judgedContract.added_oracles]) {
+      if (!contractOracles.some((known) => known.id === oracle.id)) contractOracles.push(oracle);
+    }
+
+    // Floor 2: the landed tree holds every contract test file, or the task's own landing deleted it (AC-DCS1-30).
+    let removed: DoneContractRemovedOracle[] = [];
+    if (contract.kind === "code" && landedCommit !== undefined && landingRecord !== undefined) {
+      const testOracles: TestFileOracle[] = contractOracles.filter((oracle) => oracle.id.startsWith("test:")).map((oracle) => ({ id: oracle.id, path: oracle.id.slice("test:".length) }));
+      const present = new Map<string, boolean>();
+      let readable = true;
+      for (const oracle of testOracles) {
+        const exists = pathExistsAt(git, landedCommit, oracle.path);
+        if (typeof exists === "boolean") present.set(oracle.path, exists);
+        else readable = false;
+      }
+      if (readable && testOracles.some((oracle) => present.get(oracle.path) === false)) {
+        // reason: deletion is judged on the diff of THIS task's landing (its claim start to its branch tip, else the landing's own
+        // range on main); an unreadable diff deletes nothing, so the absent file refuses (fail closed).
+        const from = landingRecord.start_head ?? landingRecord.main_before;
+        const to = landingRecord.tip ?? landingRecord.branch_head;
+        const deleted = deletedByDiff(git, from, to);
+        const deletedByTask: ReadonlySet<string> = "unmeasurable" in deleted ? new Set<string>() : deleted;
+        const verdict = missingOracleFiles(testOracles, { has: (path) => present.get(path) === true }, deletedByTask);
+        if (verdict.missing.length > 0) {
+          const note = !("unmeasurable" in deleted) ? "" : ` (whether the landing deleted it could not be measured: ${deleted.unmeasurable})`;
+          return refuse(
+            this.floorRefusalOf("missing-oracle-file", {
+              code: "VALIDATION_ERROR",
+              field: "done_contract",
+              message:
+                `oracle-file-missing: Task "${task.slug}" has contract test file(s) absent from the landed tree (${landedCommit.slice(0, 12)}) that its own landing did not delete: ` +
+                `${verdict.missing.join(", ")}${note}. Restore the file on main, or repair the task; lore done never judges an oracle whose file is gone.`,
+              value: verdict.missing,
+            }),
+          );
+        }
+        removed = verdict.removed.map((oracle) => ({
+          id: oracle.id,
+          path: oracle.path,
+          reason: `deleted by the landing of ${landingRecord.branch} (diff ${from.slice(0, 12)}..${to.slice(0, 12)})`,
+          landed_commit: landedCommit,
+        }));
+      }
+    }
+
+    // The oracles to judge: the contract's, minus the removed, each with the command a pass row must have run.
+    const evaluatedResult = await this.evaluateOracleCommands(task, contractOracles.filter((oracle) => !removed.some((gone) => gone.id === oracle.id)));
+    if (!evaluatedResult.ok) return evaluatedResult;
+    const evaluated = evaluatedResult.value;
+
+    // How each pass row binds to the code (AC-DCS1-27).
+    const binding = new Map<EvidenceEntry, RowBinding>();
+    for (const row of evidence) {
+      if (row.result !== "pass" || row.attestation === undefined) continue;
+      binding.set(row, this.bindRow(git, contract, row, landedCommit));
+    }
+    const bindingNote = describeBindingFailures([...binding.values()].reverse());
+
+    const floors = this.evaluateDoneFloors(task, contract, evaluated, evidence, stampBinding.value, binding, bindingNote);
+    if (!floors.ok) return floors;
+    return ok({ refusal: floors.value.refusal, removed, landing });
+  }
+
+  /** Stamps `details.floor` on a refusal built outside {@link evaluateDoneFloors}. */
+  private floorRefusalOf(floor: DoneFloorId, error: Extract<LoreError, { code: "VALIDATION_ERROR" }>): DoneFloorRefusal {
+    return { floor, error: { ...error, message: `${error.message} [floor: ${floor}]`, details: { floor }, rule: "BR-1292" } };
+  }
+
+  /**
+   * The evidence rule of the contract's kind, applied to one pass row. A code task: the row counts iff it was recorded by
+   * `lore integrate` at the newest landing, or the git tree of the commit it ran on is the tree of the landed commit. A check or
+   * corpus task: the row counts iff it ran on a commit of the base branch that contains the compile commit.
+   */
+  private bindRow(git: GitRunner, contract: DoneContract, entry: EvidenceEntry, landedCommit: string | undefined): RowBinding {
+    const head = entry.attestation?.head_sha;
+    if (contract.kind === "code") {
+      if (landedCommit === undefined) return { counts: false, cause: "evidence-unmeasurable", detail: "the task has no landed commit to compare the row with" };
+      if (entry.attestation?.recorded_at_landing === landedCommit) return { counts: true };
+      if (head === undefined) return { counts: false, cause: "evidence-unmeasurable", detail: "the row records no commit it ran on" };
+      const verdict = treesIdentical(git, head, landedCommit);
+      if (verdict.state === "identical") return { counts: true };
+      if (verdict.state === "different") return { counts: false, cause: "evidence-stale", detail: verdict.paths.join(", ") };
+      return { counts: false, cause: "evidence-unmeasurable", detail: verdict.reason };
+    }
+    if (head === undefined) return { counts: false, cause: "evidence-unmeasurable", detail: "the row records no commit it ran on" };
+    const row = { head_sha: head };
+    const { containsCommit, isOnBranch } = commitContainment(git);
+    if (containsCommit(row.head_sha, contract.compiled_at_commit) && isOnBranch(row.head_sha, contract.base_branch)) return { counts: true };
+    return {
+      counts: false,
+      cause: "evidence-stale",
+      detail: `the row ran on ${head.slice(0, 12)}, which is not a ${contract.base_branch} commit containing the compile commit ${contract.compiled_at_commit.slice(0, 12)}`,
+    };
+  }
+
+  /**
+   * The criteria of every spec that governs `task`, grouped by spec: the plan's parent spec and every spec the plan links with
+   * `implements` (the same set the compile at approve reads). An ad-hoc task has the one spec its recorded governing spec names.
+   * An ac id is then resolved against these groups: found in one spec, in none, or in several (ambiguous).
+   */
+  private async criteriaBySpec(task: DocRecord): Promise<Result<Array<{ spec: string; criteria: AcceptanceCriterion[] }>, LoreError>> {
+    if (task.extra["adhoc"] === true) {
+      const adhoc = await this.resolveAdhocGoverningAcCriteria(task);
+      if (!adhoc.ok) return adhoc;
+      return ok([{ spec: "the governing spec", criteria: adhoc.value }]);
+    }
+    const planId = typeof task.extra["plan_id"] === "string" && task.extra["plan_id"] !== "" ? (task.extra["plan_id"] as DocId) : task.parent_id;
+    if (planId === null) return ok([]);
+    const plan = await this.store.find(planId);
+    if (!plan.ok) return plan;
+    if (plan.value === null || plan.value.type !== "plan") return ok([]);
+    const specs: DocRecord[] = [];
+    if (plan.value.parent_id !== null) {
+      const parent = await this.store.find(plan.value.parent_id);
+      if (!parent.ok) return parent;
+      if (parent.value !== null && parent.value.type === "spec") specs.push(parent.value);
+    }
+    const links = await this.store.findLinks(plan.value.id, "out");
+    if (!links.ok) return links;
+    for (const link of links.value) {
+      if (link.link_type !== "implements") continue;
+      const target = await this.store.find(link.to_id);
+      if (!target.ok) return target;
+      if (target.value !== null && target.value.type === "spec" && !specs.some((known) => known.id === target.value?.id)) specs.push(target.value);
+    }
+    return ok(
+      specs.map((spec) => {
+        const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
+        return { spec: spec.slug, criteria: parsed.success ? parsed.data : [] };
+      }),
+    );
   }
 
   /**
@@ -4361,90 +4841,6 @@ export class TaskWorkflowService {
     const resolved = await this.resolveDeclaredAcCriteria(task.parent_id);
     if (!resolved.ok) return resolved;
     return ok(resolved.value ?? []);
-  }
-
-  /**
-   * Which of the task's declared `extra.ac_scope` ids are satisfied by supersession (D15), via the ONE shared
-   * predicate ({@link partitionDeclaredScopeBySupersession} -> `isAcSuperseded`). `undefined` when there is nothing
-   * to partition (no scope key, an empty scope) or the criteria cannot be resolved.
-   *
-   * reason: an unresolvable criterion set answers `undefined`, never an error and never "all superseded": the
-   * no-new-tests floor then stays armed exactly as before, so a resolution failure can only keep a refusal, never
-   * grant an exemption (fail closed).
-   */
-  private async resolveScopeSupersession(task: DocRecord): Promise<DeclaredScopeSupersession | undefined> {
-    const scope = extractDeclaredAcScope(task);
-    if (scope === undefined || scope.length === 0) return undefined;
-    const criteria = await this.resolveFloorCriteria(task);
-    if (!criteria.ok || criteria.value === null) return undefined;
-    return partitionDeclaredScopeBySupersession(scope, criteria.value);
-  }
-
-  /**
-   * The file-existence port of the `missing-oracle-file` floor: a path inside the repository is read from the INTEGRATION
-   * BRANCH's tree (#329: a stale main checkout must not hide a file the landed work added, nor show one it never landed);
-   * a path outside the repository, or a repository with no readable integration branch, is checked on disk as before.
-   */
-  private oracleFileExists(repoRoot: string): (path: string) => boolean {
-    const facts = this.landingFacts();
-    return (path) => {
-      const rel = relative(repoRoot, path);
-      if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return existsSync(path);
-      const inTree = facts.pathExistsInIntegration(rel);
-      return inTree.ok ? inTree.value : existsSync(path);
-    };
-  }
-
-  private async findMissingOracleFileFloor(task: DocRecord): Promise<Result<DoneFloorRefusal | null, LoreError>> {
-    const repoRoot = this.repoRoot;
-    if (repoRoot === undefined) return ok(null);
-    const covered = new Set<string>(extractDeclaredAcScope(task) ?? []);
-    for (const entry of readEvidence(task)) {
-      if (entry.ac_ref !== undefined) covered.add(entry.ac_ref);
-    }
-    if (covered.size === 0) return ok(null);
-
-    const resolvedCriteria = await this.resolveFloorCriteria(task);
-    if (!resolvedCriteria.ok) return resolvedCriteria;
-    if (resolvedCriteria.value === null) return ok(null);
-    const criteria = resolvedCriteria.value;
-
-    const declaredMissingOk = await this.readAllowMissingPathAcIds(task);
-    if (!declaredMissingOk.ok) return declaredMissingOk;
-    const evidence = readEvidence(task);
-
-    const findings: string[] = [];
-    for (const criterion of criteria) {
-      // reason: a superseded criterion (D15) is retired — its oracle is never run, so a missing oracle file is moot.
-      if (isAcSuperseded(criterion)) continue;
-      if (!covered.has(criterion.id) || criterion.verify.mode !== "script") continue;
-      const criterionCommand = criterion.verify.command;
-      const missing = findMissingOracleFiles(criterionCommand, {
-        cwd: repoRoot,
-        fileExists: this.oracleFileExists(repoRoot),
-      });
-      if (missing.length === 0) continue;
-      // reason: a red-first AC declared with `--allow-missing-path` whose file a LATER task writes is not a lie —
-      // nothing was ever attested against it. It is refused once ANY pass tagged with the AC is on record (BR-1179):
-      // AC-TG-6's text has no "ran the missing file" narrowing and AC-EI-2 removed TG-22's. The displayed state is
-      // stricter still: `deriveAcCoverageState` renders a missing oracle not_measured even with no pass (EI-6).
-      const acHasPass = hasPassOnRecord(evidence.filter((e) => e.ac_ref === criterion.id));
-      if (declaredMissingOk.value.has(criterion.id) && !acHasPass) continue;
-      findings.push(`${criterion.id} (${missing.join(", ")})`);
-    }
-    if (findings.length === 0) return ok(null);
-
-    const error: Extract<LoreError, { code: "VALIDATION_ERROR" }> = {
-      code: "VALIDATION_ERROR",
-      field: "extra.ac_scope",
-      message:
-        `Task "${task.slug}" covers AC(s) whose oracle file is missing: ${findings.join("; ")} — lore done ` +
-        "refuses: an AC whose test file does not exist is NOT MEASURED, whatever an earlier attested pass said. " +
-        "Repoint the command with `lore ac set <spec> <AC-ID> --command \"<cmd naming an existing file>\"`, " +
-        `then re-attest it: \`lore verify\`, or \`lore evidence ${task.slug} --oracle test --command "<cmd>" --result pass --capture\`. [floor: missing-oracle-file]`,
-      value: findings,
-    };
-    return ok({ floor: "missing-oracle-file", error: { ...error, details: { floor: "missing-oracle-file" } } });
   }
 
   /**
@@ -4488,6 +4884,54 @@ export class TaskWorkflowService {
     if (branch === undefined) return false;
     const inside = facts.isInsideBranchWorktree(callerCwd, branch);
     return inside.ok && inside.value;
+  }
+
+  /** Hands the composition root's `workflow.done_contract.test_file` template to the write-set addition derivation. */
+  setTestFileTemplate(template: string | undefined): void {
+    this.testFileTemplate = template;
+  }
+
+  /**
+   * The oracles a claim's write set adds to `contract` (AC-DCS1-11): the test files in the write set that the claim's branch
+   * changed since its start commit and the contract does not already run. A claim with no start commit (a no-branch claim) or no
+   * measurable tip has no branch work to measure and adds nothing. A git read that fails, or a changed test file with no
+   * configured test template, is an error, never an empty answer.
+   */
+  private deriveClaimAdditions(task: DocRecord, claim: TaskClaim, contract: DoneContract): Result<DoneContractOracle[], LoreError> {
+    if (contract.kind !== "code" || claim.start_head === undefined) return ok([]);
+    const tip = this.measureClaimTip(claim);
+    if (tip === undefined) return ok([]);
+    const git = createGitRunner(this.worktreeProbe.currentWorkingDirectory());
+    const changed = git(["diff", "--name-only", "--diff-filter=ACMR", claim.start_head, tip]);
+    if (!changed.ok) {
+      return err({ code: "VALIDATION_ERROR", field: "write_set", message: `the files the branch of "${task.slug}" changed could not be read: ${changed.reason}`, value: task.slug });
+    }
+    const changedFiles = changed.stdout.split("\n").filter((line) => line !== "");
+    const writeSet = claim.write_set ?? extractFileAnchors(task);
+    // reason: the template is needed only when a test file is actually added; probe with a placeholder-free pass first.
+    const probe = deriveWriteSetAdditions({ writeSet, changedFiles, contract, testFileTemplate: "{file}" });
+    if (probe.length === 0) return ok([]);
+    if (this.testFileTemplate === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "workflow.done_contract.test_file",
+        message: `"${task.slug}" changed test file(s) of its write set (${probe.map((oracle) => oracle.id.slice("test:".length)).join(", ")}) but workflow.done_contract.test_file is not configured, so no oracle command can be derived for them.`,
+        value: task.slug,
+      });
+    }
+    return ok(deriveWriteSetAdditions({ writeSet, changedFiles, contract, testFileTemplate: this.testFileTemplate }));
+  }
+
+  /**
+   * `task`'s stored contract with the claim's write-set additions merged in, or `undefined` when there is nothing to change
+   * (no contract, or no addition). Used by the release and the run end to write the additions in the release's own write.
+   */
+  private contractWithClaimAdditions(task: DocRecord, claim: TaskClaim): Result<DoneContract | undefined, LoreError> {
+    const stored = doneContractSchema.safeParse(task.extra["done_contract"]);
+    if (!stored.success) return ok(undefined);
+    const additions = this.deriveClaimAdditions(task, claim, stored.data);
+    if (!additions.ok) return additions;
+    return ok(additions.value.length === 0 ? undefined : withAddedOracles(stored.data, additions.value));
   }
 
   /**
@@ -4657,7 +5101,7 @@ export class TaskWorkflowService {
       reason = "no-measurable-claim";
       message =
         `${base} no-measurable-claim: every claim of this task was released before tips were recorded and cannot be measured. ` +
-        `Claim the task again (on a branch, or without one for corpus-only work), record evidence, then re-run \`lore done ${task.slug}\`.`;
+        `Claim the task again on a branch, record evidence, then re-run \`lore done ${task.slug}\`.`;
     } else {
       reason = "tip-not-on-main";
       message =
@@ -4673,80 +5117,6 @@ export class TaskWorkflowService {
       rule: "BR-1292",
     };
     return { floor: "not-landed", error: { ...error, details: { floor: "not-landed" } } };
-  }
-
-  /**
-   * One {@link AnchorRemovalVerdict} per anchored test file that still lacks an attested unfiltered run — the
-   * input of the `unfiltered-test-file` floor's "removed by this task" exception. Measured from the claim's
-   * recorded worktree/branch (the current claim's, else the latest the audit history recorded); git is spawned only for an
-   * anchor the floor would otherwise refuse, so a fully-attested task costs nothing.
-   *
-   * A task whose claims never recorded a worktree has no branch that could have deleted anything: its anchors
-   * are `kept` (the plain refusal). A recorded branch that cannot be read is `not-measured` for every anchor,
-   * with the reason — never `removed`.
-   *
-   * @returns `err` only when the claim audit history itself is unreadable
-   */
-  private async measureAnchorRemovals(task: DocRecord): Promise<Result<ReadonlyMap<string, AnchorRemovalVerdict>, LoreError>> {
-    const verdicts = new Map<string, AnchorRemovalVerdict>();
-    const unsatisfied = findMissingUnfilteredTestFileRuns(task, readEvidence(task), this.repoRoot);
-    if (unsatisfied.length === 0) return ok(verdicts);
-    const recordedResult = await this.readRecordedWorktrees(task);
-    if (!recordedResult.ok) return recordedResult;
-    const currentWorktree = readClaimRecord(task)?.worktree;
-    const recorded =
-      recordedResult.value.find((r) => r.path === currentWorktree) ?? recordedResult.value[recordedResult.value.length - 1];
-    const settle = (verdict: AnchorRemovalVerdict): ReadonlyMap<string, AnchorRemovalVerdict> => {
-      for (const anchor of unsatisfied) verdicts.set(anchor, verdict);
-      return verdicts;
-    };
-    if (recorded === undefined) return ok(settle({ kind: "kept" }));
-    const probe = this.worktreeProbe;
-
-    const cwd = probe.currentWorkingDirectory();
-    const head = resolveClaimHead(probe, recorded.path, cwd);
-    if (!head.ok) return ok(settle({ kind: "not-measured", reason: `claim head of ${recorded.path} unreadable: ${head.reason}` }));
-    const integration = probe.integrationBranch(cwd);
-    if (!integration.ok) return ok(settle({ kind: "not-measured", reason: `integration branch unreadable: ${integration.reason}` }));
-    const refs = { base: recorded.baseSha, head: head.value.sha, integration: integration.value };
-    for (const anchor of unsatisfied) verdicts.set(anchor, measureAnchorRemoval(probe, cwd, refs, anchor));
-    return ok(verdicts);
-  }
-
-  /** The async floors, in order: landed work, then oracle-file existence. The first refusal wins. */
-  private async findAsyncFloor(task: DocRecord, measure: LandingMeasure): Promise<Result<DoneFloorRefusal | null, LoreError>> {
-    const unlanded = this.notLandedRefusal(task, measure);
-    if (unlanded !== null) return ok(unlanded);
-    return this.findMissingOracleFileFloor(task);
-  }
-
-  /**
-   * The evidence-counting rule for `task` (BR-199 under the landing predicate), or `undefined` when it cannot apply: a task
-   * never claimed, or one measured without git facts (the not-landed floor refuses that case on its own).
-   */
-  private countingRule(task: DocRecord, measure: LandingMeasure): CountingRule | undefined {
-    const facts = this.landingFacts();
-    if (!measure.armed) return undefined;
-    const verdict = measure.verdict;
-    const tip =
-      verdict !== undefined && (verdict.state === "landed" || (verdict.state === "not-landed" && verdict.tip !== undefined))
-        ? verdict.tip
-        : this.currentClaimTip(task);
-    return (row) =>
-      countsAsLandedPass(
-        row,
-        {
-          mode: measure.mode,
-          ...(measure.latestClaimAt !== undefined ? { latestClaimAt: measure.latestClaimAt } : {}),
-          ...(tip !== undefined ? { tip } : {}),
-        },
-        facts,
-      );
-  }
-
-  /** The tip recorded on the current claim, when the task still holds one. */
-  private currentClaimTip(task: DocRecord): string | undefined {
-    return readClaimRecord(task)?.end_tip;
   }
 
   private async _doneImpl(
@@ -4766,50 +5136,21 @@ export class TaskWorkflowService {
       return ok({ task, already_done: true, transitions: [] });
     }
 
-    const stampBinding = await loadStampBindingContext(this.store, [task]);
-    if (!stampBinding.ok) return stampBinding;
-    const removals = await this.measureAnchorRemovals(task);
-    if (!removals.ok) return removals;
-    const supersession = await this.resolveScopeSupersession(task);
-    const measured = await this.measureLanding(task);
-    if (!measured.ok) return measured;
-    const landing = measured.value;
-    const evaluated = this.evaluateDoneFloors(
-      task,
-      {
-        ...(opts.overrideReason !== undefined ? { overrideReason: opts.overrideReason } : {}),
-        ...(opts.noNewTestsReason !== undefined ? { noNewTestsReason: opts.noNewTestsReason } : {}),
-      },
-      stampBinding.value,
-      removals.value,
-      supersession,
-      this.countingRule(task, landing),
-    );
-    if (!evaluated.ok) return evaluated;
-    if (evaluated.value.refusal !== null) return err(evaluated.value.refusal.error);
-    const { overrideReason, noNewTestsReason } = evaluated.value;
-    const removedTestAnchors = evaluated.value.removedTestAnchors ?? [];
-
-    // reason: AC-AU-7 — the attestation override is DECIDED (class override-attestation), not granted. `overrideReason`
-    // is set here only when the attested-pass floor actually failed and the escape was consumed, so a task that
-    // already holds an attested pass never asks. Runs before any write; the refusal is exit 4 with a pending decision.
-    if (overrideReason !== undefined) {
-      const decided = await requireOverrideAuto(this.overrideDecisions, {
-        classId: "override-attestation",
-        subject: { id: task.slug, version: `v${task.version}` },
-        summary: `done ${task.slug} --override-attestation`,
-        change: { document: task.slug, override: "attestation", reason: overrideReason },
-      });
-      if (!decided.ok) return decided;
-    }
-
-    const asyncFloor = await this.findAsyncFloor(task, landing);
-    if (!asyncFloor.ok) return asyncFloor;
-    if (asyncFloor.value !== null) return err(asyncFloor.value.error);
+    const judged = await this.judgeStoredContract(task, readEvidence(task));
+    if (!judged.ok) return judged;
+    if (judged.value.refusal !== null) return err(judged.value.refusal.error);
+    const { removed, landing } = judged.value;
 
     const nowIso = now();
     const claim = readClaimRecord(task);
-    if (claim !== undefined) {
+    // reason: AC-DCS1-18 — a finished claim is the implementer's hand-over of work whose rows the floors above just judged; the
+    // closer (another run) is who `lore done` / `lore land` exists for, so the lease is no obstacle to it and `done` releases it.
+    // reason: AC-DCS1-19 — a check or corpus task is never claimed; a claim it still holds is a legacy no-branch claim, ignored by
+    // the floors and released (forced) by the archive, exactly as a finished hand-over is.
+    const heldKind = doneContractSchema.safeParse(task.extra["done_contract"]);
+    const claimlessKind = heldKind.success && heldKind.data.kind !== "code";
+    const finishedHandOver = claim !== undefined && (claimlessKind || this.finishedCommitInForce(claim) !== undefined);
+    if (claim !== undefined && !finishedHandOver) {
       // reason: BR-1056 — the holder is a RUN, not a name: two runs deriving the same name must not pass for
       // one holder. Staleness is the run-aware BR-1058 form, so an ended run's clean claim does not block.
       const staleResult = await this.isClaimEffectivelyStale(claim, nowIso, new Map());
@@ -4817,14 +5158,16 @@ export class TaskWorkflowService {
       const holder = buildClaimHolder(claim, staleResult.value);
       if (hasClaimConflict(holder, buildClaimParty(opts)).kind === "conflict") {
         const runNote = ` (run ${describeClaimRun(holder.harnessRun)})`;
-        return err({
-          code: "VALIDATION_ERROR",
-          field: "extra.claim",
-          message:
-            `Task "${task.slug}" is held by a fresh claim from "${claim.by}"${runNote} — lore done ` +
-            `refuses to archive a task out from under an active session`,
-          value: claim.by,
-        });
+        return err(
+          this.floorRefusalOf("foreign-claim", {
+            code: "VALIDATION_ERROR",
+            field: "extra.claim",
+            message:
+              `Task "${task.slug}" is held by a fresh claim from "${claim.by}"${runNote} — lore done ` +
+              `refuses to archive a task out from under an active session`,
+            value: claim.by,
+          }).error,
+        );
       }
     }
 
@@ -4864,16 +5207,11 @@ export class TaskWorkflowService {
         opts.by,
         `lore done: ${task.status} → ${nextStatus}`,
         {
-          // reason: exactOptionalPropertyTypes — conditionally spread rather than
-          // pass `undefined` verbatim, since `overrideReason`/`noNewTestsReason`
-          // are locals typed `string | undefined` while writeTaskStatus's own
-          // optional fields reject an explicit `undefined` under this tsconfig
-          // (mirrors the pre-existing `additionalCwds`/`corpusRoot` spread
-          // precedent in evidence-precheck.ts).
-          ...(overrideReason !== undefined ? { overrideReason } : {}),
-          ...(noNewTestsReason !== undefined ? { noNewTestsReason } : {}),
+          // reason: exactOptionalPropertyTypes — conditionally spread rather than pass `undefined` verbatim.
           ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
           ...(landingExtra !== undefined && transitions.length === 0 ? { landing: landingExtra } : {}),
+          // reason: AC-DCS1-30 — the removed oracles are written in the SAME write as the first step of the done.
+          ...(removed.length > 0 && transitions.length === 0 ? { removedOracles: removed } : {}),
         },
       );
       if (!stepResult.ok) return stepResult;
@@ -4891,6 +5229,21 @@ export class TaskWorkflowService {
 
     const worktreeOutcomes = await this.cleanupRecordedWorktrees(task, opts.by, now(), opts.callerSession ?? null);
 
+    // reason: a passing done releases the claim of the task (AC-DCS1-7). The archive is committed, so a release that cannot be
+    // done is reported on the result, never swallowed and never undoing the archive.
+    let claimReleaseFailure: string | undefined;
+    if (readClaimRecord(task) !== undefined) {
+      const released = await this.release(task.id, {
+        by: opts.by,
+        ...(finishedHandOver ? { force: true } : {}),
+        ...(opts.harnessRun !== undefined ? { harnessRun: opts.harnessRun } : {}),
+        ...(opts.source !== undefined ? { source: opts.source } : {}),
+        reason: "released by lore done",
+      });
+      if (released.ok) task = released.value;
+      else claimReleaseFailure = describeLoreError(released.error);
+    }
+
     // spec-archiving-the-work-that-resolves-a-defect-report-closes D1/D4 — post-commit, never fatal: the
     // walk above is already committed, the step returns lines rather than an error.
     // spec-github-owns-issue-report-state-no-mirror-task-work-carries AC-GS-8 — a task carrier's
@@ -4898,16 +5251,23 @@ export class TaskWorkflowService {
     const issueClose =
       this.archiveIssueClosePort === undefined ? undefined : await this.archiveIssueClosePort.onArchived(task, opts.by);
 
+    // reason: AC-DCS2-11 — the archive that leaves a plan with no non-terminal task is the one that starts the plan's close, after the
+    // transaction of the archive and the cleanup above. The trigger only starts a detached batch and returns; a non-last archive
+    // (`planFact` undefined or a membership disagreement) starts nothing.
+    const planCloseStart =
+      this.planCloseTrigger !== undefined && opts.deferPlanClose !== true && (planFact?.kind === "fully_terminal" || planFact?.kind === "fully_terminal_with_empty_phases")
+        ? await this.planCloseTrigger.afterLastArchive(planFact.plan_slug)
+        : undefined;
+
     return ok({
       task,
       already_done: false,
       transitions,
+      ...(planCloseStart !== undefined ? { plan_close_start: planCloseStart } : {}),
       worktree_outcomes: worktreeOutcomes,
       ...(commitRangeNote(task.extra) !== undefined ? { commit_range_note: commitRangeNote(task.extra) as string } : {}),
-      ...(removedTestAnchors.length > 0 ? { removed_test_anchors: removedTestAnchors } : {}),
-      ...(supersession !== undefined && supersession.superseded.length > 0
-        ? { superseded_scope: [...supersession.superseded] }
-        : {}),
+      ...(removed.length > 0 ? { removed_oracles: removed } : {}),
+      ...(claimReleaseFailure !== undefined ? { claim_release_failure: claimReleaseFailure } : {}),
       ...(issueClose !== undefined ? { issue_close: issueClose } : {}),
       ...(landing.unrecoverable !== undefined ? { unrecoverable_claims: landing.unrecoverable } : {}),
       ...(planFact?.kind === "fully_terminal"
@@ -4989,7 +5349,7 @@ export class TaskWorkflowService {
    * @returns the slugs of the tasks that now carry the landing (empty: no task claimed the branch).
    */
   async recordLanding(request: LandingRequest, now: () => string = defaultNow): Promise<Result<string[], LoreError>> {
-    const { base_from_claim: baseFromClaim, ...landing } = request;
+    const { only, ...landing } = request;
     const tasksResult = await this.store.findMany({ type: "task" });
     if (!tasksResult.ok) return tasksResult;
     const auditResult = await this.store.queryAudit({ action: "claim" });
@@ -5003,10 +5363,15 @@ export class TaskWorkflowService {
     for (const task of tasksResult.value) {
       // reason: BR-1336 — a finished task is never rewritten by a later landing of a branch it once claimed.
       if (task.status === "archived" || task.status === "deprecated") continue;
+      // reason: AC-DCS2-1 — a caller that selected its tasks (integrate, with its oracle run) records the landing on exactly those.
+      if (only !== undefined && !only.includes(task.slug)) continue;
       const rows = auditResult.value.filter((row) => row.doc_id === task.id);
       // reason: BR-1348 — the tasks of a branch are those claimed on it AND every task of a plan whose declared
       // integration branch it is (the own-diff judgment at integrate judged the branch against exactly these).
+      // reason: D44 (AC-DCS2-1) — a caller that selected its tasks already applied the ONE selection rule (claimed on the branch, or
+      // its recorded work tip is inside the branch), so a task merged in through another branch is not re-filtered by claim names.
       const ofBranch =
+        only !== undefined ||
         isTaskOfIntegrationBranch(task, integrationBranches, landing.branch) ||
         (await this.landingCandidateNames(rows, task)).includes(landing.branch);
       if (!ofBranch) continue;
@@ -5017,24 +5382,9 @@ export class TaskWorkflowService {
         slugs.push(task.slug);
         continue;
       }
-      // reason: BR-1336/BR-1372 — a branch found already on main has no merge of this call to measure; the range starts where
-      // main stood before the merge that brought the branch head onto it ({@link LandingGitFacts.landingStartOf}), a fact of
-      // history that no claim or re-claim can move. Never the claim's base_sha (a re-claim at the branch head made it the tip).
-      // A branch that reached main without a merge has no such start: a failure naming the task, never a guess.
-      let mainBefore = landing.main_before;
-      if (baseFromClaim === true) {
-        const start = this.landingFacts().landingStartOf(landing.landing_commit);
-        if (!start.ok) {
-          firstFailure ??= {
-            code: "VALIDATION_ERROR",
-            field: "extra.landing.main_before",
-            message: `${task.slug}: the landing range of ${landing.branch} has no measurable start (${start.reason})`,
-            value: task.slug,
-          };
-          continue;
-        }
-        mainBefore = start.value;
-      }
+      // reason: D44 (BR-1336, BR-1372, BR-1496) — the range start is the one the caller measured (`landing.main_before`, the first
+      // parent of the landing commit): a fact of main's history that no claim or re-claim can move. No claim-derived start exists.
+      const mainBefore = landing.main_before;
       // reason: the landing carries what the one predicate measures (kind, start, tip) — `kind` comes from {@link landingOf}
       // over this branch's facts and nowhere else, so integrate, `lore done`, get and the reviews read one answer. A task whose
       // start was never recorded, or whose branch landingOf cannot call landed, is a failure naming the task (nothing guessed).
@@ -5070,13 +5420,17 @@ export class TaskWorkflowService {
         doc: task,
         // a re-landing replaces `landing` (singular) but the replaced one is appended to `landing_history`, so nothing is lost
         patch: {
-          extra: {
-            ...task.extra,
-            landing: record,
-            ...(task.extra["landing"] !== undefined
-              ? { landing_history: [...(Array.isArray(task.extra["landing_history"]) ? task.extra["landing_history"] : []), task.extra["landing"]] }
-              : {}),
-          },
+          // reason: AC-DCS2-14 — the `landed` entry rides the write of the landing record it describes.
+          extra: withExecutionLogEntries(
+            {
+              ...task.extra,
+              landing: record,
+              ...(task.extra["landing"] !== undefined
+                ? { landing_history: [...(Array.isArray(task.extra["landing_history"]) ? task.extra["landing_history"] : []), task.extra["landing"]] }
+                : {}),
+            },
+            [{ kind: "landed", at: nowIso, branch: landing.branch, tip: verdict.tip, landing_commit: landing.landing_commit, commit_range: `${mainBefore}..${landing.landing_commit}` }],
+          ),
         },
         action: "update",
         changeSummary: `lore integrate: recorded the landing of ${landing.branch} (${landing.landing_commit.slice(0, 12)})`,
@@ -5408,6 +5762,57 @@ export class TaskWorkflowService {
   }
 
   /**
+   * Appends `paths` to the write set of the task's held claim (the edit-time declare, AC-DCS1-12): one corpus write, one version
+   * and one audit row, naming the caller. The task's `file_anchors` are never touched, so the 50-anchor cap bounds approved
+   * anchors only and a write set has no count cap. A claim that declared no write set starts from the task's approved anchors.
+   *
+   * @param idOrSlug - Task document ULID or slug
+   * @param paths - repo-relative entries (anchor grammar)
+   * @param opts - `{ by, source? }`
+   * @returns The updated task DocRecord
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / no held claim / bad entry), STALE_VERSION
+   */
+  async addToWriteSet(
+    idOrSlug: string,
+    paths: readonly string[],
+    opts: AnchorMutationOpts,
+    now: () => string = defaultNow,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const startMs = Date.now();
+    const result = await this._addToWriteSetImpl(idOrSlug, paths, opts.by, now);
+    this.recordEvent("task.anchors_updated", startMs, result, opts.source, { count: paths.length });
+    return result;
+  }
+
+  private async _addToWriteSetImpl(
+    idOrSlug: string,
+    paths: readonly string[],
+    by: string,
+    now: () => string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const taskResult = await this.resolveTask(idOrSlug);
+    if (!taskResult.ok) return taskResult;
+    const task = taskResult.value;
+    const claim = extractHeldClaim(task);
+    if (claim === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.claim",
+        message: `Task "${task.slug}" holds no claim, so it has no write set to extend (\`lore claim ${task.slug} --worktree <branch>\`).`,
+        value: task.slug,
+      });
+    }
+    const merged = normalizeWriteSet([...(claim.write_set ?? extractFileAnchors(task)), ...paths]);
+    if (!merged.ok) return merged;
+    const nowIso = now();
+    const newExtra: Record<string, unknown> = { ...task.extra, claim: { ...claim, write_set: merged.value } };
+    return this.writeTaskExtra(task, newExtra, nowIso, by, `Write set of the claim extended by ${paths.join(", ")}`, "anchors", {
+      by,
+      write_set_added: [...paths],
+    });
+  }
+
+  /**
    * Read-modify-write DIFFERENCE: removes `anchors` from the task's existing
    * `file_anchors` (the `lore anchor rm` command, D3). `anchors` is itself
    * normalized before comparison (so `"./src/a"` matches a stored `"src/a"`) —
@@ -5697,56 +6102,6 @@ export class TaskWorkflowService {
       `Recorded governing spec ${spec.slug} by ${opts.by}`,
       "update",
       { by: opts.by, governing_spec: spec.id },
-    );
-  }
-
-  // ── Red-First Declaration (task-red-first-discipline-is-asked-for-in-prose-but-never) ──
-
-  /**
-   * Declares that `idOrSlug`'s tests were written RED FIRST — sets
-   * `extra.red_first: true`. `done()` (see its own JSDoc) then demands ≥1
-   * `"expected-fail"`/`"fail"` evidence row on this task, ALONGSIDE the
-   * pre-existing `result: "pass"` floor, before it may archive.
-   *
-   * This is the ONLY writer for `extra.red_first` — deliberately no
-   * create-time `lore create task --red-first` flag (the claim is typically
-   * made AFTER a task already exists, once its tests are actually written —
-   * exactly the ordering `lore red-first <task>` supports) and deliberately
-   * no `lore set --red-first` (wholesale `extra` replace, the same reason
-   * `file_anchors`/`ac_scope`/`claim`/`verification_evidence` each have a
-   * dedicated writer instead).
-   *
-   * Read-modify-write via {@link writeTaskExtra} — every sibling `extra` key
-   * (`claim`/`verification_evidence`/`ac_scope`/`file_anchors`) survives
-   * byte-identical. Idempotent: declaring on an already-`true` task is a
-   * normal successful write (still `red_first: true`, one more version/audit
-   * row), never an error.
-   *
-   * @param idOrSlug - Task document ULID or slug
-   * @param opts - `{ by, source? }`
-   * @param now - Time seam (D10)
-   * @returns The updated task DocRecord
-   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task), STALE_VERSION
-   */
-  async declareRedFirst(
-    idOrSlug: string,
-    opts: AnchorMutationOpts,
-    now: () => string = defaultNow,
-  ): Promise<Result<DocRecord, LoreError>> {
-    const taskResult = await this.resolveTask(idOrSlug);
-    if (!taskResult.ok) return taskResult;
-    const task = taskResult.value;
-
-    const nowIso = now();
-    const newExtra: Record<string, unknown> = { ...task.extra, red_first: true };
-    return this.writeTaskExtra(
-      task,
-      newExtra,
-      nowIso,
-      opts.by,
-      `Declared red-first test discipline by ${opts.by}`,
-      "update",
-      { by: opts.by, red_first: true },
     );
   }
 
@@ -6134,9 +6489,12 @@ export class TaskWorkflowService {
     const anyoneDeclaresAnchors = tasks.some((t) => extractFileAnchors(t).length > 0);
     const anchorConflicts: AnchorConflict[] = [];
     const anchorlessSlugs = new Set<string>();
+    const finishedProbe = this.finishedProbe();
 
     for (const task of tasks) {
-      const taskAnchors = extractFileAnchors(task);
+      // reason: AC-DCS1-10 — overlap is judged on write sets (the claim's declared set, else the approved anchors), the SAME
+      // function the claim gate's sibling context calls. The anchorless advisory below still asks about approved anchors.
+      const taskAnchors = effectiveWriteSet(task);
       const taskClaim = extractHeldClaim(task);
 
       if (taskAnchors.length > 0) {
@@ -6145,6 +6503,8 @@ export class TaskWorkflowService {
           const otherClaim = extractHeldClaim(other);
           if (otherClaim === undefined) continue;
           if (staleByTask.get(other.id) ?? isClaimStale(otherClaim, nowIso, this.claimTtlMinutes)) continue;
+          // reason: AC-DCS1-18 — the same fold rule as the claim gate's sibling context (`applyEffectiveSiblingStaleness`).
+          if (siblingFinishedAndFolded(other, task, finishedProbe)) continue;
           // reason: BR-1056 — same holder means same RUN. Two runs that share a derived name are TWO holders and
           // stay reported; a lease or claim with no run is nobody's and stays reported too.
           const sameHolder =
@@ -6154,7 +6514,7 @@ export class TaskWorkflowService {
               buildClaimParty({ by: taskClaim.by, harnessRun: (taskClaim.harness_run ?? null) as RunId | null }),
             ).kind === "refresh";
           if (sameHolder) continue;
-          const otherAnchors = extractFileAnchors(other);
+          const otherAnchors = effectiveWriteSet(other);
           if (otherAnchors.length === 0) continue;
           const overlap = anchorsOverlap(taskAnchors, otherAnchors);
           if (overlap.overlaps) {
@@ -6169,7 +6529,7 @@ export class TaskWorkflowService {
 
       if (
         anyoneDeclaresAnchors &&
-        taskAnchors.length === 0 &&
+        extractFileAnchors(task).length === 0 &&
         taskClaim !== undefined &&
         !(staleByTask.get(task.id) ?? isClaimStale(taskClaim, nowIso, this.claimTtlMinutes))
       ) {
@@ -6222,6 +6582,7 @@ export class TaskWorkflowService {
     task: DocRecord,
     actionLabel: string,
     callerCwd: string | undefined,
+    refuseUninspectable = false,
   ): LoreError | null {
     const claim = readClaimRecord(task);
     const worktree = claim?.worktree;
@@ -6235,6 +6596,21 @@ export class TaskWorkflowService {
     }
 
     const check = measureWorktreeCleanliness(worktree);
+    // reason: BR-144 — a recorded worktree that exists but whose git state cannot be read is refused, never released as if clean.
+    // A relative value is a branch name (nothing to measure), and a vanished path has nothing left to lose: both release.
+    if (refuseUninspectable && check.status === "not-measured-not-a-repo" && isAbsolute(worktree)) {
+      const cause = describeInspectionFailure(worktree);
+      return {
+        code: "VALIDATION_ERROR",
+        field: "worktree-uninspectable",
+        message:
+          `worktree-uninspectable: ${actionLabel} for task "${task.slug}" — its claim's recorded worktree "${worktree}" exists but its git state ` +
+          `cannot be read (${cause}), so uncommitted work cannot be ruled out. The claim stays held; repair the worktree ` +
+          `(or remove it) and release again.`,
+        value: { refusal: "worktree-uninspectable", worktree, cause },
+        rule: "BR-144",
+      };
+    }
     if (check.status !== "measured-dirty") return null;
 
     const ranked = rankDirtyPathsByAnchors(check.paths, extractFileAnchors(task));
@@ -6370,6 +6746,7 @@ export class TaskWorkflowService {
     task: DocRecord,
     opts: ClaimOpts,
     nowIso: string,
+    declaredWriteSet: readonly string[] | undefined,
   ): Promise<Result<void, LoreError>> {
     if (this.gate === undefined) {
       return ok(undefined);
@@ -6385,10 +6762,18 @@ export class TaskWorkflowService {
     }
 
     const by = opts.by;
+    // reason: AC-DCS1-10 — the candidate is judged on the write set the claim being taken will hold: the declared one, else the
+    // one a same-run refresh keeps, else every approved anchor.
+    const existingClaim = readClaimRecord(task);
+    const keptByRefresh =
+      existingClaim?.write_set !== undefined && existingClaim.harness_run != null && existingClaim.harness_run === (opts.harnessRun ?? null)
+        ? existingClaim.write_set
+        : undefined;
+    const candidateWriteSet = declaredWriteSet ?? keptByRefresh ?? extractFileAnchors(task);
     let ctx: ReturnType<typeof buildUpstreamSpecContext> &
       Partial<ReturnType<typeof buildAnchorGateContext>>;
     if (task.parent_id === null) {
-      const anchorCtx = await this.buildAnchorGateContext(by, task, [], nowIso);
+      const anchorCtx = await this.buildAnchorGateContext(by, task, [], nowIso, candidateWriteSet);
       if (!anchorCtx.ok) return anchorCtx;
       ctx = { ...buildUpstreamSpecContext(undefined), ...anchorCtx.value };
     } else {
@@ -6397,11 +6782,11 @@ export class TaskWorkflowService {
         if (!isNonPlanParentError(bundleResult.error)) return bundleResult;
         const siblingsResult = await this.findAdhocSiblingTasks();
         if (!siblingsResult.ok) return siblingsResult;
-        const anchorCtx = await this.buildAnchorGateContext(by, task, siblingsResult.value, nowIso);
+        const anchorCtx = await this.buildAnchorGateContext(by, task, siblingsResult.value, nowIso, candidateWriteSet);
         if (!anchorCtx.ok) return anchorCtx;
         ctx = { ...buildUpstreamSpecContext(undefined), ...anchorCtx.value };
       } else {
-        const anchorCtx = await this.buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso);
+        const anchorCtx = await this.buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, candidateWriteSet);
         if (!anchorCtx.ok) return anchorCtx;
         ctx = { ...buildUpstreamSpecContext(bundleResult.value.spec), ...anchorCtx.value };
       }
@@ -6435,13 +6820,14 @@ export class TaskWorkflowService {
     task: DocRecord,
     siblings: readonly DocRecord[],
     nowIso: string,
+    candidateWriteSet?: readonly string[],
   ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>> {
-    return buildEffectiveAnchorGateContext(this.store, by, task, siblings, nowIso, this.claimTtlMinutes);
+    return buildEffectiveAnchorGateContext(this.store, by, task, siblings, nowIso, this.claimTtlMinutes, candidateWriteSet, this.finishedProbe());
   }
 
   /** {@link claimIsLive} bound to this service's store and TTL (BR-1493's "live claim" for `lore anchor scope --all`). */
   isClaimLive(task: DocRecord, nowIso: string, endedRuns: Map<string, boolean>): Promise<Result<boolean, LoreError>> {
-    return claimIsLive(this.store, task, nowIso, this.claimTtlMinutes, endedRuns);
+    return claimIsLive(this.store, task, nowIso, this.claimTtlMinutes, endedRuns, (held) => this.measureClaimTip(held));
   }
 
   /**
@@ -6537,22 +6923,8 @@ export class TaskWorkflowService {
    * `corpus-service.ts` for why the versions-row action and the audit-entry action can
    * diverge under this exact-version join.
    *
-   * `escapes.overrideReason` (adr-lore-done-requires-a-runner-attested-pass-the-sixth-
-   * false) — present iff this `done()` call used the audited attestation-floor escape
-   * hatch; merged verbatim onto EVERY step's audit `details` this call produces as
-   * `override_reason` + `attestation_overridden: true`, so a multi-step walk
-   * (draft -> approved -> active -> archived) leaves the justification attached to
-   * each individual audited step, not just the first. `undefined` (the common case —
-   * an attested pass already satisfied the floor) adds neither key.
-   *
-   * `escapes.noNewTestsReason` (task-a-non-empty-output-tail-can-be-hand-authored-
-   * prose-and-the) — the SAME per-step, every-step persistence, independent of
-   * `overrideReason` (a walk can carry both, either, or neither key set, since the
-   * two floors are evaluated independently in `_doneImpl`): present iff this call
-   * used the audited no-new-tests escape hatch, merged onto every step's audit
-   * `details` as `no_new_tests_reason` + `no_new_tests_declared: true`. `undefined`
-   * (the common case — no `ac_scope` KEY at all, an opted-in red_first claim, or a
-   * genuine red evidence row already satisfied the floor) adds neither key.
+   * `escapes.removedOracles` (AC-DCS1-30) — the test-file oracles this task's landing deleted; they are written to
+   * `done_contract.removed_oracles` in this same write (the first step of the walk).
    */
   private async writeTaskStatus(
     task: DocRecord,
@@ -6560,11 +6932,36 @@ export class TaskWorkflowService {
     nowIso: string,
     actor: string,
     changeSummary: string,
-    escapes: { overrideReason?: string; noNewTestsReason?: string; reason?: string; landing?: Record<string, unknown> } = {},
+    escapes: { reason?: string; landing?: Record<string, unknown>; removedOracles?: DoneContractRemovedOracle[] } = {},
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: the landing and the removed oracles ride the same write as the status (one CAS), so a rival closer cannot see one without the other.
+    let extraPatch: Record<string, unknown> = { ...task.extra };
+    // reason: AC-DCS2-14 — the log entries of what this write records ride the SAME write (one CAS, no entry without its event).
+    const logged: ExecutionLogEntry[] = [];
+    if (escapes.landing !== undefined) {
+      extraPatch["landing"] = escapes.landing;
+      const branch = escapes.landing["branch"];
+      const tip = escapes.landing["tip"];
+      const landingCommit = escapes.landing["landing_commit"];
+      const alreadyLogged = readExecutionLog(task.extra).some((entry) => entry.kind === "landed" && entry.landing_commit === landingCommit);
+      if (typeof branch === "string" && typeof tip === "string" && typeof landingCommit === "string" && !alreadyLogged) {
+        const before = escapes.landing["main_before"];
+        logged.push({ kind: "landed", at: nowIso, branch, tip, landing_commit: landingCommit, commit_range: `${typeof before === "string" ? before : tip}..${landingCommit}` });
+      }
+    }
+    if (escapes.removedOracles !== undefined) {
+      const contract = this.readStoredContract(task);
+      if (!contract.ok) return contract;
+      extraPatch["done_contract"] = { ...contract.value, removed_oracles: escapes.removedOracles };
+      for (const gone of escapes.removedOracles) {
+        logged.push({ kind: "removed-oracle", at: nowIso, oracle: gone.id, path: gone.path, reason: gone.reason, landed_commit: gone.landed_commit });
+      }
+    }
+    if (logged.length > 0) extraPatch = withExecutionLogEntries(extraPatch, logged);
     const written = await this.writer.writeDoc({
       doc: task,
-      patch: { status: newStatus, ...(escapes.landing !== undefined ? { extra: { ...task.extra, landing: escapes.landing } } : {}) },
+      patch: { status: newStatus, ...(escapes.landing !== undefined || escapes.removedOracles !== undefined ? { extra: extraPatch } : {}) },
+      // (extraPatch carries the log entries of this write)
       action: "update",
       changeSummary,
       auditAction: "update",
@@ -6573,12 +6970,6 @@ export class TaskWorkflowService {
         status_from: task.status,
         status_to: newStatus,
         done: true,
-        ...(escapes.overrideReason !== undefined
-          ? { override_reason: escapes.overrideReason, attestation_overridden: true }
-          : {}),
-        ...(escapes.noNewTestsReason !== undefined
-          ? { no_new_tests_reason: escapes.noNewTestsReason, no_new_tests_declared: true }
-          : {}),
         ...(escapes.reason !== undefined ? { reason: escapes.reason } : {}),
         ...(escapes.landing !== undefined ? { landing: escapes.landing } : {}),
       },

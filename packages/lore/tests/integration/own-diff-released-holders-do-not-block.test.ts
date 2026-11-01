@@ -44,8 +44,8 @@ describe("BR-1346 — a released holder never blocks another branch's landing", 
     const f = new OwnDiffFixture();
     fx = f;
     f.commitOnMain({ "src/shared.ts": shared(1, 1) }, "base");
-    const t1 = f.createTask("R1", ["src/shared.ts"]);
-    const t2 = f.createTask("R2", ["src/shared.ts"]);
+    const t1 = f.createTask("R1", ["src/shared.ts"], "code");
+    const t2 = f.createTask("R2", ["src/shared.ts"], "code");
     f.makeBranch("rel-1", { "src/shared.ts": shared(10, 1) });
     f.makeBranch("rel-2", { "src/shared.ts": shared(1, 20) });
     // sequential, as real sessions work: the claim gate itself refuses a second claim while the first is held
@@ -66,8 +66,8 @@ describe("BR-1346 — a released holder never blocks another branch's landing", 
     const f = new OwnDiffFixture();
     fx = f;
     f.commitOnMain({ "src/shared.ts": shared(1, 1) }, "base");
-    const holder = f.createTask("Holder", ["src/shared.ts"]);
-    const mine = f.createTask("Mine", ["src/other.ts"]);
+    const holder = f.createTask("Holder", ["src/shared.ts"], "code");
+    const mine = f.createTask("Mine", ["src/other.ts"], "code");
     f.makeBranch("holder-b", { "h.txt": "h\n" });
     f.makeBranch("mine-b", { "src/shared.ts": shared(5, 1) });
     claimOn(f, holder, "holder-b");
@@ -85,9 +85,9 @@ describe("BR-1346 — a released holder never blocks another branch's landing", 
     const f = new OwnDiffFixture();
     fx = f;
     f.commitOnMain({ "packages/x/a.ts": "export const a = 1;\n", "packages/x/b.ts": "export const b = 1;\n" }, "base");
-    const holder = f.createTask("DirHolder", ["packages/x/"]);
-    const onB = f.createTask("OnB", ["src/ob.ts"]);
-    const onA = f.createTask("OnA", ["src/oa.ts"]);
+    const holder = f.createTask("DirHolder", ["packages/x/"], "code");
+    const onB = f.createTask("OnB", ["src/ob.ts"], "code");
+    const onA = f.createTask("OnA", ["src/oa.ts"], "code");
     f.makeBranch("dir-holder", { "packages/x/a.ts": "export const a = 2;\n" });
     f.makeBranch("touch-b", { "packages/x/b.ts": "export const b = 2;\n" });
     f.makeBranch("touch-a", { "packages/x/a.ts": "export const a = 3;\n" });

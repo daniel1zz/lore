@@ -129,6 +129,7 @@ import type { AbandonmentPlan } from "./rule-landing-port.js";
 import { findSpecChildPlans, findSpecEvidenceTasks, findTasksUnderPlans } from "./spec-evidence-tasks.js";
 import { resolveDoc } from "./resolve.js";
 import type { RecordLockService } from "./record-lock-service.js";
+import type { ExecutionLogPort } from "./execution-log-service.js";
 import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
 import { findPlanClaimedByWriter } from "./run-claimed-plan.js";
 import { buildRuleIndex, citeWarnings, type CiteWarning } from "./ac-citations.js";
@@ -242,6 +243,20 @@ export interface SetCriterionPatch {
    * candidate through; it is never itself validated here.
    */
   falsifier?: unknown;
+}
+
+/**
+ * Mark a falsifier candidate as naming a symbol the task has yet to create (`--falsifier-new-symbol`,
+ * AC-DCS1-3). Pure; the single place the `new_symbol` key is written, shared by `ac add` and `ac set`.
+ *
+ * @param falsifier - the shaped candidate from the CLI (`undefined` when no `--falsifier-*` flag was passed)
+ * @param newSymbol - whether `--falsifier-new-symbol` was passed
+ * @returns the candidate with `new_symbol: true` merged in when marked; otherwise the candidate untouched, so an
+ *   unmarked falsifier never carries the key (and a `set` without the flag replaces the object and so clears it).
+ */
+export function markFalsifierNewSymbol(falsifier: unknown, newSymbol: boolean): unknown {
+  if (falsifier === undefined || typeof falsifier !== "object" || falsifier === null) return falsifier;
+  return { ...falsifier, ...(newSymbol ? { new_symbol: true } : {}) };
 }
 
 // ─── D8 Declaration-Time Path-Existence Check ──────────────────────────────
@@ -1011,7 +1026,37 @@ export class AcService {
       ...(citeAudit !== undefined ? { auditDetails: citeAudit.value } : {}),
     });
     if (!writeResult.ok) return writeResult;
+    if (correction !== undefined) {
+      const logged = await this.logSuperseded(spec.slug, acId, correction.reason.trim(), "correction");
+      if (!logged.ok) return logged;
+    }
     return ok(parsed.data);
+  }
+
+  /**
+   * Wires the execution log (AC-DCS2-14): a correction or supersede of a criterion appends a `superseded` entry to every task whose
+   * ac_scope holds it. Set by `app.ts`; a bare construction (a unit test) has none and appends nothing.
+   */
+  attachExecutionLog(port: ExecutionLogPort): void {
+    this.executionLog = port;
+  }
+
+  private executionLog: ExecutionLogPort | undefined;
+
+  /**
+   * Appends the `superseded` entries AFTER the spec write that made them true. A failure is returned (never swallowed): the spec
+   * write stands, and the message says which tasks may lack the entry.
+   */
+  private async logSuperseded(specSlug: string, acId: string, reason: string, via: "correction" | "supersede"): Promise<Result<void, LoreError>> {
+    if (this.executionLog === undefined) return ok(undefined);
+    const logged = await this.executionLog.recordSuperseded(specSlug, acId, reason, via);
+    if (logged.ok) return ok(undefined);
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "execution_log",
+      message: `The ${via} of ${acId} was written, but its execution-log entry could not be appended to every task holding it: ${"message" in logged.error ? logged.error.message : logged.error.code}. The log is never edited by hand; report this failure.`,
+      value: acId,
+    });
   }
 
   // ── supersedeCriterion ────────────────────────────────────────────────────
@@ -1118,6 +1163,8 @@ export class AcService {
       auditDetails: { superseded_by: { spec: superseding.value.id, ac: by.ac, reason: trimmedReason } },
     });
     if (!written.ok) return written;
+    const logged = await this.logSuperseded(spec.slug, acId, trimmedReason, "supersede");
+    if (!logged.ok) return logged;
     return ok(parsed.data);
   }
 

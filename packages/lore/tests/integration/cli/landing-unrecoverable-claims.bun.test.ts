@@ -1,4 +1,10 @@
 // @spawns packages/lore/src/index.ts
+// @spawns-external git builds the throwaway repository and its linked worktrees
+/**
+ * Done-contract model (this file's tasks are `code` tasks approved with a contract, landed by a landing record): the retired
+ * no-change landing and the no-branch claim are gone, so each case claims on a branch and lands it (`support/land-task.ts`). A
+ * landed task is judged by its landing record, so a tipless legacy claim only blocks while the fresh claim's branch is unlanded.
+ */
 /**
  * @spec_ref spec-claims-released-before-tips-were-recorded-are-classified  AC-UC-1 (a)-(f)
  * @task task-classify-released-pre-356-claims-without-a-tip-as (TDD-Role: red then green)
@@ -15,13 +21,15 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { execFileSync } from "child_process";
 import { Database } from "bun:sqlite";
 import { join } from "path";
 import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../../helpers/clean-tree-repo.js";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { landTask, recordContractPasses, type TaskWorld } from "../support/land-task.js";
+import { landWithoutIntegrate } from "../../helpers/done-contract-land.js";
 import { auditBindings, INSERT_AUDIT_SQL, SELECT_AUDIT_HEAD_SQL } from "../../../src/store/migrations/migration-028.js";
 
 interface RunResult {
@@ -71,15 +79,59 @@ let taskCounter = 0;
 function relaxPlanGates(root: string): void {
   patchLoreConfig(
     root,
-    ["workflow:", "  gates:", '    "plan-close":', "      enabled: false", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"', ""].join("\n"),
+    [
+      "workflow:", "  gates:", '    "plan-close":', "      enabled: false", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"',
+      // approve compiles each task's contract from these commands (a code task needs all three)
+      "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"', "",
+    ].join("\n"),
   );
 }
 
-function createTask(root: string, title: string, parent: string): string {
+/**
+ * An approved task: `corpus` (commitless work, finished by `lore finish` at main's head) unless `kind` says `code` (it has a branch).
+ * A code task's red run is waived: it is not this file's subject.
+ */
+function createTask(root: string, title: string, parent: string, kind: "corpus" | "code" = "corpus", approved = true): string {
   taskCounter += 1;
-  return parseSlug(
-    mustRun(["create", "task", "--title", `${title} ${taskCounter}`, "--parent", parent, "--plan-id", parent, "--content", "x", "--no-ai", "--ac-scope", ""], root),
+  const task = parseSlug(
+    mustRun(["create", "task", "--kind", kind, "--title", `${title} ${taskCounter}`, "--parent", parent, "--plan-id", parent, "--content", "x", "--no-ai", "--ac-scope", ""], root),
   );
+  // reason: approve compiles the contract at a commit of the repository, so a corpus outside any repository stays a draft
+  if (approved) mustRun(kind === "code" ? ["approve", task, "--red-waiver", "the red run is not the subject of this test"] : ["approve", task], root);
+  return task;
+}
+
+/**
+ * Takes the approved CODE task through a real claim on its own branch, one commit, the landing record and a runner pass for every
+ * contract oracle, so `lore done` reaches the landing judgement over the claims (the legacy ones included).
+ */
+async function claimAndLand(task: string, branch: string, stage: "claimed" | "landed" = "landed"): Promise<void> {
+  mkdirSync(join(dir, ".claude", "wt"), { recursive: true });
+  await landTask(world(), {
+    slug: task,
+    branch,
+    worktree: join(dir, ".claude", "wt", branch),
+    claimValue: "branch",
+    session: "uc",
+    approve: false,
+    land: stage === "landed",
+  });
+}
+
+function world(): TaskWorld {
+  return { dir, git: (args) => git([...args], dir), lore: (args) => runLore([...args], dir) };
+}
+
+/** The rest of {@link claimAndLand} for a task left `claimed`: one commit on its branch, the landing record, a pass for every oracle. */
+async function landClaimed(task: string, branch: string): Promise<void> {
+  const wt = join(dir, ".claude", "wt", branch);
+  git(["config", "user.email", "fixture@example.invalid"], wt);
+  git(["config", "user.name", "fixture"], wt);
+  writeFileSync(join(wt, `${branch}.txt`), `${branch}\n`);
+  git(["add", "-A"], wt);
+  git(["commit", "-q", "-m", `own commit ${branch}`], wt);
+  await landWithoutIntegrate({ dir, git: (args) => git([...args], dir) }, branch);
+  await recordContractPasses(world(), task, "uc");
 }
 
 /** A PRD and an approved plan in `root`, returning the plan's slug. */
@@ -90,8 +142,12 @@ function createPlan(root: string): string {
   return plan;
 }
 
-function capturePass(task: string, cwd: string): RunResult {
-  return runLore(["evidence", task, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"], cwd);
+/** A runner pass of every oracle of a CODE task's stored contract, taken inside its worktree. */
+function captureContractPasses(task: string, cwd: string): void {
+  const view = JSON.parse(mustRun(["get", task, "--json"], dir)) as { data: { doc: { extra: { done_contract: { oracles: { id: string; command: string }[] } } } } };
+  for (const oracle of view.data.doc.extra.done_contract.oracles) {
+    mustRun(["evidence", task, "--oracle", "test", "--command", oracle.command, "--result", "pass", "--capture"], cwd);
+  }
 }
 
 function withDb<T>(root: string, fn: (db: Database) => T): T {
@@ -165,16 +221,24 @@ afterEach(() => {
 });
 
 describe("AC-UC-1 (a) a released tipless branch claim is classified once and landing judges the measurable claim", () => {
-  it("AC-UC-1 (a) refuses unmeasurable before migration 040, then closes exit 0 listing the unrecoverable claim with its count", () => {
-    const task = createTask(dir, "Legacy then fresh", planSlug);
+  it("AC-UC-1 (a) refuses unmeasurable before migration 040, then closes exit 0 listing the unrecoverable claim with its count", async () => {
+    const task = createTask(dir, "Legacy then fresh", planSlug, "code");
     seedLegacyClaim(dir, task, "legacy-gone", LEGACY_AT);
-    mustRun(["claim", task], dir); // fresh no-branch claim
-    expect(capturePass(task, dir).exitCode).toBe(0); // clean pass at main's head
+    await claimAndLand(task, "uc-a", "claimed"); // fresh claim on a branch; its work lands after the migration
+    const aWt = join(dir, ".claude", "wt", "uc-a");
+    git(["config", "user.email", "fixture@example.invalid"], aWt);
+    git(["config", "user.name", "fixture"], aWt);
+    writeFileSync(join(aWt, "uc-a-early.txt"), "early\n");
+    git(["add", "-A"], aWt);
+    git(["commit", "-q", "-m", "early work"], aWt); // a commit not on main: the landing judgement is reached
+    captureContractPasses(task, aWt); // a clean pass at the branch head
 
-    const refused = runLore(["done", task, "--declare-no-new-tests", "read-only"], dir);
+    const refused = runLore(["done", task], dir);
     expect(refused.exitCode).toBe(4);
     expect(refused.text).toContain("[floor: not-landed]");
-    expect(refused.text).toContain("unmeasurable");
+    // the unlanded branch of the fresh claim refuses first, and the tipless legacy claim is one of the claims the refusal names
+    expect(refused.text).toContain("legacy-gone");
+    expect(refused.text).toContain("tip-not-on-main");
 
     rewindToSchema39(dir);
     const migrated = migrate(dir);
@@ -191,24 +255,25 @@ describe("AC-UC-1 (a) a released tipless branch claim is classified once and lan
     expect(shownText).toContain("legacy-gone");
     expect(shownText).toContain("released before tips were recorded");
 
-    const done = runLore(["done", task, "--declare-no-new-tests", "read-only"], dir);
+    await landClaimed(task, "uc-a");
+    const done = runLore(["done", task], dir);
 
     expect(done.exitCode, done.text).toBe(0);
     expect(done.stdout).toContain("unrecoverable claims: 1 (legacy-gone)");
     const view = JSON.parse(mustRun(["get", task, "--json"], dir)) as { data: { doc: { status: string; extra: { landing?: { kind?: string } } } } };
     expect(view.data.doc.status).toBe("archived");
-    expect(view.data.doc.extra.landing?.kind).toBe("no-change");
+    expect(view.data.doc.extra.landing?.kind).toBe("commits"); // the fresh claim's branch carried a commit and was landed
   }, 300_000);
 });
 
 describe("AC-UC-1 (b) a claim made under the current schema is never marked", () => {
   it("AC-UC-1 (b) a claim with start_head whose branch is gone with no tip stays unmeasurable after migration 040", () => {
-    const task = createTask(dir, "Current schema claim", planSlug);
+    const task = createTask(dir, "Current schema claim", planSlug, "code");
     mkdirSync(join(dir, ".claude", "wt"), { recursive: true });
     const wt = join(dir, ".claude", "wt", "uc-b");
     git(["worktree", "add", "-q", "-b", "uc-b", wt, "main"], dir);
     mustRun(["claim", task, "--worktree", "uc-b"], dir);
-    expect(capturePass(task, wt).exitCode).toBe(0);
+    captureContractPasses(task, wt);
     git(["worktree", "remove", "--force", wt], dir);
     git(["branch", "-D", "uc-b"], dir);
     withDb(dir, (db) => {
@@ -220,7 +285,7 @@ describe("AC-UC-1 (b) a claim made under the current schema is never marked", ()
 
     rewindToSchema39(dir);
     expect(migrate(dir).exitCode).toBe(0);
-    const refused = runLore(["done", task, "--declare-no-new-tests", "read-only"], dir);
+    const refused = runLore(["done", task], dir);
 
     expect(unrecoverableRows(dir, task)).toHaveLength(0);
     expect(refused.exitCode).toBe(4);
@@ -254,13 +319,12 @@ describe("AC-UC-1 (c) migration 040 is idempotent", () => {
 
 describe("AC-UC-1 (d) a task whose only claim is unrecoverable has no measurable claim", () => {
   it("AC-UC-1 (d) lore done exits 4 [floor: not-landed] no-measurable-claim", () => {
-    const task = createTask(dir, "Only legacy claim", planSlug);
-    seedLegacyClaim(dir, task, "legacy-only", LEGACY_AT);
-    expect(capturePass(task, dir).exitCode).toBe(0); // the task holds no claim: an attested pass alone
+    const task = createTask(dir, "Only legacy claim", planSlug, "code");
+    seedLegacyClaim(dir, task, "legacy-only", LEGACY_AT); // the task holds no other claim
     rewindToSchema39(dir);
     expect(migrate(dir).exitCode).toBe(0);
 
-    const refused = runLore(["done", task, "--declare-no-new-tests", "read-only"], dir);
+    const refused = runLore(["done", task], dir);
 
     expect(refused.exitCode).toBe(4);
     expect(refused.text).toContain("[floor: not-landed]");
@@ -274,7 +338,7 @@ describe("AC-UC-1 (e) migration 040 reads no git", () => {
     try {
       mustRun(["init"], bare);
       relaxPlanGates(bare);
-      const task = createTask(bare, "No repository", createPlan(bare));
+      const task = createTask(bare, "No repository", createPlan(bare), "corpus", false);
       seedLegacyClaim(bare, task, "legacy-gone", LEGACY_AT);
       rewindToSchema39(bare);
 
@@ -290,25 +354,27 @@ describe("AC-UC-1 (e) migration 040 reads no git", () => {
 });
 
 describe("AC-UC-1 (f) an unrecoverable claim whose branch ref still holds unlanded work refuses", () => {
-  it("AC-UC-1 (f) exits 4 unrecoverable-claim-branch-unlanded naming the branch, then 0 once the tip is merged into main", () => {
-    const task = createTask(dir, "Legacy branch still alive", planSlug);
+  it("AC-UC-1 (f) exits 4 unrecoverable-claim-branch-unlanded naming the branch, then 0 once the tip is merged into main", async () => {
+    const task = createTask(dir, "Legacy branch still alive", planSlug, "code");
     seedLegacyClaim(dir, task, "legacy-live", LEGACY_AT);
     git(["branch", "legacy-live", commitOffMain()], dir);
-    mustRun(["claim", task], dir);
-    expect(capturePass(task, dir).exitCode).toBe(0);
+    await claimAndLand(task, "uc-f"); // the fresh claim's branch is landed with every contract oracle passed
     rewindToSchema39(dir);
     expect(migrate(dir).exitCode).toBe(0);
 
-    const refused = runLore(["done", task, "--declare-no-new-tests", "read-only"], dir);
+    const refused = runLore(["done", task], dir);
 
     expect(refused.exitCode).toBe(4);
     expect(refused.text).toContain("[floor: not-landed]");
     expect(refused.text).toContain("unrecoverable-claim-branch-unlanded");
     expect(refused.text).toContain("legacy-live");
 
-    git(["merge", "-q", "--ff-only", "legacy-live"], dir);
-    expect(capturePass(task, dir).exitCode).toBe(0); // main moved: a no-branch pass is bound to main's head
-    const landed = runLore(["done", task, "--declare-no-new-tests", "read-only"], dir);
+    // main reaches the legacy tip by a merge commit (main already moved when the fresh claim landed); the tree is unchanged, so every
+    // recorded pass still names the landed tree
+    git(["merge", "-q", "--no-edit", "legacy-live"], dir);
+    // reason: the shared checkout is a detached view of main; the shipped guard is not installed in this fixture, so the ref moves directly
+    git(["update-ref", "refs/heads/main", git(["rev-parse", "HEAD"], dir)], dir);
+    const landed = runLore(["done", task], dir);
 
     expect(landed.exitCode, landed.text).toBe(0);
     expect(landed.stdout).toContain("unrecoverable claims: 1 (legacy-live)");

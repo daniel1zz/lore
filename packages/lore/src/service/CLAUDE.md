@@ -34,7 +34,7 @@ Full pre-eviction file is archived verbatim: `lore get knowledge-module-claude-m
 - **Service per concern, no cross-service imports** — composition lives in `app.ts`. ⛔ *Service* = a store-holding class composed in `app.ts`; a store-less pure module (`plan-membership.ts`, `gate-predicates.ts`, `validity-service.ts`) is shared infrastructure and IS meant to be imported, never duplicated.
 - **`CorpusService` is the only service wired to shared `Telemetry`**; `TaskWorkflowService`/`PhaseWorkflowService` carry their OWN `Telemetry` DI (cross-service calls are forbidden, so they can't piggyback).
 - **Task/Phase workflow services write `extra.claim`/`extra.verification_evidence`/`status` directly via the store**, never through `CorpusService.update` — a bounded bypass. Shared `appendEvidenceEntry` also renews a same-holder claim's `at` in the SAME CAS write.
-- **`done()` walks `computeArchiveWalk`'s `VALID_TRANSITIONS` path behind FOUR INDEPENDENT floors** — attested-pass, red-first, unfiltered-test-run, declared-`ac_scope`-without-red. ⛔ None may mask another; every floor FAILS CLOSED; predicates live in `@lore/core`. SSOT: `spec-workflow-hardening-evidence-red-vocabulary-claim-worktree` §M3.
+- **`done()` walks `computeArchiveWalk`'s `VALID_TRANSITIONS` path behind INDEPENDENT floors judged on the stored done contract** (attested-pass, red-first, unfiltered-test-run, contract oracles). ⛔ None may mask another; every floor FAILS CLOSED; predicates live in `@lore/core`. The task flow `lore start`, `lore finish`, `lore land` (and `lore dispatch`) reads the same contract.
 - **Stable public types live beside their owning service** (`PendingDoc`, `Diff`, `MigrationReport`, `TreeDrift`) — never centralized into `packages/core/src/types.ts`.
 - **`TreeCheckService`** is the only service permitted to write the link table directly (parent_id ↔ link-table reconciliation).
 - **One cross-doc read-orchestration locus per consumer family** — `getPlanBundle`, `getReviewBundle`, `resolveDeclaredAcIds`, `findFeedingSkill` — never duplicated into an adapter.
@@ -60,7 +60,7 @@ One line per service — scope keywords only; mechanism detail lives in the arch
 | `PlanIntegrationBranchService` | sole writer of a plan's `extra.integration_branch` (`lore plan integration-branch`) |
 | `SyncDocsService` | One-way file→corpus reconciler for spec files |
 | `PhaseService` | add/list/remove/rename/migrate on `plan.extra.phases` |
-| `TaskWorkflowService` | addEvidence/claim/release/done/ready/declareRedFirst — evidence log, advisory claim lease, four-floor archival walk, computed readiness over `blocks` links (own telemetry) |
+| `TaskWorkflowService` | addEvidence/claim/release/done/ready — evidence log, advisory claim lease, stored-contract archival walk (`DONE_FLOOR_ORDER`), computed readiness over `blocks` links (own telemetry) |
 | `PhaseWorkflowService` | Same verb set scoped to `phase` docs; own `phase-claim` checkpoint; `recordChecklistVerifiedEvidence` is the sole `attestation` injection point for checklist-linked evidence |
 | `PhaseMigrationService` | One-shot idempotent task→phase sweep (`lore migrate tasks-to-phases`) |
 | `ExportDocsService` | One-way corpus→file exporter; collision-safe `.lore/export-index.json`; MDX-spliced output |

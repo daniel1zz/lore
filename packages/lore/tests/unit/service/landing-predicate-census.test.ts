@@ -109,9 +109,12 @@ describe("the landing predicate census", () => {
     // integrate's record: the kind, start and tip come from landingOf over the branch's facts
     const record = workflow.slice(workflow.indexOf("async recordLanding("));
     expect(record).toMatch(/landingOf\(\s*\{ start_head: mainBefore, branches: \[landing\.branch\]/);
-    // lore done and evidence counting: one measurement feeds the floor, the counting rule and the landing write
+    // lore done: one measurement feeds the floor and the landing write; the evidence counting rule is the contract's (AC-DCS1-27,
+    // `bindRow`: a code pass counts at the landed commit by tree or by the landing it was recorded for), which replaced the
+    // claim-bound `countsAsLandedPass` call and reads only the stored landing record, never a second landing computation
     expect(workflow).toMatch(/const verdict: LandingVerdict = landingOf\(/);
-    expect(workflow).toContain("countsAsLandedPass(");
+    expect(workflow).toContain("private bindRow(");
+    expect(workflow).not.toContain("countsAsLandedPass(");
     // milestone review: skips a landing by its measured range, never by the stored label (A11)
     expect(text("service/milestone-review.ts")).toContain("landing.main_before === landing.landing_commit");
     expect(text("service/milestone-review.ts")).not.toMatch(COMPARES_KIND);

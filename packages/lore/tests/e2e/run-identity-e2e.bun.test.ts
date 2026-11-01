@@ -115,7 +115,7 @@ function preToolPayload(task: string, agentId?: string): Record<string, unknown>
 }
 
 function newTask(title: string): string {
-  const r = mustLore(["create", "task", "--adhoc", "--title", title, "--ac-scope", "", "--json"]);
+  const r = mustLore(["create", "task", "--adhoc", "--kind", "corpus", "--title", title,"--ac-scope", "", "--json"]);
   const data = JSON.parse(r.stdout).data as { slug: string; id: string };
   docIds.set(data.slug, data.id);
   return data.slug;

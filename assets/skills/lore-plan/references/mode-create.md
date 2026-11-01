@@ -368,22 +368,22 @@ Skip when: pure research/design plan, no implement tasks, or user explicitly opt
      - {scenario 1, Given/When/Then format}
      - {scenario 2, ...}
 
-     Red-first: capture the failing tests before implementing, then capture the pass.
+     Red run: `lore finish --red` runs the failing tests before implementing; `lore finish` then runs every oracle.
      ```
    - Add the implement task's test file path to its `--anchor` list.
-   - Declare the task red-first: `lore red-first <impl-task>`.
+   - Create it with `--kind code`: its done contract requires the red run (`red_required` true) by default; only `lore approve <impl-task> --red-waiver "<reason>"` waives it.
 
 3. **No extra dependency edges** — the red step adds no task and no `blocks` edge. The implement task keeps only the prerequisites it already had.
 
-   The implementer then runs, inside its own worktree, in this order:
-   1. write the failing tests; run `lore evidence <impl-task> --oracle test --command "<cmd>" --result expected-fail --capture` (the runner records the red);
+   The orchestrator hands the task over with `lore dispatch <impl-task>`. The implementer then runs, inside its own worktree, in this order:
+   1. `lore start <impl-task>`, write the failing tests, commit, run `lore finish --red <impl-task>` (the runner records the red);
    2. implement until green;
-   3. `lore verify` (or `lore evidence ... --result pass --capture`) records the pass;
-   4. commit test and implementation together, so the red never lands on main alone; after landing, `lore done <impl-task>` archives it.
+   3. `lore finish <impl-task>` runs every contract oracle and records the pass;
+   4. commit test and implementation together, so the red never lands on main alone; `lore land <impl-task>` integrates, archives and cleans up.
 
 **Output**:
 ```
-**[TDD_INJECTION]** impl tasks: N | red-first declared: N | scenarios total: M | avg per task: M/N
+**[TDD_INJECTION]** impl tasks: N | red run required: N | scenarios total: M | avg per task: M/N
 ```
 
 **Anti-pattern guards**:

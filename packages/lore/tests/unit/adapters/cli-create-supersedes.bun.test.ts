@@ -191,6 +191,7 @@ describe("lore create --supersedes — up-front target-type precondition (Defect
       const task = await createTitledDoc(cmd, {
         type: "task",
         title: "A Task That Cannot Be Superseded",
+        kind: "code",
         parent: plan.slug,
         "plan-id": plan.slug,
       });

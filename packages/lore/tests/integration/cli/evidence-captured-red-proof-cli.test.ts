@@ -76,7 +76,7 @@ beforeAll(() => {
   mustRun(["init"], tmpDir);
   mustRun(["create", "prd", "--title", "Captured red root", "--content", "## Overview\nroot", "--no-ai"], tmpDir);
   const created = mustRun(
-    ["create", "task", "--title", "captured red task", "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"],
+    ["create", "task", "--kind", "code", "--title", "captured red task", "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"],
     tmpDir,
   );
   slug = (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;

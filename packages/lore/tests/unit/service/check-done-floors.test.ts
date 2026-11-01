@@ -4,24 +4,21 @@
  *
  * `TaskWorkflowService.checkDoneFloors(taskIdOrSlug)` returns
  * `Result<{ floor, error } | null>`: the first failing floor in `_doneImpl`'s order
- * (attested-pass, red-first, no-new-tests, unfiltered-test-file) or `null`. `error` is
- * the exact LoreError `done()` returns, plus `details.floor`. The
- * `--override-attestation` branch stays inside `_doneImpl`.
+ * (not-landed, attested-pass, red-first, unfiltered-test-file, contract-oracles — the floors of
+ * the contract stored at approve, AC-DCS1-7) or `null`. `error` is the exact LoreError `done()`
+ * returns, plus `details.floor`. No floor has an escape (the attestation override is retired).
  *
- * RED STATE: `checkDoneFloors` does not exist yet (the paired implement task adds
- * it). Cases (a)-(e) and (g) therefore fail at the call `checkDoneFloors is not a
- * function` — a TypeError that is acceptable ONLY because it is that one missing
- * method. Case (f) is a REGRESSION guard on the override path; its first half also
- * calls the missing method.
+ * A task here is a landed `code` task holding a stored contract (done-contract-unit-fixture.ts):
+ * the floors come from that contract, never from the task's live fields (the retired
+ * `extra.red_first` / `ac_scope` declarations are not read).
  *
- * Dimensions: NEGATIVE (a-d), HAPPY (e), STATE (no writes on refusal), BOUNDARY (g
- * order), REGRESSION (f override stays in done).
+ * Dimensions: NEGATIVE (a-d, not-landed), HAPPY (e), STATE (no writes on refusal), BOUNDARY (g
+ * order), REGRESSION (f no escape from the attested floor).
  *
  * @spec_ref spec-approval-and-plan-closure-go-through-the-same-checks-on
  */
 
 import { describe, it, expect } from "vitest";
-import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
@@ -36,18 +33,18 @@ import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
-type DoneFloorId = "attested-pass" | "red-first" | "no-new-tests" | "unfiltered-test-file";
+import { LANDING_COMMIT, landedPass, landedTaskExtra, testFileCommand, unitDoneContract } from "./done-contract-unit-fixture.js";
+type DoneFloorId = "not-landed" | "attested-pass" | "red-first" | "unfiltered-test-file" | "contract-oracles";
 
-/** The contract the paired task adds (spec D5). Cast: the method does not exist yet. */
+/** The data contract of `checkDoneFloors` (spec D5). */
 interface WithCheckDoneFloors {
   checkDoneFloors(taskIdOrSlug: string): Promise<Result<{ floor: DoneFloorId; error: LoreError } | null, LoreError>>;
 }
 
-function makeServices(wireOverridePort = true) {
+function makeServices() {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
-  if (wireOverridePort) taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   const floors = taskWorkflowService as unknown as WithCheckDoneFloors;
   return { store, corpusService, taskWorkflowService, floors };
 }
@@ -62,7 +59,7 @@ async function createTask(s: Services, title: string, extra: Record<string, unkn
     title,
     parent_id: plan.value.id,
     content: "body",
-    extra: { plan_id: plan.value.id, ...extra },
+    extra: { plan_id: plan.value.id, ...landedTaskExtra(), ...extra },
   } as CreateDocInput);
   if (!task.ok) throw new Error(`task create failed: ${JSON.stringify(task.error)}`);
   return task.value.id;
@@ -75,7 +72,8 @@ function attestedPass(): VerifiedEvidenceInput {
     result: "pass",
     recorded_by: "runner",
     capture_source: "runner",
-    attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+    // reason: AC-DCS1-27 (b) — a pass counts for a code oracle when it names the landing it was recorded for.
+    attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, recorded_at_landing: LANDING_COMMIT },
   };
 }
 
@@ -151,28 +149,41 @@ describe("AC-AP-9 checkDoneFloors contract and byte-identical done refusals", ()
     await expectFloorThenDoneMatches(s, taskId, "attested-pass");
   });
 
-  it("(b) red-first: declared red_first without a red run -> floor red-first, same error from done(), no writes", async () => {
+  it("(b) red-first: a contract with red_required and no red run -> floor red-first, same error from done(), no writes", async () => {
     const s = makeServices();
-    const taskId = await createTask(s, "Floor B", { red_first: true });
+    const taskId = await createTask(s, "Floor B", landedTaskExtra({ redRequired: true }));
     await addAttested(s, taskId);
     await expectFloorThenDoneMatches(s, taskId, "red-first");
   });
 
-  it("(c) no-new-tests: declared ac_scope [] without a red run or declaration -> floor no-new-tests, same error, no writes", async () => {
+  it("(c) contract-oracles: a counted pass of some other command, typecheck oracle unmet -> floor contract-oracles, same error, no writes", async () => {
     const s = makeServices();
-    const taskId = await createTask(s, "Floor C", { ac_scope: [] });
-    await addAttested(s, taskId);
-    await expectFloorThenDoneMatches(s, taskId, "no-new-tests");
+    const taskId = await createTask(s, "Floor C");
+    // reason: an attested pass that counts (it names the landing) but ran a command that is not the contract's typecheck oracle,
+    // so the attested-pass floor is met and the oracle floor is what refuses.
+    const written = await s.taskWorkflowService.recordVerifiedEvidence(taskId, landedPass("bun run lint"), "2026-10-12T09:00:00.000Z");
+    expect(written.ok).toBe(true);
+    await expectFloorThenDoneMatches(s, taskId, "contract-oracles");
   });
 
-  it("(d) unfiltered-test-file: test-file anchor with no unfiltered pass run -> floor unfiltered-test-file, same error, no writes", async () => {
+  it("(c2) not-landed: a task claimed on a branch the probe cannot measure -> floor not-landed, same error, no writes", async () => {
     const s = makeServices();
-    const taskId = await createTask(s, "Floor D", {
-      file_anchors: ["packages/lore/tests/unit/service/check-done-floors.test.ts"],
-      red_first: true,
-    });
+    const taskId = await createTask(s, "Floor C2");
+    await addAttested(s, taskId);
+    const claimed = await s.taskWorkflowService.claim(taskId, { by: "alice", worktree: "wt-unmeasured" });
+    expect(claimed.ok).toBe(true);
+    await expectFloorThenDoneMatches(s, taskId, "not-landed");
+  });
+
+  it("(d) unfiltered-test-file: a contract test-file oracle with no unfiltered pass run -> floor unfiltered-test-file, same error, no writes", async () => {
+    const s = makeServices();
+    const FILE = "packages/lore/tests/unit/service/check-done-floors.test.ts";
+    const taskId = await createTask(s, "Floor D", landedTaskExtra({ redRequired: true, testFiles: [FILE] }));
     await addAttested(s, taskId);
     await addEvidence(s, taskId, runnerCapturedFail());
+    // a pass narrowed to one case is never the unfiltered run (the contract's own command is exact)
+    const narrowed = await s.taskWorkflowService.recordVerifiedEvidence(taskId, landedPass(`${testFileCommand(FILE)} -t "case"`), "2026-10-12T09:00:00.000Z");
+    expect(narrowed.ok).toBe(true);
     await expectFloorThenDoneMatches(s, taskId, "unfiltered-test-file");
   });
 
@@ -192,45 +203,32 @@ describe("AC-AP-9 checkDoneFloors contract and byte-identical done refusals", ()
     expect(done.value.transitions).toEqual(["approved", "active", "archived"]);
   });
 
-  it("override port required: --override-attestation with NO override port wired is refused loudly and nothing is archived", async () => {
-    const s = makeServices(false);
-    const taskId = await createTask(s, "Floor F no port");
-    await addEvidence(s, taskId, runnerCapturedPass());
-    const done = await s.taskWorkflowService.done(taskId, { by: "alice", overrideReason: "manual browser check: verified in staging" });
-    expect(done.ok).toBe(false);
-    if (!done.ok) expect(done.error).toMatchObject({ code: "VALIDATION_ERROR", field: "autonomy" });
-    const after = await s.store.find(taskId as never);
-    expect(after.ok && after.value?.status).not.toBe("archived");
-  });
-
-  it("(f) REGRESSION: --override-attestation with a reason still archives an unattested task with the audited reason", async () => {
+  it("(f) NEGATIVE, mutation check: the attested floor refuses an unattested task with NO escape, even on a contract holding no oracle", async () => {
     const s = makeServices();
-    const taskId = await createTask(s, "Floor F");
+    // reason: a contract with no oracle leaves the attested-pass floor as the only thing between this task and the archive, so a
+    // bypass re-added to evaluateDoneFloors turns this red. The retired `overrideReason` option is not part of DoneOpts any more.
+    const taskId = await createTask(s, "Floor F", { done_contract: { ...unitDoneContract(), oracles: [] } });
     await addEvidence(s, taskId, runnerCapturedPass());
 
-    // checkDoneFloors never reads the override: the unattested task still reports the floor.
     const checked = await s.floors.checkDoneFloors(taskId);
     expect(checked.ok).toBe(true);
     if (!checked.ok) return;
     expect(checked.value?.floor).toBe("attested-pass");
 
-    const REASON = "manual browser check: verified in staging";
-    const done = await s.taskWorkflowService.done(taskId, { by: "alice", overrideReason: REASON });
-    expect(done.ok).toBe(true);
-    if (!done.ok) return;
-    expect(done.value.task.status).toBe("archived");
-
-    const audit = await s.store.queryAudit({ doc_id: taskId as never });
-    expect(audit.ok).toBe(true);
-    if (!audit.ok) return;
-    const doneSteps = audit.value.filter((e) => e.details?.["done"] === true);
-    expect(doneSteps.length).toBeGreaterThan(0);
-    expect(doneSteps.every((e) => e.details?.["override_reason"] === REASON)).toBe(true);
+    // a stray, retired option smuggled past the type system is still not honoured
+    const done = await s.taskWorkflowService.done(taskId, { by: "alice", overrideReason: "manual browser check" } as never);
+    expect(done.ok).toBe(false);
+    if (done.ok) return;
+    expect(detailsFloor(done.error)).toBe("attested-pass");
+    expect(done.error).toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(JSON.stringify(done.error)).not.toContain("--override-attestation");
+    const after = await s.store.find(taskId as never);
+    expect(after.ok && after.value?.status).not.toBe("archived");
   });
 
   it("(g) order: a task failing both attested-pass and red-first reports attested-pass", async () => {
     const s = makeServices();
-    const taskId = await createTask(s, "Floor G", { red_first: true });
+    const taskId = await createTask(s, "Floor G", landedTaskExtra({ redRequired: true }));
     await addEvidence(s, taskId, runnerCapturedPass());
 
     const checked = await s.floors.checkDoneFloors(taskId);
@@ -238,5 +236,25 @@ describe("AC-AP-9 checkDoneFloors contract and byte-identical done refusals", ()
     if (!checked.ok) return;
     expect(checked.value?.floor).toBe("attested-pass");
     expect(detailsFloor(checked.value?.error as LoreError)).toBe("attested-pass");
+  });
+
+  // reason: AC-DCS1-7 / BR-209 judge "not landed" first for a code task: a task with no landing record is refused
+  // [floor: not-landed] whatever evidence rows exist, and no other floor's message says "no landing record" (J2).
+  it("(h) order: an unlanded code task (no landing record, no pass row) is refused not-landed, never attested-pass", async () => {
+    const s = makeServices();
+    const { landing: _landing, ...unlanded } = landedTaskExtra();
+    const taskId = await createTask(s, "Floor H", { ...unlanded, landing: undefined });
+    await expectFloorThenDoneMatches(s, taskId, "not-landed");
+    const checked = await s.floors.checkDoneFloors(taskId);
+    expect(JSON.stringify(checked.ok ? checked.value?.error : "unreadable")).toContain("no landing record");
+  });
+
+  it("(h2) order: the same unlanded code task is still not-landed once a pass row and a runner-captured pass exist", async () => {
+    const s = makeServices();
+    const { landing: _landing, ...unlanded } = landedTaskExtra();
+    const taskId = await createTask(s, "Floor H2", { ...unlanded, landing: undefined });
+    await addAttested(s, taskId);
+    await addEvidence(s, taskId, runnerCapturedPass());
+    await expectFloorThenDoneMatches(s, taskId, "not-landed");
   });
 });

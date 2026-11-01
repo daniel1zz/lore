@@ -90,7 +90,7 @@ async function createAdhocPair(): Promise<{ a: DocRecord; b: DocRecord }> {
         type: "task",
         title,
         content: `# ${title}`,
-        extra: { adhoc: true, file_anchors: [anchor] },
+        extra: { adhoc: true, kind: "code", file_anchors: [anchor] },
       } as CreateDocInput);
       if (!task.ok) throw new Error(`task create failed: ${JSON.stringify(task.error)}`);
       return task.value;

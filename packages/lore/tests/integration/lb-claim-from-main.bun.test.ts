@@ -52,8 +52,8 @@ function addWorktree(name: string, from: string): string {
 beforeAll(() => {
   fx = new OwnDiffFixture();
   wtRoot = mkdtempSync(join(tmpdir(), "lore-lb-claim-wt-"));
-  taskA = fx.createTask("task A", ["src/a.ts"]);
-  taskB = fx.createTask("task B", ["src/b.ts"]);
+  taskA = fx.createTask("task A", ["src/a.ts"], "code");
+  taskB = fx.createTask("task B", ["src/b.ts"], "code");
 }, TEST_TIMEOUT_MS);
 
 afterAll(() => {

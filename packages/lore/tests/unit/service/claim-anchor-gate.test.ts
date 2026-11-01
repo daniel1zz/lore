@@ -124,7 +124,7 @@ async function createTask(
     title,
     parent_id: planId,
     content: `# ${title}`,
-    extra: { plan_id: planId, ...(anchors !== undefined ? { file_anchors: anchors } : {}) },
+    extra: { plan_id: planId, kind: "code", ...(anchors !== undefined ? { file_anchors: anchors } : {}) },
   } as CreateDocInput);
   return task.id;
 }
@@ -389,6 +389,34 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
     expect(steal.ok).toBe(false);
     if (steal.ok) return;
     expect((steal.error as { field?: string }).field).toBe("gate:task-claim:anchor-overlap");
+  });
+
+  // HAPPY / NEGATIVE — AC-DCS1-10: overlap is judged on the declared write sets, not on the accumulated task anchors
+  it("a claim declaring a write set that avoids the sibling's files succeeds though the task anchors overlap; one whose write set includes the held path is blocked", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createTopLevelPlan(corpusService);
+    const heldId = await createTask(corpusService, planId, "Holder", ["src/a.ts"]);
+    const avoidsId = await createTask(corpusService, planId, "Avoids", ["src/a.ts"]);
+    const touchesId = await createTask(corpusService, planId, "Touches", ["src/a.ts"]);
+
+    const held = await taskWorkflowService.claim(heldId, { worktree: "wt-held", by: "agent:t1", harnessRun: runOfName("agent:t1") });
+    expect(held.ok).toBe(true);
+
+    // the anchors overlap (src/a.ts on both tasks), the declared write set does not
+    const avoids = await taskWorkflowService.claim(avoidsId, {
+      worktree: "wt-avoids", by: "agent:t2", harnessRun: runOfName("agent:t2"), writeSet: ["src/b.test.ts", "src/c.test.ts"],
+    });
+    expect(avoids.ok).toBe(true);
+    if (!avoids.ok) return;
+    expect(avoids.value.extra["claim"]).toMatchObject({ write_set: ["src/b.test.ts", "src/c.test.ts"] });
+
+    // control: a write set that includes the held path is the same overlap as before, so the gate still refuses it
+    const touches = await taskWorkflowService.claim(touchesId, {
+      worktree: "wt-touches", by: "agent:t3", harnessRun: runOfName("agent:t3"), writeSet: ["src/a.ts"],
+    });
+    expect(touches.ok).toBe(false);
+    if (touches.ok) return;
+    expect((touches.error as { field?: string }).field).toBe("gate:task-claim:anchor-overlap");
   });
 
   // STATE — AC-S3-11: release the conflicting claim → the identical retry succeeds

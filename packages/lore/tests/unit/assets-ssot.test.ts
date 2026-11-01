@@ -70,6 +70,8 @@ const ASSETS_ROOT = join(REPO_ROOT, "assets");
 // ─── The declared manifest — THE conformance spec, not derived from the fs ────
 
 const DECLARED_FILES = [
+  // root (a file directly in assets/, AC-DCS2-6)
+  "dispatch-standing-rules.md",
   // skills
   "skills/lore/SKILL.md",
   "skills/lore-kickoff/SKILL.md",
@@ -567,7 +569,7 @@ const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)
 // RE-BASELINE (task-traceability-pass-over-the-ten-fragments-classify-every): traceability pass against knowledge-traceability-table-always-loaded-lore-fragments; restores the snapshot-never-current-state rule, the UPSTREAM_NOT_APPROVED freeze, the verify exit-code rule and the piped-exit-code reason.
 // RE-BASELINE (task-drop-the-explanation-the-traceability-pass-over-restored): drops the explanation clauses the traceability pass put back (see knowledge-traceability-table-always-loaded-lore-fragments v3); every instruction, condition and qualifier is kept.
 // RE-BASELINE (task-shipped-guidance-teaches-lore-evidence-result-pass-output-2): the pass-evidence bullet now teaches `--capture` (the gate refuses a hand-authored tail for --result pass).
-  "context/corpus-workflow-3-execute.md": "de48d3aa4b12a74f23dd8bbc614d6d02181789acf983971c0a8f0baced1b115b",
+  "context/corpus-workflow-3-execute.md": "0faee0048064f640f590ba144b6d387921106a6b49ab26c7f4bc729a0fef1364",
   // RE-BASELINE (task-rs-t13-migration-promoted-shipped-fragments-agent-rules, AC-RS-13): gains the CLAUDE.md-vs-corpus
   // boundary bullet moved from the user-layer lore-loop fragment (user-03).
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
@@ -1141,6 +1143,7 @@ describe("assets/context manifest", () => {
       mkdirSync(join(root, d), { recursive: true });
       writeFileSync(join(root, d, "seed.md"), `seed ${d}\n`);
     }
+    writeFileSync(join(root, "dispatch-standing-rules.md"), "seed root\n");
     if (withContext) {
       mkdirSync(join(root, "context"), { recursive: true });
       writeFileSync(join(root, "context", "zz-probe.md"), "probe fragment\n");
@@ -1202,8 +1205,8 @@ describe("assets/context manifest", () => {
     const withCtx = makeTempAssets(true);
     const without = makeTempAssets(false);
     try {
-      expect(listBinaryReadAssetPaths(withCtx)).toEqual(["context/zz-probe.md", "project/seed.md", "templates/seed.md"]);
-      expect(listBinaryReadAssetPaths(without)).toEqual(["project/seed.md", "templates/seed.md"]);
+      expect(listBinaryReadAssetPaths(withCtx)).toEqual(["context/zz-probe.md", "dispatch-standing-rules.md", "project/seed.md", "templates/seed.md"]);
+      expect(listBinaryReadAssetPaths(without)).toEqual(["dispatch-standing-rules.md", "project/seed.md", "templates/seed.md"]);
     } finally {
       rmSync(withCtx, { recursive: true, force: true });
       rmSync(without, { recursive: true, force: true });

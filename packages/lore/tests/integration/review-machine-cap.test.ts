@@ -646,8 +646,9 @@ describe("AC-MC-2: test slots: no review run bypasses the slots", () => {
       return statSync(path).isDirectory() ? sourceFiles(path) : path.endsWith(".ts") ? [path] : [];
     });
 
-  it("every runner and rerunner the review builds in assess.ts is wrapped by its slot decorator", () => {
-    const assess = readFileSync(join(SRC, "adapters/cli/commands/assess.ts"), "utf8");
+  it("every runner and rerunner the review builds in assess-batch-wiring.ts is wrapped by its slot decorator", () => {
+    // reason: the review's runner wiring lives in assess-batch-wiring.ts (assess.ts only calls it)
+    const assess = readFileSync(join(SRC, "adapters/cli/assess-batch-wiring.ts"), "utf8");
     const wrapped: [string, string][] = [
       ["createGitCommitSuiteRunner(", "slotCommitSuiteRunner("],
       ["createAppCriterionRerunner(", "slotCriterionRerunner("],
@@ -665,7 +666,7 @@ describe("AC-MC-2: test slots: no review run bypasses the slots", () => {
 
   it("no other source file builds a review test runner", () => {
     for (const file of sourceFiles(SRC)) {
-      if (file.endsWith("commands/assess.ts") || file.endsWith("assess-suite-runner.ts") || file.endsWith("assess-stale-refresh.ts")) continue;
+      if (file.endsWith("assess-batch-wiring.ts") || file.endsWith("assess-suite-runner.ts") || file.endsWith("assess-stale-refresh.ts")) continue;
       const text = readFileSync(file, "utf8");
       expect(text, file).not.toMatch(/createGitCommitSuiteRunner\(|createAppCriterionRerunner\(|createAppStaleRefresher\(/);
     }

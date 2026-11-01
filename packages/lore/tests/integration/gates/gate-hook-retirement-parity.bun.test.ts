@@ -111,7 +111,7 @@ function buildFixture(): Fixture {
   const bareSpec = slugOf(mustLore(["create", "spec", "--title", "Bare Spec", "--kind", "tech", "--content", SKELETON, "--no-ai"], dir));
   const plan = slugOf(mustLore(["create", "plan", "--title", "Parity Plan", "--parent", bareSpec, "--content", "Plan body.", "--no-ai"], dir));
   const task = slugOf(
-    mustLore(["create", "task", "--title", "Parity Task", "--plan-id", plan, "--ac-scope", "", "--content", "Task body.", "--no-ai"], dir),
+    mustLore(["create", "task", "--kind", "code", "--title", "Parity Task", "--plan-id", plan, "--ac-scope", "", "--content", "Task body.", "--no-ai"], dir),
   );
   return { dir, prd, bareSpec, plan, task };
 }

@@ -69,7 +69,7 @@ import { fileURLToPath } from "node:url";
 
 // The SAME expander + registry the installer uses (BR-1097): the manifest hashes the bytes
 // `RealAssetSource.load()` installs, so both call `expandInstalledAsset` (one SSOT).
-import { EXPANDED_ASSET_KINDS, expandInstalledAsset } from "../packages/lore/src/adapters/real-asset-source.ts";
+import { BINARY_READ_ONLY_ROOT_FILES, EXPANDED_ASSET_KINDS, expandInstalledAsset } from "../packages/lore/src/adapters/real-asset-source.ts";
 
 /** Thrown for domain-specific failures (missing dir, unparsable version, corrupt check target). */
 export class AssetManifestError extends Error {
@@ -112,6 +112,7 @@ export const OPTIONAL_TOP_LEVEL_DIRS = new Set(["context"]);
 const DEFAULT_OWNERSHIP_BY_KIND = {
   agent: "managed",
   context: "managed",
+  root: "managed",
   governance: "managed",
   hook: "managed",
   project: "managed",
@@ -188,7 +189,7 @@ export function computeTreeDigest(entries) {
 // ─── Template expansion ────────────────────────────────────────────────────────
 
 /** Kinds that must not carry any `{{lore:` token (copied verbatim, never expanded). */
-const LITERAL_ONLY_KINDS = new Set(["governance", "project", "template"]);
+const LITERAL_ONLY_KINDS = new Set(["governance", "project", "root", "template"]);
 
 /**
  * Returns the bytes the manifest hashes for one asset file.
@@ -270,6 +271,13 @@ export function buildManifest(assetsRoot, repoRoot) {
       entries.push({ path, kind, ownership: deriveOwnership(kind, path), sha256: sha256Hex(bytes) });
     }
   }
+  // Files directly in the assets root (kind `root`): a missing one is a loud error, like a missing declared directory.
+  for (const path of BINARY_READ_ONLY_ROOT_FILES) {
+    const filePath = join(assetsRoot, path);
+    if (!existsSync(filePath)) throw new AssetManifestError(`buildManifest: declared root asset missing: ${filePath}`);
+    const bytes = installedBytes("root", path, readFileSync(filePath));
+    entries.push({ path, kind: "root", ownership: deriveOwnership("root", path), sha256: sha256Hex(bytes) });
+  }
   entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return {
     binary_version: resolveBinaryVersion(repoRoot),
@@ -306,8 +314,8 @@ export function renderGeneratedFile(manifest) {
  * for the kind -> ownership derivation rules.
  */
 
-/** One of the seven vendored top-level \`assets/\` directories. */
-export type AssetEntryKind = "skill" | "agent" | "hook" | "governance" | "project" | "context" | "template";
+/** One of the seven vendored top-level \`assets/\` directories, or \`root\` (a file directly in \`assets/\`). */
+export type AssetEntryKind = "skill" | "agent" | "hook" | "governance" | "project" | "context" | "template" | "root";
 
 /** Update-time handling region (SPEC-076 §C1) — see the generator's doc comment. */
 export type AssetOwnership = "managed" | "merged" | "user_once";

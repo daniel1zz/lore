@@ -23,10 +23,8 @@
  * no-match when the prose is reflowed (standing CLAUDE.md lesson), and in THIS
  * corpus it also degrades to a FALSE POSITIVE because docs quote the very
  * markers they document (knowledge-the-substring-matcher-lesson-has-a-mirror-
- * face-over). The `attestation`-is-named assertion is additionally anchored
- * STRUCTURALLY: `--override-attestation` (a remedy flag, present before AND
- * after this change) is stripped from the message first, so the token can only
- * be satisfied by a genuine reference to the missing FIELD.
+ * face-over). The refusal never names the retired `--override-attestation` flag
+ * (asserted), so the `attestation` token can only be a reference to the missing FIELD.
  *
  * Coverage dimensions:
  *   HAPPY:       a genuine runner-attested pass still archives, unchanged;
@@ -38,11 +36,10 @@
  *                self-reported, never as runner-captured
  *   ERROR:       a genuinely self-reported population is STILL described
  *                accurately (AC-2) — the word was not merely deleted
- *   STATE:       the three OTHER independent `done()` floors (red-first,
- *                declared-ac_scope/no-new-tests, unfiltered-test-file-anchor)
- *                still fire independently, and none masks another (AC-5); the
- *                audited `--override-attestation` still archives and still
- *                records its reason verbatim (AC-6)
+ *   STATE:       the OTHER independent `done()` floors (red-first,
+ *                contract-oracles, unfiltered-test-file)
+ *                still fire independently, and none masks another (AC-5); an
+ *                unattested task has no escape and writes no audit row
  *   REGRESSION:  the refused SET, the error code, the error field and the exit
  *                code are byte-identical across every population (AC-4)
  *
@@ -52,7 +49,6 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
-import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -68,13 +64,13 @@ import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
+import { LANDING_COMMIT, landedTaskExtra, unitDoneContract } from "./done-contract-unit-fixture.js";
 // ─── Harness ────────────────────────────────────────────────────────────────
 
 function makeServices() {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
-  taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   return { store, corpusService, taskWorkflowService };
 }
 
@@ -95,10 +91,16 @@ async function createTask(
     title,
     parent_id: planId,
     content: "body",
-    extra: { plan_id: planId, ...extraOpts },
+    // reason: `done` judges the stored contract and the landing (AC-DCS1-7); the fixture stores the shapes approve and integrate write.
+    extra: { plan_id: planId, ...landedTaskExtra(), ...extraOpts },
   } as CreateDocInput);
   if (!result.ok) throw new Error(`task create failed: ${JSON.stringify(result.error)}`);
   return result.value.id;
+}
+
+/** A contract that holds no oracle: only the attested-pass floor stands. */
+function noOracleContractExtra(): Record<string, unknown> {
+  return { done_contract: { ...unitDoneContract(), oracles: [] } };
 }
 
 /** A SELF-REPORTED `result:"pass"` row — `capture_source: "self-report"`, the shape a
@@ -146,20 +148,10 @@ function attestedPass(overrides: Partial<VerifiedEvidenceInput> = {}): VerifiedE
     result: "pass",
     recorded_by: "runner",
     capture_source: "runner",
-    attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+    // reason: AC-DCS1-27 (b) — a pass counts for a code oracle when it names the landing it was recorded for.
+    attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, recorded_at_landing: LANDING_COMMIT },
     ...overrides,
   };
-}
-
-/**
- * Strips every `--override-attestation` occurrence (the REMEDY flag, present in
- * the refusal both before and after this change) so a surviving `attestation`
- * token can only come from a genuine reference to the missing FIELD. This is the
- * "anchor structurally + require a second independent condition" discipline: the
- * lone token alone would be satisfied by the flag name and prove nothing.
- */
-function withoutRemedyFlag(message: string): string {
-  return message.split("--override-attestation").join("«FLAG»");
 }
 
 /**
@@ -256,13 +248,15 @@ describe("NEGATIVE — AC-1: an all-`capture_source:runner` population is never 
     // Lone token 2 — what the rows ACTUALLY are.
     expect(message).toContain("runner-captured");
     // Lone token 3, structurally anchored — the MISSING field, not the flag.
-    expect(withoutRemedyFlag(message)).toContain("attestation");
+    expect(message).toContain("attestation");
     // The population is stated as a COUNT, not hand-waved: three pass rows.
     expect(message).toContain("3");
 
-    // Both remedies survive (they are the operator's only exits).
+    // Both remedies survive (they are the operator's only exits); the retired flag is not named.
     expect(message).toContain("lore verify");
-    expect(message).toContain("--override-attestation");
+    expect(message).toContain("lore evidence");
+    expect(message).toContain("Two repairs");
+    expect(message).not.toContain("--override-attestation");
 
     // The refusal never partially writes.
     const after = await corpusService.get(taskId);
@@ -316,7 +310,7 @@ describe("ERROR — AC-2: a genuinely `capture_source:self-report` population ke
     // can check the claim against the corpus.
     expect(message).toContain("capture_source");
     // Lone token 3, structurally anchored — the missing field.
-    expect(withoutRemedyFlag(message)).toContain("attestation");
+    expect(message).toContain("attestation");
     // NEGATIVE half of AC-2: it must NOT over-claim the other population.
     expect(message).not.toContain("runner-captured");
     // Count is accurate.
@@ -433,28 +427,13 @@ describe("REGRESSION — AC-4: the refused set, error identity and exit code are
     expect(Array.isArray((done.error as { value?: unknown }).value)).toBe(true);
   });
 
-  it("a blank overrideReason is STILL refused on the `overrideReason` field, not on the evidence field", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
-    const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId);
-
-    await taskWorkflowService.addEvidence(taskId, runnerCapturedPass());
-
-    const done = await taskWorkflowService.done(taskId, { by: "alice", overrideReason: "   " });
-    expect(done.ok).toBe(false);
-    if (done.ok) return;
-    expect(done.error.code).toBe("VALIDATION_ERROR");
-    expect((done.error as { field?: string }).field).toBe("overrideReason");
-    expect(exitCode(done.error)).toBe(4);
-  });
-
   it("an already-archived task is STILL an idempotent no-op, evaluated before this floor", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId);
+    const taskId = await createTask(corpusService, planId, "Wording Task", noOracleContractExtra());
 
-    await taskWorkflowService.addEvidence(taskId, runnerCapturedPass());
-    const first = await taskWorkflowService.done(taskId, { by: "alice", overrideReason: "manual browser check" });
+    await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-08-06T09:00:00.000Z");
+    const first = await taskWorkflowService.done(taskId, { by: "alice" });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
 
@@ -473,11 +452,11 @@ describe("REGRESSION — AC-4: the refused set, error identity and exit code are
 // each floor is identified below by its OWN message tokens, plus a NEGATIVE
 // condition asserting the attestation floor's new wording is absent. That pair
 // is what proves the floors stayed independent instead of one absorbing another.
-describe("STATE — AC-5: the three OTHER independent done() floors still fire, and none masks another", () => {
+describe("STATE — AC-5: the OTHER independent done() floors still fire, and none masks another", () => {
   it("the red-first floor fires with its OWN message once the attestation floor is satisfied", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId, "Red First Task", { red_first: true });
+    const taskId = await createTask(corpusService, planId, "Red First Task", landedTaskExtra({ redRequired: true }));
 
     // Attestation floor satisfied; the red-first floor must now be the blocker.
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-08-06T09:00:00.000Z");
@@ -486,39 +465,37 @@ describe("STATE — AC-5: the three OTHER independent done() floors still fire, 
     expect(done.ok).toBe(false);
     if (done.ok) return;
     expect(done.error.code).toBe("VALIDATION_ERROR");
-    expect(messageOf(done.error)).toContain("extra.red_first");
+    expect(messageOf(done.error)).toContain("red_required: true");
     expect(messageOf(done.error)).toContain("expected-fail");
+    expect(messageOf(done.error)).toContain("[floor: red-first]");
     // The attestation floor's own wording must NOT appear — it already passed.
     expect(messageOf(done.error)).not.toContain("runner-captured");
     expect(messageOf(done.error)).not.toContain("capture_source");
   });
 
-  it("the declared-ac_scope no-new-tests floor fires with its OWN message once the attestation floor is satisfied", async () => {
+  it("the contract-oracles floor fires with its OWN message once the attestation floor is satisfied by a pass of another command", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    // An EXPLICITLY EMPTY declaration arms the floor (keyed on PRESENCE).
-    const taskId = await createTask(corpusService, planId, "Declared Scope Task", { ac_scope: [] });
+    const taskId = await createTask(corpusService, planId, "Oracle Task");
 
-    await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-08-06T09:00:00.000Z");
+    // An attested pass that counts, but of a command that is not the contract's typecheck oracle.
+    await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass({ command: "bun run lint" }), "2026-08-06T09:00:00.000Z");
 
     const done = await taskWorkflowService.done(taskId, { by: "alice" });
     expect(done.ok).toBe(false);
     if (done.ok) return;
     expect(done.error.code).toBe("VALIDATION_ERROR");
-    expect(messageOf(done.error)).toContain("EMPTY extra.ac_scope");
-    expect(messageOf(done.error)).toContain("--declare-no-new-tests");
+    expect(messageOf(done.error)).toContain("[floor: contract-oracles]");
+    expect(messageOf(done.error)).toContain("typecheck");
     expect(messageOf(done.error)).not.toContain("runner-captured");
     expect(messageOf(done.error)).not.toContain("capture_source");
   });
 
-  it("the unfiltered-test-file-anchor floor fires with its OWN message once the attestation floor is satisfied", async () => {
+  it("the unfiltered-test-file oracle floor fires with its OWN message once the attestation floor is satisfied", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const ANCHOR = "packages/lore/tests/unit/service/done-attestation-refusal-wording.test.ts";
-    const taskId = await createTask(corpusService, planId, "Anchored Task", {
-      file_anchors: [ANCHOR],
-      red_first: true,
-    });
+    const taskId = await createTask(corpusService, planId, "Anchored Task", landedTaskExtra({ redRequired: true, testFiles: [ANCHOR] }));
 
     // Satisfies the attestation floor AND the red-first floor, leaving the
     // test-file-anchor floor as the only remaining blocker.
@@ -540,7 +517,7 @@ describe("STATE — AC-5: the three OTHER independent done() floors still fire, 
   it("the attestation floor is checked FIRST — a red-first task with NO attested pass reports the ATTESTATION field, not the red one", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId, "Both Floors Task", { red_first: true });
+    const taskId = await createTask(corpusService, planId, "Both Floors Task", landedTaskExtra({ redRequired: true }));
 
     await taskWorkflowService.addEvidence(taskId, runnerCapturedPass());
 
@@ -552,31 +529,28 @@ describe("STATE — AC-5: the three OTHER independent done() floors still fire, 
     // load-bearing (a task can be in violation of both; the operator must be
     // told about the one checked first, exactly as before this change).
     expect(messageOf(done.error)).toContain("runner-captured");
-    expect(messageOf(done.error)).not.toContain("extra.red_first");
+    expect(messageOf(done.error)).not.toContain("red_required");
   });
 });
 
-describe("STATE — AC-6: the audited --override-attestation escape still archives and still records its reason", () => {
-  it("archives an unattested runner-captured task and stamps the reason verbatim on every audit step", async () => {
+describe("STATE — an unattested runner-captured task is refused, nothing is archived, and no audit row carries an override marker", () => {
+  it("refuses with [floor: attested-pass] and writes no done step", async () => {
     const { corpusService, store, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId);
+    const taskId = await createTask(corpusService, planId, "Wording Task", noOracleContractExtra());
 
     await taskWorkflowService.addEvidence(taskId, runnerCapturedPass());
 
-    const REASON = "manual browser check: verified in staging, screenshot attached to PR #123";
-    const done = await taskWorkflowService.done(taskId, { by: "alice", overrideReason: REASON });
-    expect(done.ok).toBe(true);
-    if (!done.ok) return;
-    expect(done.value.transitions).toEqual(["approved", "active", "archived"]);
+    const done = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(done.ok).toBe(false);
+    if (done.ok) return;
+    expect(exitCode(done.error)).toBe(4);
 
     const audit = await store.queryAudit({ doc_id: taskId });
     expect(audit.ok).toBe(true);
     if (!audit.ok) return;
-    const doneSteps = audit.value.filter((e) => e.details?.["done"] === true);
-    expect(doneSteps).toHaveLength(3);
-    expect(doneSteps.every((e) => e.details?.["override_reason"] === REASON)).toBe(true);
-    expect(doneSteps.every((e) => e.details?.["attestation_overridden"] === true)).toBe(true);
+    expect(audit.value.filter((e) => e.details?.["done"] === true)).toHaveLength(0);
+    expect(audit.value.every((e) => e.details?.["override_reason"] === undefined)).toBe(true);
   });
 });
 
@@ -601,11 +575,12 @@ describe("BOUNDARY — the sibling arm (no result:pass row at all) names attesta
 
     // Two independent lone tokens: the shape it lacks, and the field it lacks.
     expect(message).toContain('result:"pass"');
-    expect(withoutRemedyFlag(message)).toContain("attestation");
+    expect(message).toContain("attestation");
     // ⛔ It must NOT call these rows self-reported either — they are runner-captured.
     expect(message.toLowerCase()).not.toContain("self-report");
     expect(message).toContain("lore verify");
-    expect(message).toContain("--override-attestation");
+    expect(message).toContain("lore evidence");
+    expect(message).not.toContain("--override-attestation");
   });
 });
 

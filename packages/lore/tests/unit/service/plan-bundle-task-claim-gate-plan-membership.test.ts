@@ -73,7 +73,7 @@ async function createTask(
     title,
     parent_id: parentId,
     content: "body",
-    extra: { plan_id: planId, file_anchors: anchors },
+    extra: { plan_id: planId, kind: "code", file_anchors: anchors },
   } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create task: ${JSON.stringify(result.error)}`);
   return result.value;

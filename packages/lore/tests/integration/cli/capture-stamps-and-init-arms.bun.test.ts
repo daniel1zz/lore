@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { STATE_BINDING_ARMED_ACTION } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { actedStore } from "../../live-invocation.js";
-import { installShippedGuard } from "../support/main-guard-repo.js";
+import { landTask, recordContractPasses, type TaskWorld } from "../support/land-task.js";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
@@ -75,13 +75,9 @@ function makeCommittedCorpus(): string {
   writeFileSync(join(d, "README.md"), "fixture\n");
   mustLore(["init"], d);
   // reason: gates are not under test; disabling them lets the fixture claim a task under a draft spec.
-  patchLoreConfig(
-    d,
-    // `lore integrate` (the landing a task needs to archive, BR-1291) reads its floor key from the config
-    ["workflow:", "  gates:", ...["task-claim", "task-create"].flatMap((g) => [`    ${g}:`, "      enabled: false"]), "  integrate:", '    floor_command: "true"', ""].join("\n"),
-  );
-  // integrate keeps its own worktree and attempt ledger inside the repo; neither may dirty the tree
-  appendFileSync(join(d, ".git", "info", "exclude"), ".claude/\n.lore/integrate-attempts/\n.lore/integrate-losses/\n");
+  patchLoreConfig(d, ["workflow:", "  gates:", ...["task-claim", "task-create"].flatMap((g) => [`    ${g}:`, "      enabled: false"]), ...DONE_CONTRACT_LINES, ""].join("\n"));
+  // the landing worktrees live outside the repo; the claim worktree directory of a linked checkout never dirties the tree
+  appendFileSync(join(d, ".git", "info", "exclude"), ".claude/\n");
   git(d, ["add", "."]);
   git(d, ["commit", "-q", "-m", "init"]);
   return d;
@@ -95,16 +91,33 @@ function slugOf(r: RunResult): string {
   return slug;
 }
 
-/** prd -> spec -> plan -> task, claimed; returns the task slug. Tracked files stay clean (db is gitignored). */
-function makeClaimedTask(dir: string, claimWorktree: string | null = dir): string {
+/** The `workflow.done_contract` lines approve needs to compile a task's contract (each command prints a runner summary and touches nothing). */
+const DONE_CONTRACT_LINES = ["  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"'];
+
+/** prd -> spec -> plan -> task (a draft code task); returns the task slug. Tracked files stay clean (db is gitignored). */
+function makeDraftTask(dir: string): string {
   mustLore(["create", "prd", "--title", "CT3b PRD", "--no-ai", "--content", "## Overview\nbody"], dir);
   const spec = slugOf(mustLore(["create", "spec", "--title", "CT3b Spec", "--no-ai", "--content", "## Overview\nbody", "--json"], dir));
   const plan = slugOf(mustLore(["create", "plan", "--title", "CT3b Plan", "--parent", spec, "--no-ai", "--content", "body", "--json"], dir));
-  const task = slugOf(
-    mustLore(["create", "task", "--title", "CT3b Task", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body", "--json"], dir),
+  return slugOf(
+    mustLore(["create", "task", "--kind", "code", "--title", "CT3b Task", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body", "--json"], dir),
   );
-  mustLore(claimWorktree === null ? ["claim", task] : ["claim", task, "--worktree", claimWorktree], dir);
-  return task;
+}
+
+function worldOf(dir: string): TaskWorld {
+  return { dir, git: (args) => git(dir, [...args]).trim(), lore: (args) => lore([...args], dir) };
+}
+
+let branchSeq = 0;
+
+/**
+ * Approves the draft task (its contract is compiled), claims it on a fresh linked worktree of its own, and, unless told otherwise,
+ * commits there, lands the branch on main and records a runner pass for every contract oracle from the shared checkout.
+ */
+async function takeToLanding(dir: string, task: string, stages: { land: boolean; recordPasses: boolean }): Promise<void> {
+  branchSeq += 1;
+  const branch = `ct3b-b${branchSeq}`;
+  await landTask(worldOf(dir), { slug: task, branch, worktree: join(FIXTURE_HOME, `wt-${branch}`), claimValue: "branch", session: "ct3b", ...stages });
 }
 
 interface Row {
@@ -196,15 +209,25 @@ describe("lore init OUTSIDE a git repository does not arm, and says so (AC-CT-3b
     expect(human.stdout).toContain("not inside a git repository");
   });
 
-  it("a captured pass is accepted by lore done (unarmed corpus refuses nothing)", () => {
+  it("a captured pass is accepted by lore done (unarmed corpus refuses nothing)", async () => {
     const d = makeNonGitCorpus();
     mustLore(["init"], d);
     patchLoreConfig(
       d,
-      ["workflow:", "  gates:", ...["task-claim", "task-create"].flatMap((g) => [`    ${g}:`, "      enabled: false"]), ""].join("\n"),
+      ["workflow:", "  gates:", ...["task-claim", "task-create"].flatMap((g) => [`    ${g}:`, "      enabled: false"]), ...DONE_CONTRACT_LINES, ""].join("\n"),
     );
-    const task = makeClaimedTask(d, null);
-    mustLore(["evidence", task, "--oracle", "build", "--command", "true", "--result", "pass", "--capture"], d);
+    // reason: approve compiles the contract at a commit, so the project is placed in git AFTER `lore init`: the corpus stays unarmed
+    // (arming is a separate step, see the CONTROL below) while a task can be approved, landed and judged by `lore done`.
+    git(d, ["init", "-q", "-b", "main"]);
+    git(d, ["config", "user.email", "ct3b@example.invalid"]);
+    git(d, ["config", "user.name", "ct3b test"]);
+    appendFileSync(join(d, ".git", "info", "exclude"), ".lore/\n.claude/\n");
+    writeFileSync(join(d, "README.md"), "fixture\n");
+    git(d, ["add", "."]);
+    git(d, ["commit", "-q", "-m", "init"]);
+    expect(statusStateBinding(d)).toMatchObject({ armed: false });
+    const task = makeDraftTask(d);
+    await takeToLanding(d, task, { land: true, recordPasses: true });
     const done = lore(["done", task], d);
     expect(done.exitCode, done.stderr + done.stdout).toBe(0);
   });
@@ -222,14 +245,11 @@ describe("lore init OUTSIDE a git repository does not arm, and says so (AC-CT-3b
 describe("lore evidence --capture stamps like verify (AC-CT-3b)", () => {
   it("clean committed tree: captured pass is stamped and accepted by lore done", async () => {
     const d = makeCommittedCorpus();
-    // the task's own branch holds nothing past main, so `lore integrate` finds it already integrated and records the
-    // landing `lore done` requires; main does not move, so the stamp below still names HEAD
-    git(d, ["branch", "ct3b-ok", "main"]);
-    const task = makeClaimedTask(d, "ct3b-ok");
-    git(d, ["checkout", "-q", "--detach", "main"]); // the shared checkout is a detached view of main
-    installShippedGuard(d, join(d, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
-    mustLore(["integrate", "ct3b-ok", "--session", "ct3b-session"], d);
-    mustLore(["evidence", task, "--oracle", "build", "--command", "true", "--result", "pass", "--capture"], d);
+    // the task is approved, claimed on its own branch, landed on main (the landing record `lore done` requires) and every oracle of
+    // its stored contract is captured at the shared checkout, a detached clean view of main; main does not move afterwards, so the
+    // stamp below still names HEAD
+    const task = makeDraftTask(d);
+    await takeToLanding(d, task, { land: true, recordPasses: true });
     const row = (await evidenceRows(d, task))[0]!;
     expect(row.attestation?.["state_stamp"]).toEqual({ head_sha: git(d, ["rev-parse", "HEAD"]).trim(), worktree_dirty: false });
     expect(row.attestation?.["stamp_unbound_reason"]).toBeUndefined();
@@ -240,12 +260,11 @@ describe("lore evidence --capture stamps like verify (AC-CT-3b)", () => {
   it("dirty tree: captured pass is unbound/dirty_tree and lore done refuses it", async () => {
     const d = makeCommittedCorpus();
     // reason: the claim is taken in a CLEAN linked worktree so the pre-existing uncommitted-claimed-
-    // worktree refusal does not fire first; the capture itself runs in the DIRTY checkout `d`.
-    const linked = join(FIXTURE_HOME, "linked-wt");
-    git(d, ["worktree", "add", "-q", "-b", "ct3b-linked", linked]);
-    const task = makeClaimedTask(d, linked);
+    // worktree refusal does not fire first; the captures (one per contract oracle) run in the DIRTY checkout `d`, after the landing.
+    const task = makeDraftTask(d);
+    await takeToLanding(d, task, { land: true, recordPasses: false });
     writeFileSync(join(d, "dirty.txt"), "uncommitted\n");
-    mustLore(["evidence", task, "--oracle", "build", "--command", "true", "--result", "pass", "--capture"], d);
+    await recordContractPasses(worldOf(d), task, "ct3b");
     const row = (await evidenceRows(d, task))[0]!;
     expect(row.attestation?.["state_stamp"]).toBeUndefined();
     expect(row.attestation?.["stamp_unbound_reason"]).toBe("dirty_tree");
@@ -256,7 +275,8 @@ describe("lore evidence --capture stamps like verify (AC-CT-3b)", () => {
 
   it("HEAD moved during the command: state_moved, no head recorded", async () => {
     const d = makeCommittedCorpus();
-    const task = makeClaimedTask(d);
+    const task = makeDraftTask(d);
+    await takeToLanding(d, task, { land: false, recordPasses: false }); // approved and claimed on its own branch; nothing landed
     mustLore(
       ["evidence", task, "--oracle", "build", "--command", "git commit -q --allow-empty -m moved", "--result", "pass", "--capture"],
       d,

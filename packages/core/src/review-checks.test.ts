@@ -435,41 +435,20 @@ describe("check: evidence_completeness", () => {
     }
   });
 
-  it("HAPPY: a task with a non-empty verification_evidence array passes", () => {
-    const doc = makeDoc("task", {
-      extra: {
-        plan_id: "01ARZ3PLAN0000000000001",
-        verification_evidence: [
-          { oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_at: "2026-07-01T00:00:00.000Z", recorded_by: "alice" },
-        ],
-      },
-    });
-    const results = runDeterministicChecks(makeBundle(doc));
-    expect(findCheck(results, "evidence_completeness")?.outcome).toBe("pass");
-  });
-
-  it("NEGATIVE: a task with an empty verification_evidence array fails", () => {
-    const doc = makeDoc("task", {
-      extra: { plan_id: "01ARZ3PLAN0000000000001", verification_evidence: [] },
-    });
-    const results = runDeterministicChecks(makeBundle(doc));
-    const check = findCheck(results, "evidence_completeness");
-    expect(check?.outcome).toBe("fail");
-    expect(check?.detail).toContain("verification_evidence");
-  });
-
-  it("NEGATIVE: a task with no verification_evidence key at all fails", () => {
-    const doc = makeDoc("task", { extra: { plan_id: "01ARZ3PLAN0000000000001" } });
-    const results = runDeterministicChecks(makeBundle(doc));
-    expect(findCheck(results, "evidence_completeness")?.outcome).toBe("fail");
-  });
-
-  it("BOUNDARY: a non-array verification_evidence value fails rather than throwing", () => {
-    const doc = makeDoc("task", {
-      extra: { plan_id: "01ARZ3PLAN0000000000001", verification_evidence: "not-an-array" },
-    });
-    expect(() => runDeterministicChecks(makeBundle(doc))).not.toThrow();
-    const results = runDeterministicChecks(makeBundle(doc));
-    expect(findCheck(results, "evidence_completeness")?.outcome).toBe("fail");
+  // reason: AC-DCS2-15 (#195, #408) — a task's evidence is judged by its done contract, never by the intent review.
+  it("SKIPPED: a task never fails the intent review for missing evidence, whatever its evidence holds", () => {
+    const evidences: unknown[] = [
+      undefined,
+      [],
+      "not-an-array",
+      [{ oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_at: "2026-07-01T00:00:00.000Z", recorded_by: "alice" }],
+    ];
+    for (const verification_evidence of evidences) {
+      const doc = makeDoc("task", { extra: { plan_id: "01ARZ3PLAN0000000000001", ...(verification_evidence === undefined ? {} : { verification_evidence }) } });
+      expect(() => runDeterministicChecks(makeBundle(doc))).not.toThrow();
+      const check = findCheck(runDeterministicChecks(makeBundle(doc)), "evidence_completeness");
+      expect(check?.outcome).toBe("skipped");
+      expect(check?.detail).toContain("done contract");
+    }
   });
 });

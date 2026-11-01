@@ -1,3 +1,4 @@
+// @layer cli-claim-anchors AC-DCS1-14
 // @reads assets/project/lore-config-template.yaml
 /**
  * `lore create task --anchor` / `lore anchor add|rm|list` / `lore claim
@@ -119,6 +120,8 @@ async function createTask(tmpDir: string, planSlug: string, title: string, ancho
     "task",
     "--title",
     title,
+    "--kind",
+    "code",
     "--parent",
     planSlug,
     "--plan-id",
@@ -168,6 +171,8 @@ describe("lore create task --anchor — HAPPY", () => {
         "task",
         "--title",
         "Anchored Task",
+        "--kind",
+        "code",
         "--parent",
         planSlug,
         "--plan-id",
@@ -197,7 +202,7 @@ describe("lore create task (no --anchor) — REGRESSION", () => {
   it("omitting --anchor entirely leaves extra.file_anchors absent (unchanged pre-SPEC-042 create behavior)", async () => {
     const planSlug = await createPlan(tmpDir, "No Anchor Plan");
     const result = await runLore(
-      ["create", "task", "--title", "Plain Task", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body", "--json"],
+      ["create", "task", "--title", "Plain Task", "--kind", "code", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body", "--json"],
       tmpDir,
     );
 
@@ -218,6 +223,8 @@ describe("lore create task --anchor <invalid> — NEGATIVE", () => {
         "task",
         "--title",
         "Bad Anchor Task",
+        "--kind",
+        "code",
         "--parent",
         planSlug,
         "--plan-id",
@@ -325,7 +332,7 @@ describe("lore claim --machine/--worktree — HAPPY (SPEC-042 D2)", () => {
     const planSlug = await createPlan(tmpDir, "Machine Override Plan");
     const taskSlug = await createTask(tmpDir, planSlug, "Machine Override Task");
 
-    const result = await runLore(["claim", taskSlug, "--machine", "custom-host", "--json"], tmpDir, "alice");
+    const result = await runLore(["claim", taskSlug, "--machine", "custom-host", "--worktree", "wt-machine", "--json"], tmpDir, "alice");
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as { data: { doc: { extra: { claim: { machine: string } } } } };
     expect(parsed.data.doc.extra.claim.machine).toBe("custom-host");
@@ -335,20 +342,22 @@ describe("lore claim --machine/--worktree — HAPPY (SPEC-042 D2)", () => {
     const planSlug = await createPlan(tmpDir, "Machine Auto Plan");
     const taskSlug = await createTask(tmpDir, planSlug, "Machine Auto Task");
 
-    const result = await runLore(["claim", taskSlug, "--json"], tmpDir, "alice");
+    const result = await runLore(["claim", taskSlug, "--worktree", "wt-auto", "--json"], tmpDir, "alice");
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as { data: { doc: { extra: { claim: { machine: string } } } } };
     expect(parsed.data.doc.extra.claim.machine).toBe(hostname());
   });
 
-  it("omitted --worktree yields NO worktree field at all (no process.cwd() capture, D2)", async () => {
+  it("omitted --worktree is refused for a code task (exit 4, work-needs-branch) and no claim is stored — the cwd is never captured in its place (D2, AC-DCS1-14)", async () => {
     const planSlug = await createPlan(tmpDir, "Worktree Omitted Plan");
     const taskSlug = await createTask(tmpDir, planSlug, "Worktree Omitted Task");
 
     const result = await runLore(["claim", taskSlug, "--json"], tmpDir, "alice");
-    expect(result.exitCode).toBe(0);
-    const parsed = JSON.parse(result.stdout) as { data: { doc: { extra: { claim: Record<string, unknown> } } } };
-    expect("worktree" in parsed.data.doc.extra.claim).toBe(false);
+    expect(result.exitCode).toBe(4);
+    expect(`${result.stdout}${result.stderr}`).toContain("work-needs-branch");
+    const got = await runLore(["get", taskSlug, "--json"], tmpDir);
+    const doc = (JSON.parse(got.stdout) as { data: { doc: { extra: Record<string, unknown> } } }).data.doc;
+    expect(doc.extra["claim"]).toBeUndefined();
   });
 
   it("explicit --worktree persists", async () => {

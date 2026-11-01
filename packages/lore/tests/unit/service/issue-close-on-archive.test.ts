@@ -29,6 +29,7 @@ import { actedStore } from "../../live-invocation.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
+import { LANDING_COMMIT, landedTaskExtra } from "./done-contract-unit-fixture.js";
 const NOW = "2026-10-12T10:00:00.000Z";
 const REPO_ID = 123;
 const REPO = "acme/widget";
@@ -129,7 +130,8 @@ async function createTask(w: World, plan: DocRecord, title: string, issues?: num
   return must(
     w.cs.create({
       type: "task", title, parent_id: plan.id, content: "body",
-      extra: { plan_id: plan.id, ...(issues === undefined ? {} : { issues: refsOf(...issues) }) },
+      // reason: `done` judges the stored contract and the landing (AC-DCS1-7); the fixture stores the shapes approve and integrate write.
+      extra: { plan_id: plan.id, ...landedTaskExtra(), ...(issues === undefined ? {} : { issues: refsOf(...issues) }) },
     } as CreateDocInput),
     "task",
   );
@@ -152,7 +154,7 @@ async function passEvidence(w: World, taskId: string): Promise<void> {
       {
         oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_by: "runner",
         capture_source: "runner",
-        attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+        attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, recorded_at_landing: LANDING_COMMIT },
       },
       NOW,
     ),

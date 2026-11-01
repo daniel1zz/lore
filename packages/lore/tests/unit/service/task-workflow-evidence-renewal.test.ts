@@ -60,7 +60,7 @@ async function createTask(cs: CorpusService, planId: string, title = "Renewal Ta
     title,
     parent_id: planId,
     content: "body",
-    extra: { plan_id: planId },
+    extra: { plan_id: planId, kind: "code" },
   } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create task: ${JSON.stringify(result.error)}`);
   return result.value.id;
@@ -91,7 +91,7 @@ describe("HAPPY — same-holder evidence renews the claim in one CAS write (AC-0
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice" }, () => "2026-07-23T10:00:00.000Z");
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: "wt-alice" },() => "2026-07-23T10:00:00.000Z");
     expect(claimResult.ok).toBe(true);
     if (!claimResult.ok) return;
     const versionBeforeEvidence = claimResult.value.version;
@@ -156,7 +156,7 @@ describe("NEGATIVE — foreign-holder evidence leaves the claim untouched (AC-06
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice" }, () => "2026-07-23T10:00:00.000Z");
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: "wt-alice" },() => "2026-07-23T10:00:00.000Z");
     expect(claimResult.ok).toBe(true);
     if (!claimResult.ok) return;
     const claimBefore = claimResult.value.extra["claim"];
@@ -188,7 +188,7 @@ describe("BOUNDARY — same-holder STALE claim still renews on evidence (AC-069-
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice" }, () => "2026-01-01T00:00:00.000Z");
+    await taskWorkflowService.claim(taskId, { by: "alice", worktree: "wt-alice" },() => "2026-01-01T00:00:00.000Z");
 
     // Far past any TTL — a foreign claimant would find this stale and claimable
     // without --steal, but the evidence recorder here IS the same holder.
@@ -234,7 +234,7 @@ describe("ERROR — STALE_VERSION sequential-CAS recipe still rejects correctly 
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice" }, () => "2026-07-23T10:00:00.000Z");
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: "wt-alice" },() => "2026-07-23T10:00:00.000Z");
     expect(claimResult.ok).toBe(true);
     if (!claimResult.ok) return;
     const versionAfterClaim = claimResult.value.version;

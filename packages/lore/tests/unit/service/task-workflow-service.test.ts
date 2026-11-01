@@ -1,4 +1,4 @@
-// @layer service-task-workflow AC-ACODE-3 AC-S3-5
+// @layer service-task-workflow AC-ACODE-3 AC-S3-5 AC-DCS1-14
 /**
  * Six-dimension tests for TaskWorkflowService (SPEC-025).
  * Uses InMemoryStore — no file I/O, no SQLite.
@@ -33,7 +33,6 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
-import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import { AC_REF_NOT_ON_RESOLVED_GOVERNING_SPEC } from "../../../src/service/ac-ref-messages.js";
@@ -61,6 +60,8 @@ import { runOfName } from "../../helpers/test-run-identity.js";
 
 import { fakeWorktreeProbe } from "../../helpers/fake-worktree-probe.js";
 import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
+import { LANDING_COMMIT, landedPass, landedTaskExtra, makeNoChangeRepo, testFileCommand } from "./done-contract-unit-fixture.js";
+import { createRealWorktreeProbe } from "../../../src/service/worktree-cleanup.js";
 // ─── Capturing telemetry spy (mirrors corpus-service-telemetry.test.ts) ──────
 
 class CapturingTelemetry implements Telemetry {
@@ -90,8 +91,19 @@ function makeServices(ttl = 120) {
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const telemetry = new CapturingTelemetry();
   const taskWorkflowService = new TaskWorkflowService(store, telemetry, { claimTtlMinutes: ttl }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
-  taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   return { store, corpusService, taskWorkflowService, telemetry };
+}
+
+/**
+ * Like {@link makeServices} but over a real git probe rooted at `repoDir`, so a held claim can be measured as landed by the one
+ * landing predicate (the not-landed floor runs before the foreign-claim floor, so a claim the fake probe cannot measure would
+ * refuse first). Pair with {@link makeNoChangeRepo}: its branch sits on main's head, a landing with no work of its own.
+ */
+function makeServicesOnRepo(repoDir: string, ttl = 120) {
+  const store = actedStore(new InMemoryStore());
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: ttl }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, createRealWorktreeProbe(repoDir));
+  return { store, corpusService, taskWorkflowService };
 }
 
 /**
@@ -114,7 +126,6 @@ function makeServicesWithAcPort(
     return resolveDeclaredAcIds(planId);
   };
   const taskWorkflowService = new TaskWorkflowService(store, telemetry, { claimTtlMinutes: ttl }, spiedPort, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
-  taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   return {
     store,
     corpusService,
@@ -141,7 +152,9 @@ async function createTask(
     title,
     parent_id: planId,
     content: "body",
-    extra: { plan_id: planId, ...extraOpts },
+    // reason: `done` judges the contract stored at approve and the landing integrate records (AC-DCS1-7, AC-DCS1-27); this unit
+    // fixture stores both shapes (no oracle but typecheck, red waived) so a test states only the floor it is about.
+    extra: { plan_id: planId, ...landedTaskExtra(), ...extraOpts },
   } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create task: ${JSON.stringify(result.error)}`);
   return result.value.id;
@@ -206,7 +219,8 @@ function attestedPass(overrides: Partial<VerifiedEvidenceInput> = {}): VerifiedE
     command: "bun run typecheck",
     result: "pass",
     recorded_by: "runner",
-    attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+    // reason: AC-DCS1-27 (b) — a pass counts for a code oracle when it names the landing it was recorded for.
+    attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, recorded_at_landing: LANDING_COMMIT },
     // reason: task-capture-source-is-optional-at-the-evidence-write-boundary —
     // now a compile-time-required field on VerifiedEvidenceInput; "runner" is
     // the value this fixture's real-world caller (VerifyRunnerService, which
@@ -226,7 +240,7 @@ describe("HAPPY — claim → evidence → release → ready round-trip (AC-WF-1
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     expect(claimResult.ok).toBe(true);
     if (!claimResult.ok) return;
     expect(claimResult.value.extra["claim"]).toMatchObject({ by: "alice" });
@@ -375,10 +389,10 @@ describe("NEGATIVE — foreign fresh claim → CLAIM_CONFLICT (AC-WF-3)", () => 
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const first = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const first = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     expect(first.ok).toBe(true);
 
-    const second = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") });
+    const second = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob"), worktree: "wt-bob" });
     expect(second.ok).toBe(false);
     if (second.ok) return;
     expect(second.error.code).toBe("CLAIM_CONFLICT");
@@ -392,8 +406,8 @@ describe("NEGATIVE — foreign fresh claim → CLAIM_CONFLICT (AC-WF-3)", () => 
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
-    const second = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
+    const second = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     expect(second.ok).toBe(true);
   });
 });
@@ -444,17 +458,22 @@ describe("NEGATIVE — claim --worktree empty or whitespace-only rejected (AC-WH
     expect(doc.value.doc.version).toBe(1);
   });
 
-  it("REGRESSION — omitted worktree still claims successfully with no worktree key stored", async () => {
+  it("REGRESSION — an omitted worktree is refused work-needs-branch for a code task (AC-DCS1-14), nothing stored", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
     const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
-    expect(claimResult.ok).toBe(true);
-    if (!claimResult.ok) return;
-    const claim = claimResult.value.extra["claim"] as Record<string, unknown>;
-    expect(claim.by).toBe("alice");
-    expect("worktree" in claim).toBe(false);
+    expect(claimResult.ok).toBe(false);
+    if (claimResult.ok) return;
+    expect(claimResult.error.code).toBe("VALIDATION_ERROR");
+    expect(JSON.stringify(claimResult.error)).toContain("work-needs-branch");
+
+    const doc = await corpusService.get(taskId);
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+    expect(doc.value.doc.extra["claim"]).toBeUndefined();
+    expect(doc.value.doc.version).toBe(1); // create only — no claim write landed
   });
 
   it("REGRESSION — non-empty worktree still claims successfully and stores the value verbatim", async () => {
@@ -476,7 +495,7 @@ describe("NEGATIVE — non-holder release rejected (AC-WF-6)", () => {
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     const release = await taskWorkflowService.release(taskId, { by: "bob", harnessRun: runOfName("bob") });
     expect(release.ok).toBe(false);
     if (release.ok) return;
@@ -485,7 +504,7 @@ describe("NEGATIVE — non-holder release rejected (AC-WF-6)", () => {
     expect(release.error.holder).toBe("alice");
 
     // Claim must still be held by alice — the rejected release must not have mutated it.
-    const claimAgain = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") });
+    const claimAgain = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob"), worktree: "wt-bob" });
     expect(claimAgain.ok).toBe(false); // still CLAIM_CONFLICT — proves claim wasn't cleared
   });
 
@@ -494,7 +513,7 @@ describe("NEGATIVE — non-holder release rejected (AC-WF-6)", () => {
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     const release = await taskWorkflowService.release(taskId, { by: "bob", harnessRun: runOfName("bob"), force: true, reason: "stale worker" });
     expect(release.ok).toBe(true);
     if (!release.ok) return;
@@ -518,8 +537,8 @@ describe("NEGATIVE — steal succeeds and records the previous holder in history
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
-    const stolen = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob"), steal: true });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
+    const stolen = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob"), worktree: "wt-bob", steal: true });
     expect(stolen.ok).toBe(true);
     if (!stolen.ok) return;
     expect(stolen.value.extra["claim"]).toMatchObject({ by: "bob" });
@@ -598,10 +617,10 @@ describe("BOUNDARY — TTL boundary via injected now (AC-WF-4)", () => {
     const taskId = await createTask(corpusService, planId);
 
     const claimedAt = "2026-07-02T08:00:00.000Z";
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") }, () => claimedAt);
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" }, () => claimedAt);
 
     const exactlyAtTtl = "2026-07-02T10:00:00.000Z"; // exactly 120 minutes later
-    const attempt = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") }, () => exactlyAtTtl);
+    const attempt = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob"), worktree: "wt-bob" }, () => exactlyAtTtl);
     expect(attempt.ok).toBe(false);
     if (attempt.ok) return;
     expect(attempt.error.code).toBe("CLAIM_CONFLICT");
@@ -613,10 +632,10 @@ describe("BOUNDARY — TTL boundary via injected now (AC-WF-4)", () => {
     const taskId = await createTask(corpusService, planId);
 
     const claimedAt = "2026-07-02T08:00:00.000Z";
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") }, () => claimedAt);
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" }, () => claimedAt);
 
     const pastTtl = "2026-07-02T10:01:00.000Z"; // 121 minutes later
-    const attempt = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") }, () => pastTtl);
+    const attempt = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob"), worktree: "wt-bob" }, () => pastTtl);
     expect(attempt.ok).toBe(true);
     if (!attempt.ok) return;
     expect(attempt.value.extra["claim"]).toMatchObject({ by: "bob" });
@@ -685,7 +704,7 @@ describe("ERROR — STALE_VERSION via sequential-CAS recipe (SPEC-025 §7, not P
       return "2026-07-02T10:00:00.000Z";
     };
 
-    const result = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") }, now);
+    const result = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" }, now);
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("STALE_VERSION");
@@ -701,7 +720,7 @@ describe("STATE — claim → stale transition via now injection (AC-WF-4, D10)"
     const taskId = await createTask(corpusService, planId);
 
     const claimedAt = "2026-07-02T08:00:00.000Z";
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") }, () => claimedAt);
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" }, () => claimedAt);
 
     const freshReport = await taskWorkflowService.ready(planId, () => "2026-07-02T09:00:00.000Z"); // 60 min later
     expect(freshReport.ok).toBe(true);
@@ -919,7 +938,7 @@ describe("REGRESSION — existing phase validation untouched by claim/evidence w
     await phaseService.addPhase(planId, "Foundation");
     const taskId = await createTask(corpusService, planId, "Phased Task", { phase: "Foundation" });
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     expect(claimResult.ok).toBe(true);
     if (!claimResult.ok) return;
     expect(claimResult.value.extra["phase"]).toBe("Foundation");
@@ -945,7 +964,7 @@ describe("REGRESSION — telemetry emits exactly one event per successful write,
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), source: "cli" });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice", source: "cli" });
     expect(telemetry.events).toHaveLength(1);
     expect(telemetry.last?.method).toBe("task.claimed");
     expect(telemetry.last?.ok).toBe(true);
@@ -965,10 +984,10 @@ describe("REGRESSION — telemetry emits exactly one event per successful write,
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     const countAfterFirstClaim = telemetry.events.length;
 
-    const conflicting = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") });
+    const conflicting = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob"), worktree: "wt-bob" });
     expect(conflicting.ok).toBe(false);
     expect(telemetry.events.length).toBe(countAfterFirstClaim); // no new event
   });
@@ -1144,7 +1163,6 @@ function makeServicesWithRealAcPorts(ttl = 120) {
     undefined,
     corpusService.resolveDeclaredAcIdsForAdhocTask.bind(corpusService), undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(),
   );
-  taskWorkflowService.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = refused
   return { store, corpusService, acService, taskWorkflowService, telemetry };
 }
 
@@ -1608,15 +1626,43 @@ describe("REGRESSION — recordVerifiedEvidence telemetry emits meta.attested ==
 
 describe("HAPPY — done() walks a released task to archived, one audit row per step (AC-WH-3)", () => {
   it("claim → evidence(pass) → release → done archives the task via draft -> approved -> active -> archived", async () => {
+    // reason: the claim is on a branch (AC-DCS1-14) that sits on main's head, so the landing predicate measures it as landed and
+    // `done` reaches its evidence floors; the branch's own landing record and counted pass are the fixture's (AC-DCS1-27).
+    const repo = makeNoChangeRepo();
+    try {
+      const { corpusService, taskWorkflowService, store } = makeServicesOnRepo(repo.dir);
+      const planId = await createPlan(corpusService);
+      const taskId = await createTask(corpusService, planId);
+
+      const claimed = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repo.branch });
+      expect(claimed.ok).toBe(true);
+      await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+      await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
+      const released = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
+      expect(released.ok).toBe(true);
+
+      await expectDoneWalk(taskWorkflowService, corpusService, store, taskId);
+    } finally {
+      repo.dispose();
+    }
+  });
+
+  it("evidence(pass) → done, with no claim at all, archives the task via the same steps", async () => {
     const { corpusService, taskWorkflowService, store } = makeServices();
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
-
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
-    await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
 
+    await expectDoneWalk(taskWorkflowService, corpusService, store, taskId);
+  });
+
+  async function expectDoneWalk(
+    taskWorkflowService: TaskWorkflowService,
+    corpusService: CorpusService,
+    store: ReturnType<typeof makeServices>["store"],
+    taskId: string,
+  ): Promise<void> {
     const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
     if (!doneResult.ok) return;
@@ -1638,7 +1684,7 @@ describe("HAPPY — done() walks a released task to archived, one audit row per 
     expect(doneSteps).toHaveLength(3);
     expect(doneSteps.map((e) => e.details?.["status_to"])).toEqual(["approved", "active", "archived"]);
     expect(doneSteps.every((e) => e.action === "update")).toBe(true);
-  });
+  }
 
   it("a dependent blocks-linked task flips to ready:true in the same corpus state", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
@@ -1772,55 +1818,75 @@ describe("NEGATIVE — done() refuses without a result:pass evidence entry (AC-W
 });
 
 describe("NEGATIVE — done() refuses under a fresh foreign claim (AC-WH-3)", () => {
+  // reason: the claim is on a branch (AC-DCS1-14) that sits on main's head: the landing predicate measures it as landed, so the
+  // floors before the foreign-claim floor pass and the claim itself is what the test is about.
   it("a fresh claim held by a DIFFERENT actor refuses done with VALIDATION_ERROR naming the holder", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
-    const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId);
+    const repo = makeNoChangeRepo();
+    try {
+      const { corpusService, taskWorkflowService } = makeServicesOnRepo(repo.dir);
+      const planId = await createPlan(corpusService);
+      const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
-    await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
-    await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") });
+      await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+      await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
+      const claimed = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob"), worktree: repo.branch });
+      expect(claimed.ok).toBe(true);
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
-    expect(doneResult.ok).toBe(false);
-    if (doneResult.ok) return;
-    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
-    if (doneResult.error.code !== "VALIDATION_ERROR") return;
-    expect(doneResult.error.value).toBe("bob");
+      const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
+      expect(doneResult.ok).toBe(false);
+      if (doneResult.ok) return;
+      expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+      if (doneResult.error.code !== "VALIDATION_ERROR") return;
+      expect(doneResult.error.value).toBe("bob");
 
-    const doc = await corpusService.get(taskId);
-    expect(doc.ok).toBe(true);
-    if (!doc.ok) return;
-    expect(doc.value.doc.status).toBe("draft");
+      const doc = await corpusService.get(taskId);
+      expect(doc.ok).toBe(true);
+      if (!doc.ok) return;
+      expect(doc.value.doc.status).toBe("draft");
+    } finally {
+      repo.dispose();
+    }
   });
 
   it("a fresh claim held by the SAME actor calling done does NOT block", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
-    const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId);
+    const repo = makeNoChangeRepo();
+    try {
+      const { corpusService, taskWorkflowService } = makeServicesOnRepo(repo.dir);
+      const planId = await createPlan(corpusService);
+      const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
-    await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+      await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+      await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
+      const claimed = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: repo.branch });
+      expect(claimed.ok).toBe(true);
 
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
-    expect(doneResult.ok).toBe(true);
+      const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
+      expect(doneResult.ok).toBe(true);
+    } finally {
+      repo.dispose();
+    }
   });
 
   it("a STALE foreign claim does NOT block done (freshness via injected now)", async () => {
-    const { corpusService, taskWorkflowService } = makeServices(1); // 1-minute TTL
-    const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId);
+    const repo = makeNoChangeRepo();
+    try {
+      const { corpusService, taskWorkflowService } = makeServicesOnRepo(repo.dir, 1); // 1-minute TTL
+      const planId = await createPlan(corpusService);
+      const taskId = await createTask(corpusService, planId);
 
-    const t0 = () => "2026-07-27T10:00:00.000Z";
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }), t0);
-    await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), t0());
-    await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") }, t0);
+      const t0 = () => "2026-07-27T10:00:00.000Z";
+      await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }), t0);
+      await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), t0());
+      const claimed = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob"), worktree: repo.branch }, t0);
+      expect(claimed.ok).toBe(true);
 
-    // 5 minutes later — well past the 1-minute TTL, so bob's claim is stale.
-    const tLater = () => "2026-07-27T10:05:00.000Z";
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") }, tLater);
-    expect(doneResult.ok).toBe(true);
+      // 5 minutes later — well past the 1-minute TTL, so bob's claim is stale.
+      const tLater = () => "2026-07-27T10:05:00.000Z";
+      const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") }, tLater);
+      expect(doneResult.ok).toBe(true);
+    } finally {
+      repo.dispose();
+    }
   });
 });
 
@@ -1893,17 +1959,19 @@ describe("REGRESSION — done() telemetry emits exactly one task.done event per 
 // ─── done()'s red-first discipline floor ─────────────────────────────────────
 // (task-red-first-discipline-is-asked-for-in-prose-but-never)
 //
-// A task carrying `extra.red_first: true` claims its tests were written RED
-// FIRST. `done()` now demands ≥1 "expected-fail"/"fail" evidence row on such a
-// task — the SAME `result:pass` floor above still applies independently, so a
-// red_first task needs BOTH a passing row AND a red row; a task that never
-// sets the flag is completely unaffected (zero new friction).
+// The red requirement is the stored contract's (AC-DCS1-7): a code task whose
+// `done_contract.red_required` is true demands ≥1 runner-produced
+// "expected-fail"/"fail" evidence row — the SAME attested-pass floor above still
+// applies independently, so such a task needs BOTH a passing row AND a red row;
+// a contract that waived the red run at approve (`red_required: false`, the
+// fixture default) is completely unaffected. The retired `extra.red_first`
+// declaration is not read any more.
 
-describe("HAPPY — done() accepts a red_first task carrying both a pass AND a red row", () => {
-  it("red_first:true + pass + expected-fail rows → done succeeds", async () => {
+describe("HAPPY — done() accepts a red_required task carrying both a pass AND a red row", () => {
+  it("red_required:true + pass + expected-fail rows → done succeeds", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId, "Red First Task", { red_first: true });
+    const taskId = await createTask(corpusService, planId, "Red First Task", landedTaskExtra({ redRequired: true }));
 
     await taskWorkflowService.addEvidence(
       taskId,
@@ -1920,10 +1988,10 @@ describe("HAPPY — done() accepts a red_first task carrying both a pass AND a r
     expect(doneResult.value.task.status).toBe("archived");
   });
 
-  it("red_first:true + pass + a plain 'fail' row (not just expected-fail) also satisfies the floor", async () => {
+  it("red_required:true + pass + a plain 'fail' row (not just expected-fail) also satisfies the floor", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId, "Red First Task Fail Row", { red_first: true });
+    const taskId = await createTask(corpusService, planId, "Red First Task Fail Row", landedTaskExtra({ redRequired: true }));
 
     await taskWorkflowService.addEvidence(
       taskId,
@@ -1937,11 +2005,11 @@ describe("HAPPY — done() accepts a red_first task carrying both a pass AND a r
   });
 });
 
-describe("NEGATIVE — done() refuses a red_first task holding only result:pass evidence (AC1)", () => {
-  it("red_first:true + pass only (no red row) → VALIDATION_ERROR naming the task and the missing row", async () => {
+describe("NEGATIVE — done() refuses a red_required task holding only result:pass evidence (AC1)", () => {
+  it("red_required:true + pass only (no red row) → VALIDATION_ERROR [floor: red-first] naming the task and the missing row", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId, "Unproven Red First Task", { red_first: true });
+    const taskId = await createTask(corpusService, planId, "Unproven Red First Task", landedTaskExtra({ redRequired: true }));
 
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
@@ -1957,6 +2025,7 @@ describe("NEGATIVE — done() refuses a red_first task holding only result:pass 
     if (doneResult.error.code !== "VALIDATION_ERROR") return;
     expect(doneResult.error.message).toContain(slug);
     expect(doneResult.error.message).toMatch(/expected-fail|"fail"/);
+    expect(doneResult.error.message).toContain("[floor: red-first]");
 
     const doc = await corpusService.get(taskId);
     expect(doc.ok).toBe(true);
@@ -1966,10 +2035,10 @@ describe("NEGATIVE — done() refuses a red_first task holding only result:pass 
 });
 
 describe("BOUNDARY — the pre-existing result:pass floor and the new red-first floor are independent (AC4)", () => {
-  it("red_first:true + only an expected-fail row (NO pass) is still refused, by the PRE-EXISTING pass floor", async () => {
+  it("red_required:true + only an expected-fail row (NO pass) is still refused, by the PRE-EXISTING pass floor", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId, "Red Only Task", { red_first: true });
+    const taskId = await createTask(corpusService, planId, "Red Only Task", landedTaskExtra({ redRequired: true }));
 
     const written = await taskWorkflowService.addEvidence(
       taskId,
@@ -1991,29 +2060,61 @@ describe("BOUNDARY — the pre-existing result:pass floor and the new red-first 
     // sentence could only ever degrade to a silent no-match.
     expect(doneResult.error.message).toContain("evidence row at all");
     expect(doneResult.error.message).toContain("runner-issued provenance record");
-    expect(doneResult.error.message).not.toContain("extra.red_first");
+    expect(doneResult.error.message).not.toContain("red_required");
   });
 });
 
-describe("ERROR — a malformed extra.red_first value degrades to 'not declared', never crashes (defensive read)", () => {
-  it("extra.red_first stored as a non-boolean string ('yes') is treated as undeclared — done succeeds on pass alone", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
+describe("ERROR — a malformed stored done_contract is refused by name, never crashes (defensive read)", () => {
+  it("done_contract stored as a non-object ('yes') → VALIDATION_ERROR on field done_contract, task unarchived", async () => {
+    const { store, corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId, "Malformed Flag Task");
-    // Bypasses the Zod write-time gate on purpose — simulates a legacy/corrupted
-    // row, mirroring readClaim/readEvidence's "malformed → safe default" contract.
-    await corpusService.set(taskId, { extra: { plan_id: planId, red_first: "yes" } });
+    const taskId = await createTask(corpusService, planId, "Malformed Contract Task");
+    // Bypasses the write-time gates on purpose — simulates a corrupted row, the
+    // defensive-read contract of every stored record.
+    const current = await corpusService.get(taskId);
+    expect(current.ok).toBe(true);
+    if (!current.ok) return;
+    const corrupted = await store.update(taskId, { extra: { ...current.value.doc.extra, done_contract: "yes" } });
+    expect(corrupted.ok).toBe(true);
 
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
     const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
-    expect(doneResult.ok).toBe(true);
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+    if (doneResult.error.code !== "VALIDATION_ERROR") return;
+    expect(doneResult.error.field).toBe("done_contract");
+    expect(doneResult.error.message).toContain("does not parse");
+
+    const after = await corpusService.get(taskId);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.value.doc.status).toBe("draft");
+  });
+
+  it("a task with NO stored contract at all is refused naming lore approve, never judged by its live fields", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    // `done_contract: undefined` overrides the fixture default, so the task holds none.
+    const taskId = await createTask(corpusService, planId, "No Contract Task", { done_contract: undefined });
+
+    await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+    if (doneResult.error.code !== "VALIDATION_ERROR") return;
+    expect(doneResult.error.field).toBe("done_contract");
+    expect(doneResult.error.message).toContain("holds no done contract");
+    expect(doneResult.error.message).toContain("lore approve");
   });
 });
 
-describe("STATE — a task that never declares red_first is completely unaffected (AC3, no new friction)", () => {
-  it("no extra.red_first at all + only a result:pass row → done succeeds exactly as before", async () => {
+describe("STATE — a task whose contract waived the red run is completely unaffected (AC3, no new friction)", () => {
+  it("red_required:false (waived at approve) + only a result:pass row → done succeeds exactly as before", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
@@ -2025,16 +2126,18 @@ describe("STATE — a task that never declares red_first is completely unaffecte
     expect(doneResult.ok).toBe(true);
   });
 
-  it("extra.red_first explicitly false + only a result:pass row → done succeeds (false behaves like absent)", async () => {
+  it("done never changes the stored red requirement: the waiver reason survives the archive byte for byte", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId, "Explicit False Task", { red_first: false });
+    const taskId = await createTask(corpusService, planId, "Waived Task");
 
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
-
     const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(doneResult.ok).toBe(true);
+    if (!doneResult.ok) return;
+    const stored = doneResult.value.task.extra["done_contract"] as { red_required?: boolean; red_waiver_reason?: string };
+    expect(stored.red_required).toBe(false);
+    expect(stored.red_waiver_reason).toBe("unit fixture: this task adds no new test");
   });
 });
 
@@ -2050,112 +2153,6 @@ describe("REGRESSION — pre-existing done() behavior over legacy (no red_first 
     expect(doneResult.ok).toBe(true);
     if (!doneResult.ok) return;
     expect(doneResult.value.transitions).toEqual(["approved", "active", "archived"]);
-  });
-});
-
-// ─── TaskWorkflowService.declareRedFirst — the dedicated write-time verb ────
-// (task-red-first-discipline-is-asked-for-in-prose-but-never, Q2)
-// `lore red-first <task>`'s service-layer implementation. Read-modify-write,
-// never through `lore set` (wholesale extra replace) — same reason
-// `file_anchors`/`ac_scope`/`claim`/`verification_evidence` each have a
-// dedicated writer.
-
-describe("HAPPY — declareRedFirst sets extra.red_first: true and preserves sibling extra keys", () => {
-  it("declares true on a fresh task, bumps version, appends an audit row", async () => {
-    const { corpusService, taskWorkflowService, store } = makeServices();
-    const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId, "Declare Target", { linkage: "kept" });
-
-    const result = await taskWorkflowService.declareRedFirst(taskId, { by: "alice" });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.extra["red_first"]).toBe(true);
-    expect(result.value.extra["linkage"]).toBe("kept");
-    expect(result.value.version).toBe(2); // v1 create, v2 declare
-
-    const auditResult = await store.queryAudit({ doc_id: taskId });
-    expect(auditResult.ok).toBe(true);
-    if (!auditResult.ok) return;
-    expect(auditResult.value.some((e) => e.details?.["red_first"] === true)).toBe(true);
-  });
-});
-
-describe("NEGATIVE — declareRedFirst refuses a non-task target", () => {
-  it("a plan target → VALIDATION_ERROR naming the type", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
-    const planId = await createPlan(corpusService);
-
-    const result = await taskWorkflowService.declareRedFirst(planId, { by: "alice" });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
-  });
-});
-
-describe("BOUNDARY — declareRedFirst is idempotent on an already-declared task", () => {
-  it("declaring twice leaves red_first true both times, second call still succeeds", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
-    const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId);
-
-    const first = await taskWorkflowService.declareRedFirst(taskId, { by: "alice" });
-    expect(first.ok).toBe(true);
-    const second = await taskWorkflowService.declareRedFirst(taskId, { by: "alice" });
-    expect(second.ok).toBe(true);
-    if (!second.ok) return;
-    expect(second.value.extra["red_first"]).toBe(true);
-  });
-});
-
-describe("ERROR — declareRedFirst on a nonexistent target", () => {
-  it("an unknown id/slug → DOC_NOT_FOUND", async () => {
-    const { taskWorkflowService } = makeServices();
-    const result = await taskWorkflowService.declareRedFirst("task-does-not-exist", { by: "alice" });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("DOC_NOT_FOUND");
-  });
-});
-
-describe("STATE — declareRedFirst never touches claim/verification_evidence (AC-S3-5-style)", () => {
-  it("a claimed task with evidence keeps both byte-identical after declareRedFirst", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
-    const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId);
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
-
-    const before = await corpusService.get(taskId);
-    expect(before.ok).toBe(true);
-    if (!before.ok) return;
-
-    const result = await taskWorkflowService.declareRedFirst(taskId, { by: "alice" });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-
-    expect(JSON.stringify(result.value.extra["claim"])).toBe(JSON.stringify(before.value.doc.extra["claim"]));
-    expect(JSON.stringify(result.value.extra["verification_evidence"])).toBe(
-      JSON.stringify(before.value.doc.extra["verification_evidence"]),
-    );
-  });
-});
-
-describe("REGRESSION — declareRedFirst + a red row together satisfy done()'s new floor end to end", () => {
-  it("declareRedFirst then evidence(expected-fail) then evidence(pass) then done() succeeds", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
-    const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId);
-
-    await taskWorkflowService.declareRedFirst(taskId, { by: "alice" });
-    await taskWorkflowService.addEvidence(
-      taskId,
-      evidence({ result: "expected-fail", output_tail: "AssertionError: expected 1 to equal 2", capture_source: "runner" }),
-    );
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass", command: "second" }));
-    await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
-
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
-    expect(doneResult.ok).toBe(true);
   });
 });
 
@@ -2176,20 +2173,15 @@ describe("HAPPY — done() accepts a test-file anchor with a genuine unfiltered 
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const FILE = "packages/core/tests/attestation-completeness.test.ts";
-    const taskId = await createTask(corpusService, planId, "Anchored Task", { file_anchors: [FILE] });
+    // reason: the anchored test file is a `test:<path>` oracle of the stored contract, run by the contract's own unfiltered command.
+    const taskId = await createTask(corpusService, planId, "Anchored Task", landedTaskExtra({ testFiles: [FILE] }));
 
-    await taskWorkflowService.addEvidence(
+    await taskWorkflowService.recordVerifiedEvidence(
       taskId,
-      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): oracle
-      // "test" self-report is now refused by the D5 raise regardless of tail content;
-      // this describe block tests done()'s UNFILTERED-file floor, not capture_source,
-      // so an explicit "runner" override is the cheaper correct fix.
-      evidence({ oracle: "test", command: `bunx vitest run ${FILE} -t "AC-1"`, result: "pass", capture_source: "runner" }),
+      landedPass(`${testFileCommand(FILE)} -t "AC-1"`),
+      "2026-07-27T09:00:00.000Z",
     );
-    await taskWorkflowService.addEvidence(
-      taskId,
-      evidence({ oracle: "test", command: `bunx vitest run ${FILE}`, result: "pass", capture_source: "runner" }),
-    );
+    await taskWorkflowService.recordVerifiedEvidence(taskId, landedPass(testFileCommand(FILE)), "2026-07-27T09:00:00.000Z");
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
     const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
@@ -2204,15 +2196,12 @@ describe("NEGATIVE — done() refuses a test-file anchor backed ONLY by -t-scope
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const FILE = "packages/core/tests/attestation-completeness.test.ts";
-    const taskId = await createTask(corpusService, planId, "Anchored Task", { file_anchors: [FILE] });
+    const taskId = await createTask(corpusService, planId, "Anchored Task", landedTaskExtra({ testFiles: [FILE] }));
 
-    await taskWorkflowService.addEvidence(
+    await taskWorkflowService.recordVerifiedEvidence(
       taskId,
-      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): oracle
-      // "test" self-report is now refused by the D5 raise regardless of tail content;
-      // this describe block tests done()'s UNFILTERED-file floor, not capture_source,
-      // so an explicit "runner" override is the cheaper correct fix.
-      evidence({ oracle: "test", command: `bunx vitest run ${FILE} -t "AC-1"`, result: "pass", capture_source: "runner" }),
+      landedPass(`${testFileCommand(FILE)} -t "AC-1"`),
+      "2026-07-27T09:00:00.000Z",
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
@@ -2223,6 +2212,7 @@ describe("NEGATIVE — done() refuses a test-file anchor backed ONLY by -t-scope
     if (doneResult.error.code !== "VALIDATION_ERROR") return;
     expect(doneResult.error.message).toContain(FILE);
     expect(doneResult.error.message).toContain("UNFILTERED");
+    expect(doneResult.error.message).toContain("[floor: unfiltered-test-file]");
 
     const doc = await corpusService.get(taskId);
     expect(doc.ok).toBe(true);
@@ -2235,18 +2225,14 @@ describe("NEGATIVE — done() refuses a test-file anchor backed ONLY by -t-scope
     const planId = await createPlan(corpusService);
     const FILE_A = "packages/core/tests/attestation-completeness.test.ts";
     const FILE_B = "packages/lore/tests/unit/service/task-workflow-service.test.ts";
-    const taskId = await createTask(corpusService, planId, "Two-Anchor Task", {
-      file_anchors: [FILE_A, FILE_B],
-    });
+    const taskId = await createTask(corpusService, planId, "Two-Anchor Task", landedTaskExtra({ testFiles: [FILE_A, FILE_B] }));
 
     // FILE_A gets a genuine unfiltered pass; FILE_B only ever gets a -t-scoped one.
-    await taskWorkflowService.addEvidence(
+    await taskWorkflowService.recordVerifiedEvidence(taskId, landedPass(testFileCommand(FILE_A)), "2026-07-27T09:00:00.000Z");
+    await taskWorkflowService.recordVerifiedEvidence(
       taskId,
-      evidence({ oracle: "test", command: `bunx vitest run ${FILE_A}`, result: "pass", capture_source: "runner" }),
-    );
-    await taskWorkflowService.addEvidence(
-      taskId,
-      evidence({ oracle: "test", command: `bunx vitest run ${FILE_B} -t "some case"`, result: "pass", capture_source: "runner" }),
+      landedPass(`${testFileCommand(FILE_B)} -t "some case"`),
+      "2026-07-27T09:00:00.000Z",
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
@@ -2263,11 +2249,12 @@ describe("NEGATIVE — done() refuses a test-file anchor backed ONLY by -t-scope
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const FILE = "packages/core/tests/attestation-completeness.test.ts";
-    const taskId = await createTask(corpusService, planId, "Anchored Task", { file_anchors: [FILE] });
+    const taskId = await createTask(corpusService, planId, "Anchored Task", landedTaskExtra({ testFiles: [FILE] }));
 
-    await taskWorkflowService.addEvidence(
+    await taskWorkflowService.recordVerifiedEvidence(
       taskId,
-      evidence({ oracle: "test", command: `bunx vitest run ${FILE} --test-name-pattern=alpha`, result: "pass", capture_source: "runner" }),
+      landedPass(`${testFileCommand(FILE)} --test-name-pattern=alpha`),
+      "2026-07-27T09:00:00.000Z",
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
@@ -2333,7 +2320,7 @@ describe("ERROR — a malformed extra.file_anchors value degrades to 'no anchors
     const taskId = await createTask(corpusService, planId, "Malformed Anchors Task");
     // Bypasses the create-time normalizeFileAnchors gate on purpose — simulates a
     // corrupted row, mirroring extractFileAnchors's own "malformed → []" contract.
-    await corpusService.set(taskId, { extra: { plan_id: planId, file_anchors: "not-an-array" } });
+    await corpusService.set(taskId, { extra: { plan_id: planId, ...landedTaskExtra(), file_anchors: "not-an-array" } });
 
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
@@ -2344,14 +2331,11 @@ describe("ERROR — a malformed extra.file_anchors value degrades to 'no anchors
 });
 
 describe("BOUNDARY — the three done() evidence floors are independent; none masks another (AC3)", () => {
-  it("red_first:true + an unmet unfiltered-file floor + only an expected-fail row → the PRE-EXISTING pass floor fires first", async () => {
+  it("red_required:true + an unmet unfiltered-file floor + only an expected-fail row → the PRE-EXISTING pass floor fires first", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const FILE = "packages/core/tests/attestation-completeness.test.ts";
-    const taskId = await createTask(corpusService, planId, "Triple-Floor Task", {
-      red_first: true,
-      file_anchors: [FILE],
-    });
+    const taskId = await createTask(corpusService, planId, "Triple-Floor Task", landedTaskExtra({ redRequired: true, testFiles: [FILE] }));
 
     await taskWorkflowService.addEvidence(
       taskId,
@@ -2374,31 +2358,25 @@ describe("BOUNDARY — the three done() evidence floors are independent; none ma
     // ABSENCE of the other two floors' markers.
     expect(doneResult.error.message).toContain("evidence row at all");
     expect(doneResult.error.message).toContain("runner-issued provenance record");
-    expect(doneResult.error.message).not.toContain("extra.red_first");
+    expect(doneResult.error.message).not.toContain("red_required");
     expect(doneResult.error.message).not.toContain("UNFILTERED");
   });
 
-  it("red_first:true + a pass row + an unmet unfiltered-file floor, NO red row → the red-first floor fires (not the new floor)", async () => {
+  it("red_required:true + a pass row + an unmet unfiltered-file floor, NO red row → the red-first floor fires (not the new floor)", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const FILE = "packages/core/tests/attestation-completeness.test.ts";
-    const taskId = await createTask(corpusService, planId, "Triple-Floor Task 2", {
-      red_first: true,
-      file_anchors: [FILE],
-    });
+    const taskId = await createTask(corpusService, planId, "Triple-Floor Task 2", landedTaskExtra({ redRequired: true, testFiles: [FILE] }));
 
     // A -t-scoped pass — satisfies neither red-first (no red row) nor the new
     // unfiltered-file floor (still -t-scoped), so BOTH would refuse; the
     // red-first floor is evaluated first and must be the one that actually fires.
     // An attested pass is added so the ATTESTATION floor (evaluated before
     // red-first) is satisfied too — otherwise IT would fire first instead.
-    await taskWorkflowService.addEvidence(
+    await taskWorkflowService.recordVerifiedEvidence(
       taskId,
-      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): oracle
-      // "test" self-report is now refused by the D5 raise regardless of tail content;
-      // this describe block tests done()'s UNFILTERED-file floor, not capture_source,
-      // so an explicit "runner" override is the cheaper correct fix.
-      evidence({ oracle: "test", command: `bunx vitest run ${FILE} -t "AC-1"`, result: "pass", capture_source: "runner" }),
+      landedPass(`${testFileCommand(FILE)} -t "AC-1"`),
+      "2026-07-27T09:00:00.000Z",
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
@@ -2407,17 +2385,15 @@ describe("BOUNDARY — the three done() evidence floors are independent; none ma
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
     if (doneResult.error.code !== "VALIDATION_ERROR") return;
-    expect(doneResult.error.message).toContain("declares extra.red_first");
+    expect(doneResult.error.message).toContain("red_required: true");
+    expect(doneResult.error.message).toContain("[floor: red-first]");
   });
 
-  it("red_first satisfied + pass:result satisfied + unfiltered-file floor UNMET → the new floor fires distinctly", async () => {
+  it("red satisfied + pass:result satisfied + unfiltered-file floor UNMET → the new floor fires distinctly", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const FILE = "packages/core/tests/attestation-completeness.test.ts";
-    const taskId = await createTask(corpusService, planId, "Triple-Floor Task 3", {
-      red_first: true,
-      file_anchors: [FILE],
-    });
+    const taskId = await createTask(corpusService, planId, "Triple-Floor Task 3", landedTaskExtra({ redRequired: true, testFiles: [FILE] }));
 
     await taskWorkflowService.addEvidence(
       taskId,
@@ -2429,13 +2405,10 @@ describe("BOUNDARY — the three done() evidence floors are independent; none ma
         capture_source: "runner",
       }),
     );
-    await taskWorkflowService.addEvidence(
+    await taskWorkflowService.recordVerifiedEvidence(
       taskId,
-      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): oracle
-      // "test" self-report is now refused by the D5 raise regardless of tail content;
-      // this describe block tests done()'s UNFILTERED-file floor, not capture_source,
-      // so an explicit "runner" override is the cheaper correct fix.
-      evidence({ oracle: "test", command: `bunx vitest run ${FILE} -t "AC-1"`, result: "pass", capture_source: "runner" }),
+      landedPass(`${testFileCommand(FILE)} -t "AC-1"`),
+      "2026-07-27T09:00:00.000Z",
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
@@ -2447,8 +2420,9 @@ describe("BOUNDARY — the three done() evidence floors are independent; none ma
     // Neither the pass floor nor the red-first floor's own message — proves
     // the NEW floor, and only it, is what refused this call.
     expect(doneResult.error.message).not.toContain("holds no result:pass evidence entry");
-    expect(doneResult.error.message).not.toContain("declares extra.red_first");
+    expect(doneResult.error.message).not.toContain("red_required");
     expect(doneResult.error.message).toContain(FILE);
+    expect(doneResult.error.message).toContain("[floor: unfiltered-test-file]");
   });
 });
 
@@ -2474,30 +2448,17 @@ describe("REGRESSION — the interaction the floor exists to catch: two tests, e
   it("two -t-scoped PASS rows (one per test) with NO unfiltered row at all → refused, naming the fixture", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId, "Interaction Fixture Task", {
-      file_anchors: [FIXTURE],
-    });
+    const taskId = await createTask(corpusService, planId, "Interaction Fixture Task", landedTaskExtra({ testFiles: [FIXTURE] }));
 
-    await taskWorkflowService.addEvidence(
+    await taskWorkflowService.recordVerifiedEvidence(
       taskId,
-      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): oracle
-      // "test" self-report is now refused by the D5 raise regardless of tail content;
-      // this describe block tests done()'s UNFILTERED-file floor, not capture_source.
-      evidence({
-        oracle: "test",
-        command: `bunx vitest run ${FIXTURE} -t "first bumps the shared counter to one"`,
-        result: "pass",
-        capture_source: "runner",
-      }),
+      landedPass(`${testFileCommand(FIXTURE)} -t "first bumps the shared counter to one"`),
+      "2026-07-27T09:00:00.000Z",
     );
-    await taskWorkflowService.addEvidence(
+    await taskWorkflowService.recordVerifiedEvidence(
       taskId,
-      evidence({
-        oracle: "test",
-        command: `bunx vitest run ${FIXTURE} -t "second assumes it is the only test touching the counter"`,
-        result: "pass",
-        capture_source: "runner",
-      }),
+      landedPass(`${testFileCommand(FIXTURE)} -t "second assumes it is the only test touching the counter"`),
+      "2026-07-27T09:00:00.000Z",
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
@@ -2512,30 +2473,17 @@ describe("REGRESSION — the interaction the floor exists to catch: two tests, e
   it("the REAL unfiltered run, recorded verbatim as result:fail (RED), still does not satisfy the floor", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId, "Interaction Fixture Task Red", {
-      file_anchors: [FIXTURE],
-    });
+    const taskId = await createTask(corpusService, planId, "Interaction Fixture Task Red", landedTaskExtra({ testFiles: [FIXTURE] }));
 
-    await taskWorkflowService.addEvidence(
+    await taskWorkflowService.recordVerifiedEvidence(
       taskId,
-      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): oracle
-      // "test" self-report is now refused by the D5 raise regardless of tail content;
-      // this describe block tests done()'s UNFILTERED-file floor, not capture_source.
-      evidence({
-        oracle: "test",
-        command: `bunx vitest run ${FIXTURE} -t "first bumps the shared counter to one"`,
-        result: "pass",
-        capture_source: "runner",
-      }),
+      landedPass(`${testFileCommand(FIXTURE)} -t "first bumps the shared counter to one"`),
+      "2026-07-27T09:00:00.000Z",
     );
-    await taskWorkflowService.addEvidence(
+    await taskWorkflowService.recordVerifiedEvidence(
       taskId,
-      evidence({
-        oracle: "test",
-        command: `bunx vitest run ${FIXTURE} -t "second assumes it is the only test touching the counter"`,
-        result: "pass",
-        capture_source: "runner",
-      }),
+      landedPass(`${testFileCommand(FIXTURE)} -t "second assumes it is the only test touching the counter"`),
+      "2026-07-27T09:00:00.000Z",
     );
     // The genuine unfiltered run, recorded verbatim as observed — real exit
     // code 1, real AssertionError tail. Proof this floor requires an
@@ -2544,7 +2492,7 @@ describe("REGRESSION — the interaction the floor exists to catch: two tests, e
       taskId,
       evidence({
         oracle: "test",
-        command: `bunx vitest run ${FIXTURE}`,
+        command: testFileCommand(FIXTURE),
         result: "fail",
         output_tail: "AssertionError: expected 1 to be +0 // Object.is equality",
       }),
@@ -2560,16 +2508,12 @@ describe("REGRESSION — the interaction the floor exists to catch: two tests, e
   });
 });
 
-// ─── done()'s attested-pass floor + its audited escape hatch ────────────────
+// ─── done()'s attested-pass floor ───────────────────────────────────────────
 // (adr-lore-done-requires-a-runner-attested-pass-the-sixth-false,
 //  task-lore-done-accepts-an-unattested-self-reported-pass-as)
 //
-// The pre-existing `result:pass` floor now ALSO requires `attestation !==
-// undefined` — a self-reported-only pass (the ONLY shape any CLI/MCP `lore
-// evidence` write can produce) no longer suffices to archive. The ONE audited
-// bypass is `opts.overrideReason` (`commands/done.ts`'s `--override-attestation
-// "<reason>"`), which never relaxes the independent red-first / unfiltered-
-// test-file-run floors below it.
+// The `result:pass` floor also requires `attestation !== undefined` — a self-reported-only pass
+// no longer suffices to archive, and nothing waives it (the override was retired, D45).
 
 describe("HAPPY — done() accepts a task whose ONLY evidence is a runner-attested pass", () => {
   it("an attested pass with NO self-reported evidence at all archives normally", async () => {
@@ -2587,7 +2531,7 @@ describe("HAPPY — done() accepts a task whose ONLY evidence is a runner-attest
 });
 
 describe("NEGATIVE — done() refuses a self-reported-only pass, naming both repairs (AC1)", () => {
-  it("only a self-reported result:pass row → VALIDATION_ERROR naming lore verify AND the escape hatch", async () => {
+  it("only a self-reported result:pass row → VALIDATION_ERROR naming lore verify AND lore evidence --capture", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
@@ -2610,27 +2554,13 @@ describe("NEGATIVE — done() refuses a self-reported-only pass, naming both rep
     expect(doneResult.error.message).toContain("capture_source");
     expect(doneResult.error.message).not.toContain("runner-captured");
     expect(doneResult.error.message).toContain("lore verify");
-    expect(doneResult.error.message).toContain("--override-attestation");
+    expect(doneResult.error.message).toContain("lore evidence");
+    expect(doneResult.error.message).not.toContain("--override-attestation");
 
     const doc = await corpusService.get(taskId);
     expect(doc.ok).toBe(true);
     if (!doc.ok) return;
     expect(doc.value.doc.status).toBe("draft"); // unchanged — refusal never partially writes
-  });
-
-  it("a blank overrideReason passed directly to the service is refused (belt-and-suspenders, mirrors the CLI's own exit-2 usage check)", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
-    const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId);
-
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
-
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice"), overrideReason: "   " });
-    expect(doneResult.ok).toBe(false);
-    if (doneResult.ok) return;
-    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
-    if (doneResult.error.code !== "VALIDATION_ERROR") return;
-    expect(doneResult.error.field).toBe("overrideReason");
   });
 });
 
@@ -2688,38 +2618,8 @@ describe("BOUNDARY — an ATTESTED non-pass result never satisfies the floor (AC
   });
 });
 
-describe("STATE — the escape hatch archives AND writes the reason verbatim to every step's audit entry (AC-2)", () => {
-  it("overrideReason supplied on a self-reported-only task archives and stamps every audit row", async () => {
-    const { corpusService, taskWorkflowService, store } = makeServices();
-    const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId);
-
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
-
-    const REASON = "manual browser check: verified in staging, screenshot attached to PR #123";
-    const doneResult = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice"), overrideReason: REASON });
-    expect(doneResult.ok).toBe(true);
-    if (!doneResult.ok) return;
-    expect(doneResult.value.transitions).toEqual(["approved", "active", "archived"]);
-
-    const auditResult = await store.queryAudit({ doc_id: taskId });
-    expect(auditResult.ok).toBe(true);
-    if (!auditResult.ok) return;
-    const doneSteps = auditResult.value.filter((e) => e.details?.["done"] === true);
-    expect(doneSteps).toHaveLength(3);
-    // every step carries the reason VERBATIM, not merely a truthy marker.
-    expect(doneSteps.every((e) => e.details?.["override_reason"] === REASON)).toBe(true);
-    expect(doneSteps.every((e) => e.details?.["attestation_overridden"] === true)).toBe(true);
-  });
-});
-
-// The CONTROL run for the STATE test immediately above — the identical
-// archive-to-terminal scenario but WITHOUT the escape hatch (a genuine
-// attested pass instead) — proves the audit markers are absent when the
-// escape hatch is NOT used, not merely present when it is (the exact
-// "silently inert flag" shape this repo's own false-oracle catalog names).
-describe("REGRESSION — the escape hatch never taints a normal attested archive (control run, AC-2)", () => {
-  it("an attested-pass task archived WITHOUT overrideReason carries neither override_reason nor attestation_overridden on any audit row", async () => {
+describe("REGRESSION — a normal attested archive carries no override marker on any audit row", () => {
+  it("an attested-pass task archived carries neither override_reason nor attestation_overridden on any audit row", async () => {
     const { corpusService, taskWorkflowService, store } = makeServices();
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
@@ -2740,19 +2640,18 @@ describe("REGRESSION — the escape hatch never taints a normal attested archive
 });
 
 describe("REGRESSION — idempotency on an already-terminal task never regresses, WITH or WITHOUT attestation (AC-4)", () => {
-  it("an already-archived task (archived via the escape hatch) is still a no-op on a second call, evidence untouched", async () => {
+  it("an already-archived task (archived by a first done) is still a no-op on a second call, evidence untouched", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
-    const first = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice"), overrideReason: "one-off manual check" });
+    await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
+    const first = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
     const versionAfterFirst = first.value.task.version;
 
-    // Second call carries NO overrideReason at all — the idempotent short-circuit
-    // must fire before any evidence/attestation re-check, so this must still succeed.
+    // The idempotent short-circuit must fire before any evidence/attestation re-check, so this must still succeed.
     const second = await taskWorkflowService.done(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(second.ok).toBe(true);
     if (!second.ok) return;

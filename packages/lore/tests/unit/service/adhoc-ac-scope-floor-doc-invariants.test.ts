@@ -102,28 +102,6 @@ function jsdocBlockAbove(source: string, anchor: RegExp): string {
   return lines.slice(start, end + 1).join("\n");
 }
 
-/**
- * The body of a `function <name>(…) { … }` declaration, brace-matched. Used
- * instead of a whole-file grep so an assertion about ONE predicate cannot be
- * satisfied (or falsified) by an unrelated line elsewhere in a 3000-line file.
- */
-function functionBody(source: string, name: string): string {
-  const signatureIndex = source.indexOf(`function ${name}(`);
-  if (signatureIndex === -1) throw new Error(`function ${name} not found`);
-  const openBrace = source.indexOf("{", signatureIndex);
-  if (openBrace === -1) throw new Error(`function ${name} has no body`);
-  let depth = 0;
-  for (let i = openBrace; i < source.length; i++) {
-    const char = source[i];
-    if (char === "{") depth++;
-    else if (char === "}") {
-      depth--;
-      if (depth === 0) return source.slice(openBrace, i + 1);
-    }
-  }
-  throw new Error(`unbalanced braces in ${name}`);
-}
-
 // ─── Face 4 — the gate predicate's JSDoc names the CLI-layer sibling ─────────
 
 describe("face 4: acScopeRequiredAtCreate's JSDoc names the mechanism that DOES bind the ad-hoc branch", () => {
@@ -169,38 +147,19 @@ describe("face 4: acScopeRequiredAtCreate's JSDoc names the mechanism that DOES 
   });
 });
 
-// ─── Face 1 — the recorded scoping decision + the retired short-circuit ─────
-
-describe("face 1: the no-new-tests floor's keying decision is recorded, and the retired short-circuit stays retired", () => {
-  it("HAPPY: requiresNoNewTestsDeclaration's JSDoc records the presence-not-length keying and names the rejected alternative", () => {
-    const block = jsdocBlockAbove(
-      readSource(TASK_WORKFLOW_SERVICE),
-      /^(?:export )?function requiresNoNewTestsDeclaration\(/,
-    );
-    expect(block).toContain("PRESENCE");
-    // The alternative the governing task offered and this slice rejected, named
-    // so the next session does not re-litigate it blind.
-    expect(block).toContain("file_anchors");
-  });
-
-  it("REGRESSION: the predicate's body no longer short-circuits on an EMPTY array, and still short-circuits on an ABSENT one", () => {
-    const body = functionBody(readSource(TASK_WORKFLOW_SERVICE), "requiresNoNewTestsDeclaration");
-    expect(body).toContain("acScope === undefined");
-    // The exact retired condition — its return would silently re-open the hole.
-    expect(body).not.toContain("acScope.length === 0");
-  });
-
-  it("NEGATIVE (inverse control): the extracted body is this predicate's, not a neighbour's", () => {
-    const source = readSource(TASK_WORKFLOW_SERVICE);
-    const body = functionBody(source, "requiresNoNewTestsDeclaration");
-    expect(source).toContain("function findMissingUnfilteredTestFileRuns(");
-    expect(body).not.toContain("findMissingUnfilteredTestFileRuns");
-    expect(body.length).toBeLessThan(source.length / 10);
-  });
-
-  it("STATE: the service that owns the floor is still the one exporting done()", () => {
-    // Cheap structural pin for the import edge this file relies on.
+// ─── Face 1 — RETIRED with the no-new-test floor ─────────────────────────────
+//
+// Face 1 recorded the keying decision of `requiresNoNewTestsDeclaration` (the no-new-test floor armed by the PRESENCE of a
+// declared ac_scope) and pinned its short-circuit. The floor, the predicate and the done-time no-new-test declaration flag are removed
+// (spec-done-contract-compiled-at-approve-task-kinds-write-sets, AC-DCS1-6): "this task adds no new test" is now declared once, at
+// approve, as the contract's red waiver (`lore approve --red-waiver "<reason>"`, AC-DCS1-5), and `lore done` judges only the
+// stored contract (AC-DCS1-7). The removal of the surface is observed through the compiled command in
+// tests/e2e/done-contract-done-floors-compiled.bun.test.ts (AC-DCS1-6). Only this one assertion of the face stays here:
+// the service that owned the floor is still the one exporting done().
+describe("face 1 (retired): the service that owned the no-new-test floor still exports done() and the retired predicate is gone", () => {
+  it("STATE: done() is exported and requiresNoNewTestsDeclaration no longer exists in the service source", () => {
     expect(typeof TaskWorkflowService.prototype.done).toBe("function");
+    expect(readSource(TASK_WORKFLOW_SERVICE)).not.toContain("requiresNoNewTestsDeclaration");
   });
 });
 

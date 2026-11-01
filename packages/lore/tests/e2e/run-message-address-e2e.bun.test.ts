@@ -81,7 +81,7 @@ function runHook(payload: Record<string, unknown>, socket?: string): Out {
 }
 
 function newTask(title: string): string {
-  const r = mustLore(["create", "task", "--adhoc", "--title", title, "--ac-scope", "", "--json"]);
+  const r = mustLore(["create", "task", "--adhoc", "--kind", "code", "--title", title, "--ac-scope", "", "--json"]);
   return (JSON.parse(r.stdout).data as { slug: string }).slug;
 }
 
@@ -147,7 +147,8 @@ describe("AC-MA-4: installed hook -> built dist/lore -> bootstrap shows the hold
     const start = runHook({ session_id: SESSION, hook_event_name: "SessionStart", source: "startup" }, "/tmp/e2e/7.sock");
     expect(start.exitCode).toBe(0);
     expect(start.stdout).toBe("");
-    mustLore(["claim", tasks.main], MAIN_RUN);
+    // a code task is claimed on its own branch (one unlanded task per branch)
+    mustLore(["claim", tasks.main, "--worktree", "e2e-address-main"], MAIN_RUN);
     expect(addressHolding(tasks.main)).toBe("uds:/tmp/e2e/7.sock");
   });
 
@@ -162,7 +163,7 @@ describe("AC-MA-4: installed hook -> built dist/lore -> bootstrap shows the hold
 
   it("NEGATIVE: a session registered with no socket lists a null address", () => {
     runHook({ session_id: OTHER_SESSION, hook_event_name: "SessionStart", source: "startup" });
-    mustLore(["claim", tasks.other], OTHER_RUN);
+    mustLore(["claim", tasks.other, "--worktree", "e2e-address-other"], OTHER_RUN);
     expect(addressHolding(tasks.other)).toBeNull();
   });
 

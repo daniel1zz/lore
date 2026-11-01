@@ -93,7 +93,7 @@ async function createSpec(app: App, title: string, criteria: ReturnType<typeof s
 }
 
 async function createAdhocViaCli(title: string, extraArgs: string[]) {
-  return await loreAsync(["create", "task", "--title", title, "--adhoc", "--no-ai", "--content", "body", "--json", ...extraArgs]);
+  return await loreAsync(["create", "task", "--title", title, "--adhoc", "--kind", "check", "--no-ai", "--content", "body", "--json", ...extraArgs]);
 }
 
 function slugOf(stdout: string): string {
@@ -179,7 +179,7 @@ describe("create: the spec is required and checked on every route", () => {
   });
 
   it("NEGATIVE: --spec without --adhoc is a usage error (exit 2)", async () => {
-    const r = await loreAsync(["create", "task", "--title", "plan member?", "--no-ai", "--content", "b", "--spec", firstSpec]);
+    const r = await loreAsync(["create", "task", "--title", "plan member?", "--kind", "code", "--no-ai", "--content", "b", "--spec", firstSpec]);
     expect(r.exitCode).toBe(2);
   });
 
@@ -225,7 +225,7 @@ describe("create over HTTP goes through the same service check", () => {
   });
 
   const post = (extra: Record<string, unknown>) =>
-    fetch(`${baseUrl}/api/docs`, { method: "POST", headers, body: JSON.stringify({ type: "task", title: "http adhoc", content: "b", extra }) });
+    fetch(`${baseUrl}/api/docs`, { method: "POST", headers, body: JSON.stringify({ type: "task", title: "http adhoc", content: "b", extra: { kind: "check", ...extra } }) });
 
   it("NEGATIVE: a scope with no spec is refused naming --spec", async () => {
     const res = await post({ adhoc: true, ac_scope: ["AC-X-1"] });

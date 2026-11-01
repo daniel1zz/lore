@@ -91,8 +91,8 @@ function setup(): Setup {
     [`${CLI}/lib/shared.ts`]: `import { err } from "./result.js";\nexport function checkSharedRenamed() {\n  return err({ code: "BETA_EXISTING", rule: "${ruleB}" });\n}\n`,
     [`${CLI}/commands/beta.ts`]: `import { checkSharedRenamed } from "../lib/shared.js";\nexport default { run() { return checkSharedRenamed(); } };\n`,
   });
-  const taskA = f.createTask("A", [`${CLI}/lib/alpha.ts`]);
-  const taskB = f.createTask("B", [`${CLI}/lib/shared.ts`, `${CLI}/commands/beta.ts`]);
+  const taskA = f.createTask("A", [`${CLI}/lib/alpha.ts`], "code");
+  const taskB = f.createTask("B", [`${CLI}/lib/shared.ts`, `${CLI}/commands/beta.ts`], "code");
   f.claim(taskA, "branch-a");
   f.claim(taskB, "branch-b");
   return { f, root, leafA, leafB, ruleA, ruleB, taskA, taskB };

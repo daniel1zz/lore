@@ -169,7 +169,7 @@ function readEvidenceRows(slug: string, cwd: string): StoredEvidenceRow[] {
  */
 function createAdhocTask(cwd: string, title: string): string {
   const created = mustRun(
-    ["create", "task", "--title", title, "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"],
+    ["create", "task", "--title", title, "--kind", "code", "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"],
     cwd,
   );
   return (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { copyShippedGuardTo } from "../../integration/support/main-guard-repo.js";
+import { immediateIntegrateQueue } from "../../helpers/immediate-integrate-queue";
 import { IntegrateService, type GitOutcome, type IntegrateDeps } from "../../../src/service/integrate-service.js";
 
 function harness(remote: GitOutcome) {
@@ -30,6 +31,7 @@ function harness(remote: GitOutcome) {
     corpus: { take: unused, remove: unused },
     runFloor: unused,
     ledger: {} as IntegrateDeps["ledger"],
+    queue: immediateIntegrateQueue(),
     attempts: {} as IntegrateDeps["attempts"],
     projectRoot: "/nowhere",
     worktreesRoot: "/nowhere/wt",

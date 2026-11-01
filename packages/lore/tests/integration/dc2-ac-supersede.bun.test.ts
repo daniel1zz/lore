@@ -127,7 +127,7 @@ beforeAll(async () => {
   plan = slugOf(await must(["create", "plan", "--title", "DC2-15 Plan", "--parent", specS, "--no-ai", "--content", "body"]));
   task = slugOf(
     await must([
-      "create", "task", "--title", "DC2-15 Task", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body",
+      "create", "task", "--kind", "code", "--title", "DC2-15 Task", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body",
       "--ac-scope", "AC-1", "--ac-scope", "AC-2",
     ]),
   );

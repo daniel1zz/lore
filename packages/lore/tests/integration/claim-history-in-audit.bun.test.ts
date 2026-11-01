@@ -52,13 +52,13 @@ for (const kind of ["sqlite", "turso", "memory"] as const) {
       const tasks = new TaskWorkflowService(store, undefined as never, { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
       const plan = await corpus.create({ parent_id: await ensureRequirementsDocId(corpus), type: "plan", title: "Plan", content: "b" } as CreateDocInput);
       if (!plan.ok) throw new Error("plan");
-      const created = await corpus.create({ type: "task", title: "T", parent_id: plan.value.id, content: "b", extra: { plan_id: plan.value.id } } as CreateDocInput);
+      const created = await corpus.create({ type: "task", title: "T", parent_id: plan.value.id, content: "b", extra: { kind: "code", plan_id: plan.value.id } } as CreateDocInput);
       if (!created.ok) throw new Error("task");
       const id = created.value.id;
       const rowsBefore = (await store.findVersions(id)).ok ? ((await store.findVersions(id)) as { value: unknown[] }).value.length : -1;
 
-      expect((await tasks.claim(id, { by: "run-a", harnessRun: runOfName("run-a") })).ok).toBe(true);
-      expect((await tasks.claim(id, { by: "run-b", harnessRun: runOfName("run-b"), steal: true })).ok).toBe(true);
+      expect((await tasks.claim(id, { by: "run-a", harnessRun: runOfName("run-a"), worktree: "wt-hc10-a" })).ok).toBe(true);
+      expect((await tasks.claim(id, { by: "run-b", harnessRun: runOfName("run-b"), worktree: "wt-hc10-b", steal: true })).ok).toBe(true);
       expect((await tasks.release(id, { by: "run-c", harnessRun: runOfName("run-c"), force: true, reason: "worker vanished" })).ok).toBe(true);
 
       const versions = await store.findVersions(id);

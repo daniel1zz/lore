@@ -89,7 +89,7 @@ describe("AC-HID-3: claims compare runs, never names", () => {
 
   function newTask(title: string, anchors: readonly string[] = []): string {
     const created = corpus.setup([
-      "create", "task", "--title", title, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai",
+      "create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai",
       ...anchors.flatMap((anchor) => ["--anchor", anchor]),
     ]);
     return corpus.slugOf(created);

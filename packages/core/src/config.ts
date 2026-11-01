@@ -439,6 +439,29 @@ const WorkflowConfigSchema = z
       .strict()
       .default({}),
     /**
+     * The three commands a task's done contract runs (spec-done-contract-compiled-at-approve-task-kinds-write-sets,
+     * AC-DCS1-9, ledger D31): the dependency install, the typecheck and the per-file test run. `lore approve` copies them into
+     * the contract; a missing key is a compile cause there (`no-install` / `no-typecheck` / `no-test-command`), never a skipped
+     * step, so every key is optional HERE (a project that does not use done contracts still parses) and required THERE.
+     *
+     * @invariant Each value is a NON-EMPTY string: a blank `typecheck` would otherwise become a contract with an empty command.
+     * @invariant `test_file` is a template and MUST contain `{file}` (replaced by the anchored test file's path).
+     */
+    done_contract: z
+      .object({
+        /** Dependency install command, e.g. `bun install --frozen-lockfile`. */
+        install: z.string().min(1).optional(),
+        typecheck: z.string().min(1).optional(),
+        /** Per-file test command template containing `{file}`, e.g. `bun run test:file {file}`. */
+        test_file: z
+          .string()
+          .min(1)
+          .refine((template) => template.includes("{file}"), { message: "must contain the placeholder {file}" })
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    /**
      * Per-`spec_kind` verification-profile floors (SPEC-058 §Design Decisions D1) —
      * each entry declares the oracle-coverage requirement (spec-promote's
      * `oracleCoverage` predicate) and/or UAT requirement (plan-promote's
@@ -716,6 +739,23 @@ const WorkflowConfigSchema = z
          * live corpus after the landing's refresh and rebuild. Absent = neither runs and the output says "skipped".
          */
         migrate_command: z.string().min(1).optional(),
+        /**
+         * Per-oracle timeout, in seconds, of the contract-oracle run `lore integrate` makes on the merged tree (AC-DCS2-3). A timeout
+         * is a failed run with the cause `timeout`. Absent = 900. A value that is not a positive integer makes the config unusable
+         * (exit 4, naming this key): it is never replaced by a default.
+         */
+        oracle_timeout_seconds: z.number().int().positive().optional(),
+        /**
+         * Oracle ids (`typecheck`, `test:<path>`, `ac:<id>`) the floor command already runs: integrate does not run them again and
+         * their rows take the floor's result (AC-DCS2-3). Absent = none.
+         */
+        floor_covers: z.array(z.string().min(1)).optional(),
+        /**
+         * How long, in seconds, a landing waits for its turn in the FIFO merge queue before it refuses with `integrate-queue-timeout`
+         * (exit 75), naming the holder (AC-DCS2-5). Absent = 1800. A value that is not a positive integer makes the config unusable
+         * (exit 4, naming this key): it is never replaced by a default.
+         */
+        queue_wait_seconds: z.number().int().positive().optional(),
       })
       .strict()
       .optional(),

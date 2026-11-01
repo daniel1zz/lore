@@ -198,6 +198,8 @@ async function createTask(dir: string, planSlug: string, title: string, acScope:
   const args = [
     "create",
     "task",
+    "--kind",
+    "code",
     "--title",
     title,
     "--parent",

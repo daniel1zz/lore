@@ -86,7 +86,7 @@ beforeEach(async () => {
   inReviewSpec = await create("spec", "Queued in review spec");
   draftSpec = await create("spec", "Plain draft spec");
   const plan = await create("plan", "Queue plan", ["--parent", draftSpec]);
-  draftTask = await create("task", "Draft queue task", ["--parent", plan, "--plan-id", plan]);
+  draftTask = await create("task", "Draft queue task", ["--parent", plan, "--plan-id", plan, "--kind", "code"]);
 
   const move = await runLore(["set", inReviewSpec, "--status", "in-review"], dir);
   if (move.exitCode !== 0) throw new Error(`move to in-review failed: ${move.stderr}${move.stdout}`);

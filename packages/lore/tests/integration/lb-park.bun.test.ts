@@ -31,11 +31,11 @@ function setup(): { fx: OwnDiffFixture; taskT: string; taskU: string } {
   fx = f;
   f.commitOnMain(BASE, "base sources");
   f.makeBranch("branch-y", { "y.txt": "y\n" });
-  const taskU = f.createTask("U", ["src/x.ts"]);
+  const taskU = f.createTask("U", ["src/x.ts"], "code");
   f.claim(taskU, "branch-y");
   // T anchors another file: its change to src/x.ts is outside its anchors, so only U's hold is in question
   f.makeBranch("branch-x", { "src/x.ts": "export const x = 2;\n" });
-  const taskT = f.createTask("T", ["src/t.ts"]);
+  const taskT = f.createTask("T", ["src/t.ts"], "code");
   f.claim(taskT, "branch-x");
   return { fx: f, taskT, taskU };
 }

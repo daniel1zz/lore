@@ -119,7 +119,7 @@ beforeAll(() => {
   );
   mustRun(["create", "plan", "--title", "Totals Plan", "--parent", "spec-cites-standard", "--no-ai", "--content", "body"], both);
   const task = slugOf(
-    mustRun(["create", "task", "--title", "Totals Task", "--parent", "plan-totals-plan", "--plan-id", "plan-totals-plan", "--no-ai", "--content", "body"], both).stdout,
+    mustRun(["create", "task", "--kind", "code", "--title", "Totals Task", "--parent", "plan-totals-plan", "--plan-id", "plan-totals-plan", "--no-ai", "--content", "body"], both).stdout,
   );
   mustRun(["verify", "plan-totals-plan", "--task", task, "--ac", "AC-TOT-1", "--allow-new-commands"], both);
 

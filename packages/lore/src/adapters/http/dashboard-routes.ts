@@ -56,6 +56,7 @@
  */
 
 import type { WarnSink } from "../../service/warn-sink.js";
+import { requireTaskKindOnCreate } from "./task-kind-input.js";
 import { z } from "zod";
 import type { App } from "../../app.js";
 import type { ActorContext } from "./auth.js";
@@ -236,8 +237,12 @@ async function handleDashboardCreate(
     return jsonError({ code: "VALIDATION_ERROR", field: "body", message: "Request body must be JSON" }, 422);
   }
 
+  // AC-DCS1-4 (BR-1488): a task needs a kind here too, answered 400 like the bearer create route (the kind is stored in extra.kind).
+  const kindChecked = requireTaskKindOnCreate(body as Record<string, unknown>);
+  if (!kindChecked.ok) return jsonError(kindChecked.error, 400);
+
   // Zod parse — mirrors what the client validates client-side; server is SSOT.
-  const parsed = createDocInputSchema.safeParse(body);
+  const parsed = createDocInputSchema.safeParse(kindChecked.input);
   if (!parsed.success) {
     const firstIssue = parsed.error.issues[0];
     return jsonError(

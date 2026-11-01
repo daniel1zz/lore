@@ -115,7 +115,7 @@ function makeCorpusWithCarrier(): { dir: string; stubDir: string; slug: string }
   patchLoreConfig(dir, `feedback:\n  upstream:\n    repo: ${FAKE_REPO}\n`);
   mustRun(dir, stubDir, ["create", "prd", "--title", "Carrier Fixture PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"]);
   const created = mustRun(dir, stubDir, [
-    "create", "task", "--adhoc", "--ac-scope", "", "--title", "Carrier of seven", "--no-ai", "--content", "Carrier.", "--issue", "7", "--json",
+    "create", "task", "--kind", "code", "--adhoc", "--ac-scope", "", "--title", "Carrier of seven", "--no-ai", "--content", "Carrier.", "--issue", "7", "--json",
   ]);
   return { dir, stubDir, slug: (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug };
 }

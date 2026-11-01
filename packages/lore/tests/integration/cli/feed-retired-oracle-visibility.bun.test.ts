@@ -235,7 +235,7 @@ async function buildCorpus(): Promise<Observed> {
   await mustRun(["create", "plan", "--title", "Feed Gen Plan", "--parent", spec, "--no-ai", "--content", "body"], dir);
   await mustRun(
     [
-      "create", "task",
+      "create", "task", "--kind", "code",
       "--title", "Feed Gen Task",
       "--parent", "plan-feed-gen-plan",
       "--plan-id", "plan-feed-gen-plan",

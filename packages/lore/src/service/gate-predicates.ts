@@ -348,11 +348,9 @@ export const AC_SCOPE_REQUIRED_FIELD = "ac-scope-required";
  *      that passed no `--ac-scope` AT ALL, one layer earlier and keyed on the
  *      AUTHOR'S FLAG — which is the only signal that distinguishes the ad-hoc
  *      branch and which this predicate, fed a resolved PLAN LINEAGE, never sees;
- *      and (b) `TaskWorkflowService`'s no-new-tests floor
- *      (`requiresNoNewTestsDeclaration`) arms at `lore done` on the DECLARATION'S
- *      PRESENCE, so the explicit-empty `--ac-scope ""` form — the dominant ad-hoc
- *      shape — still owes a red evidence row or an audited
- *      `--declare-no-new-tests` reason. This predicate's D3 vacuous pass is
+ *      and (b) the task's stored done contract: `lore done` judges every task by
+ *      the contract compiled at approve, so a code task still owes a red evidence
+ *      row unless `lore approve --red-waiver` waived it. This predicate's D3 vacuous pass is
  *      unchanged by either: it is the CLI layer and the archival floor that hold
  *      that branch, deliberately, and this paragraph exists so the next reader
  *      finds them without having to measure the gap first.

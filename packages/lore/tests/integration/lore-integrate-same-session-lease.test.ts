@@ -113,7 +113,7 @@ class Fixture {
     claimBranchTask((args) => {
       const r = sh(this.repo, "bun", ["run", INDEX_TS, ...args], this.env("claim"));
       return { status: r.status ?? 1, out: `${r.stdout}${r.stderr}` };
-    }, this.repo, name);
+    }, this.repo, name, "code");
     return name;
   }
 

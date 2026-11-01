@@ -1,17 +1,18 @@
 /**
  * `lore integrate <branch> [--session <id>] [--message <text>] [--json]` — the one path by which a branch lands on main
  * (spec-main-advances-only-through-lore-integrate-per-session, AC-INT-1; adr-main-advances-only-by-lore-integrate-
- * per-session). Thin pipe over `IntegrateService`: the merge, floor, compare-and-swap and retry bound live in
- * `service/integrate-service.ts`, never here.
+ * per-session). Thin pipe over `IntegrateService`: the queue, merge, floor and compare-and-swap assertion live in
+ * `service/integrate-service.ts` and `service/integrate-queue.ts`, never here.
  *
- * It merges `<branch>` onto the current main in this session's own detached integration worktree
+ * Landings are serialized FIFO in the repository's merge queue (AC-DCS2-5): the command takes a ticket, prints
+ * `queued: position <n> of <m>, holder <session> <branch> since <iso>` while it waits and a `phase queue-wait <s>s` line, and only
+ * the head merges `<branch>` onto the current main in this session's own detached integration worktree
  * (`<main checkout>/.claude/worktrees/integrate-<session>`, created on first use), runs the project's post-merge floor
  * (`workflow.integrate.floor_command` in `.lore/config.yaml`, no default: absent is a refusal) and advances main by
- * `git update-ref refs/heads/main <new> <base>`. At most 3 attempts per call; every lost race is recorded in the
- * corpus directory (`integrate-losses/`) and listed by `lore status` until the branch lands. Every attempt (lost or not) also records its
+ * `git update-ref refs/heads/main <new> <base>`, with ONE attempt and no retry. The retired loss ledger (`integrate-losses/`) is read
+ * history only. The attempt also records its
  * phase durations (merge, corpus snapshot, each floor step, CAS) and outcome in `integrate-attempts/<branch>.json` (last 20
- * per branch, kept after landing) and prints one `integrate: attempt N/3 phases: ...` line; `lore status` shows each
- * starving branch's loss count and median attempt duration. The floor's per-step timings come from the machine-readable
+ * per branch, kept after landing) and prints one `integrate: attempt N phases: ...` line. The floor's per-step timings come from the machine-readable
  * file named by `LORE_FLOOR_TIMINGS_FILE` that scripts/run-chain.ts writes; a floor command that writes none is recorded
  * as one step named `floor (no per-step timings emitted)`.
  *
@@ -23,8 +24,9 @@
  *
  * Exit codes: 0 = landed, or already integrated (a re-run after a crash past the CAS); 1 = the floor failed (main
  * unchanged) or a git/filesystem failure; 4 = a merge conflict (paths named, nothing changed) or a refused request
- * (unknown branch, missing floor key, missing session); 75 = three lost races (EX_TEMPFAIL, safe to re-run; the
- * integrations that moved main are named), or another integrate of the SAME session is still running in the session's
+ * (unknown branch, missing floor key, missing session) or `integrate-main-moved` (main is not where the merge started: an
+ * update the guard should have refused; both commits named, no retry); 75 = `integrate-queue-timeout` (waited past
+ * `workflow.integrate.queue_wait_seconds`, default 1800; EX_TEMPFAIL, the holder is named), or another integrate of the SAME session is still running in the session's
  * integration worktree (refused at once, before any merge or snapshot, naming its pid, branch and start time; the run
  * holds an OS lock on the worktree for its whole duration, so a killed run frees it with nothing to clean up).
  *
@@ -62,7 +64,10 @@ import { removeCorpusSnapshot, takeCorpusSnapshot } from "../../../store/corpus-
 import { sqliteIntegrationLease } from "../../../store/integration-lease.js";
 import { IntegrateLossLedger } from "../../../service/integrate-loss-ledger.js";
 import { IntegrateAttemptLedger } from "../../../service/integrate-attempt-ledger.js";
+import type { IntegrateQueue } from "../../../service/integrate-queue.js";
 import { OwnDiffJudgment } from "../../../service/own-diff-judgment.js";
+import { ORACLE_TIMEOUT_DEFAULT_SECONDS } from "../../../service/integrate-oracle-service.js";
+import { findFirstParentCommitContaining } from "../assess-regression-git.js";
 import { buildReviewLeases, buildReviewTriggerService, spawnDetachedReviewBatch } from "../review-batch-wiring.js";
 import { loadCoChangeRules } from "../../../service/co-change-review.js";
 import {
@@ -185,7 +190,7 @@ function withSchema(head: string, schema: SchemaMigration): { out?: string; err?
 function renderOutcome(outcome: IntegrateOutcome): { out?: string; err?: string } {
   switch (outcome.kind) {
     case "landed":
-      return withSchema(`integrate: landed ${outcome.branch} on main as ${outcome.sha.slice(0, 12)} after ${outcome.attempts} attempt(s)\n${renderSharedView(outcome.shared_view)}\n${renderRebuild(outcome.rebuild)}`, outcome.schema);
+      return withSchema(`integrate: landed ${outcome.branch} on main as ${outcome.sha.slice(0, 12)}\n${renderSharedView(outcome.shared_view)}\n${renderRebuild(outcome.rebuild)}`, outcome.schema);
     case "already_integrated":
       return withSchema(`integrate: ${outcome.branch} is already integrated into main (${outcome.main.slice(0, 12)}); nothing to do\n${renderSharedView(outcome.shared_view)}\n${renderRebuild(outcome.rebuild)}`, outcome.schema);
     case "snapshot_migrate_failed":
@@ -211,11 +216,20 @@ function renderOutcome(outcome: IntegrateOutcome): { out?: string; err?: string 
       const who = outcome.holder === undefined ? "holder not yet recorded" : `pid ${outcome.holder.pid}, branch ${outcome.holder.branch}, started ${outcome.holder.started_at}`;
       return { err: `integrate: another integrate is running in ${outcome.worktree} (${who}); wait for it to finish, then re-run. Nothing was changed` };
     }
-    case "lost_races":
+    case "queue_timeout": {
+      const who = outcome.holder === undefined ? "holder unknown" : `holder ${outcome.holder.session} ${outcome.holder.branch} (pid ${outcome.holder.pid}) since ${outcome.holder.since}`;
       return {
         err:
-          `integrate: lost ${outcome.attempts} races; main moved by ${outcome.moved_by.join(", ")}\n` +
-          `integrate: ${outcome.branch} has ${outcome.consecutive_losses} consecutive lost race(s); main and ${outcome.branch} are unchanged; re-run to try again`,
+          `integrate-queue-timeout: waited ${outcome.waited_seconds.toFixed(0)}s for the merge queue (workflow.integrate.queue_wait_seconds = ${outcome.limit_seconds}); ${who}\n` +
+          `integrate: nothing was changed and the ticket was removed; re-run when the holder has finished, or raise workflow.integrate.queue_wait_seconds`,
+      };
+    }
+    case "main_moved":
+      return {
+        err:
+          `integrate-main-moved: main was ${outcome.expected.slice(0, 12)} when the merge started and is ${outcome.actual.slice(0, 12)} now; ` +
+          `main moves only through integrate, so an update bypassed the main-ref guard (${outcome.moved_by.join(", ")}). Nothing was retried and main was left as found\n` +
+          `integrate: find and stop the writer that moved main (run \`lore setup --project\` to reinstall the guard), then re-run`,
       };
   }
 }
@@ -223,7 +237,7 @@ function renderOutcome(outcome: IntegrateOutcome): { out?: string; err?: string 
 export default defineLoreCommand({
   meta: {
     name: "integrate",
-    description: "Land a branch on main: merge in your integration worktree, run the post-merge floor, advance main by compare-and-swap (max 3 attempts; exit 75 = lost 3 races)",
+    description: "Land a branch on main: merge in your integration worktree, run the post-merge floor, advance main; landings queue FIFO (exit 75 = queue timeout or integration worktree busy, 4 = main moved under the merge)",
   },
   args: {
     branch: { type: "positional", required: false, description: "Branch (or commit) to integrate onto main" },
@@ -234,7 +248,6 @@ export default defineLoreCommand({
   async run(context) {
     const { args } = context;
     const inv = invocationOf(context);
-    const runGit = gitRunnerFor(inv.env);
     const branch = typeof args.branch === "string" ? args.branch : "";
     if (branch === "") {
       inv.io.stderr.write("Error: lore integrate requires a <branch>\n");
@@ -242,158 +255,216 @@ export default defineLoreCommand({
     }
     const { app, dbPath, config } = loadLoreApp({ inv });
     try {
-      // reason: the migrate child of integrate runs as the CALLER's party, so the caller's run is resolved from the VERIFIED
-      // invocation identity (an unregistered run verifies to null -> the service refuses) before anything moves.
-      const verifiedIdentity = await app.verifiedInvocationIdentity?.();
-      if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
-        inv.io.stderr.write(`${formatError(verifiedIdentity.error)}\n`);
-        return exitCode(verifiedIdentity.error);
-      }
-      const corpusDir = dirname(resolvePath(dbPath));
-      const projectRoot = dirname(corpusDir);
-      const mainRoot = mainCheckoutRoot(runGit, projectRoot);
-      if (mainRoot === undefined) {
-        inv.io.stderr.write(`Error: ${projectRoot} is not inside a non-bare git repository whose common dir is <root>/.git\n`);
-        return 1;
-      }
-      const ownership = app.branchOwnershipReader;
-      if (ownership === undefined) {
-        inv.io.stderr.write("Error: this composition has no branch ownership reader, so the branch's own change cannot be judged; nothing was landed\n");
-        return 1;
-      }
-      const drift = app.driftCheckService;
-      if (drift === undefined) {
-        inv.io.stderr.write("Error: this composition has no drift-check service, so anchored paths cannot be judged (BR-1355); nothing was landed\n");
-        return 1;
-      }
-      // reason: BR-1532 — the landing takes `batch:<machine>` itself and hands it to the batch it spawns (REVIEW_BATCH_HANDOFF_ENV).
-      const batchLeases = buildReviewLeases(app, `${resolveActor(inv)}:integrate:${String(process.pid)}`);
-      // reason: a composition with no lease store cannot take the batch lease, so it starts no review batch (same as a missing decision reader).
-      const reviewBatch = batchLeases === undefined ? undefined : buildReviewTriggerService(app, (handoff) =>
-        spawnDetachedReviewBatch({
-          handoff,
-          cwd: projectRoot,
-          corpusDir,
-          execPath: inv.execPath,
-          isCompiled: inv.isCompiled,
-          env: inv.env,
-          // reason: #501 — the batch outlives this process, so it gets a child run registered by THIS (verified) caller
-          runService: app.runService,
-          caller: { claimedRun: inv.identity.harnessRun, verified: verifiedIdentity ?? { ok: true, value: undefined } },
-        }),
-        batchLeases,
-      );
-      const service = new IntegrateService({
-        git: runGit,
-        lease: sqliteIntegrationLease,
-        runFloor: floorRunnerFor(inv.env),
-        corpus: {
-          take: (worktree) => takeCorpusSnapshot(corpusDir, worktree),
-          remove: (worktree) => removeCorpusSnapshot(worktree),
-        },
-        ledger: new IntegrateLossLedger(corpusDir),
-        attempts: new IntegrateAttemptLedger(corpusDir),
-        // the landing is recorded through the corpus write route (TaskWorkflowService -> CorpusService.writeDoc)
-        landings: { record: (landing) => app.taskWorkflowService.recordLanding(landing) },
-        // BR-1355: spec and knowledge anchors follow the files the branch renamed, through the corpus write route
-        anchors: { follow: (moves, landing) => drift.followMovedFiles(moves, landing) },
-        // BR-1356: the done walk for every task of the landed branch; a refusal prints and never un-lands main
-        completion: {
-          complete: async (tasks) => {
-            const identity = await app.verifiedInvocationIdentity?.();
-            if (identity !== undefined && !identity.ok) {
-              return tasks.map((task) => ({ task, outcome: "refused" as const, message: formatErrorFor(inv, identity.error) }));
-            }
-            const by = resolveActor(inv);
-            const callerSession = resolveCallerSession(undefined, inv.env);
-            const doneOpts = {
-              by,
-              harnessRun: identity?.value?.harnessRun ?? null,
-              source: app.callerSurface,
-              ...(callerSession !== undefined ? { callerSession } : {}),
-            };
-            const completions: TaskCompletion[] = [];
-            for (const task of tasks) {
-              const done = await app.taskWorkflowService.done(task, doneOpts);
-              if (done.ok) {
-                completions.push({ task, outcome: "archived" });
-                continue;
-              }
-              const floor = (done.error as { details?: { floor?: unknown } }).details?.floor;
-              completions.push({ task, outcome: "refused", ...(typeof floor === "string" ? { floor } : {}), message: formatErrorFor(inv, done.error) });
-            }
-            return completions;
-          },
-        },
-        // BR-1379: after a landing, one detached review batch when plans need review and no lease is live; never waited for
-        ...(reviewBatch !== undefined ? { reviewBatch: { start: () => reviewBatch.start() } } : {}),
-        // the branch's own change is judged before the floor (BR-1346, BR-1347, BR-1348); it reads the repository and the claims only
-        ownDiff: new OwnDiffJudgment({
-          git: runGit,
-          projectRoot,
-          ownership,
-          codeAnchors: {
-            read: async () => {
-              const declared = await drift.listDeclaredAnchors();
-              if (!declared.ok) return declared;
-              return ok(
-                declared.value
-                  .filter((entry) => !isTerminalStatus(entry.doc_status as DocStatus, entry.doc_type))
-                  .map((entry) => ({ doc_slug: entry.doc_slug, anchor: entry.anchor.raw, path: entry.anchor.path, is_dir: entry.anchor.isDir })),
-              );
-            },
-          },
-          // AC-LG-7: the prose bound to each changed file (what `lore refs <path>` lists), replacing the post-edit hook
-          boundProse: {
-            read: async (paths) => {
-              const declared = await drift.listDeclaredAnchors();
-              if (!declared.ok) return declared;
-              const probe = buildRealFsProbe(projectRoot);
-              let knownScripts: ReadonlySet<string> = new Set();
-              if (probe.stat(GOVERNING_PACKAGE_JSON) === "file") {
-                const scripts = scanPackageScripts(probe.readFile(GOVERNING_PACKAGE_JSON) ?? "");
-                if (scripts === undefined) {
-                  return err({ code: "VALIDATION_ERROR", field: GOVERNING_PACKAGE_JSON, message: `${GOVERNING_PACKAGE_JSON} has no usable scripts object` });
-                }
-                knownScripts = scripts;
-              }
-              const index = buildReferenceIndex({
-                declaredAnchors: declared.value,
-                memoryFiles: discoverMemoryFiles(projectRoot, resolveMemoryFileBudgets(config).filenames),
-                fragments: discoverFragmentDocuments(projectRoot),
-                knownScripts,
-                probe,
-              });
-              return ok(paths.map((path) => ({ path, bindings: findBindings(index, path) })));
-            },
-          },
-          loadCoChangeRules: () => loadCoChangeRules(projectRoot, readFileOrNull),
-          matchesGlob: (pattern, path) => new Bun.Glob(pattern).match(path),
-        }),
-        projectRoot,
-        worktreesRoot: resolvePath(mainRoot, ".claude", "worktrees"),
-        log: (line) => inv.io.stdout.write(`${line}\n`),
-      });
-      const result = await service.integrate({
-        branch,
-        sessionId: resolveCallerSession(typeof args.session === "string" ? args.session : undefined, inv.env) ?? "",
-        floorCommand: config?.workflow?.integrate?.floor_command,
-        postRefreshCommand: config?.workflow?.integrate?.post_refresh_command,
-        migrateCommand: config?.workflow?.integrate?.migrate_command,
-        harnessRun: verifiedIdentity?.value?.harnessRun ?? undefined,
-        ...(typeof args.message === "string" && args.message !== "" ? { message: args.message } : {}),
-      });
-      if (!result.ok) {
-        inv.io.stderr.write(`${formatError(result.error)}\n`);
-        return exitCode(result.error);
-      }
-      const rendered = renderOutcome(result.value);
-      if (args.json === true) inv.io.stdout.write(`${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n`);
-      else if (rendered.out !== undefined) inv.io.stdout.write(`${rendered.out}\n`);
-      if (rendered.err !== undefined) inv.io.stderr.write(`${rendered.err}\n`);
-      return integrateExitCode(result.value);
+      return await runIntegrate({ inv, app, dbPath, config, branch, args });
     } finally {
       app.close();
     }
   },
 });
+
+/** What {@link runIntegrate} needs: the loaded app and invocation, the branch, the typed flags, and optionally the merge queue to share. */
+export interface IntegrateRunOptions {
+  readonly inv: ReturnType<typeof invocationOf>;
+  readonly app: ReturnType<typeof loadLoreApp>["app"];
+  readonly dbPath: string;
+  readonly config: ReturnType<typeof loadLoreApp>["config"];
+  readonly branch: string;
+  readonly args: { readonly session?: unknown; readonly message?: unknown; readonly json?: unknown };
+  /**
+   * The queue the landing takes its turn in. `lore land` passes the queue whose turn it already holds, so the integrate it runs
+   * inside that turn does not wait behind its own caller (integrate-queue.ts: a nested taker shares the held ticket).
+   */
+  readonly queue?: IntegrateQueue;
+}
+
+/**
+ * Runs `lore integrate <branch>` against an already loaded app and returns its exit code (the body of the command; `lore land`
+ * runs it too, so there is ONE landing path). Output goes to `inv.io`; the caller closes the app.
+ */
+export async function runIntegrate(opts: IntegrateRunOptions): Promise<number> {
+  const { inv, app, dbPath, config, branch, args } = opts;
+  const runGit = gitRunnerFor(inv.env);
+  // reason: the migrate child of integrate runs as the CALLER's party, so the caller's run is resolved from the VERIFIED
+  // invocation identity (an unregistered run verifies to null -> the service refuses) before anything moves.
+  const verifiedIdentity = await app.verifiedInvocationIdentity?.();
+  if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
+    inv.io.stderr.write(`${formatError(verifiedIdentity.error)}\n`);
+    return exitCode(verifiedIdentity.error);
+  }
+  const corpusDir = dirname(resolvePath(dbPath));
+  const projectRoot = dirname(corpusDir);
+  const mainRoot = mainCheckoutRoot(runGit, projectRoot);
+  if (mainRoot === undefined) {
+    inv.io.stderr.write(`Error: ${projectRoot} is not inside a non-bare git repository whose common dir is <root>/.git\n`);
+    return 1;
+  }
+  const ownership = app.branchOwnershipReader;
+  if (ownership === undefined) {
+    inv.io.stderr.write("Error: this composition has no branch ownership reader, so the branch's own change cannot be judged; nothing was landed\n");
+    return 1;
+  }
+  const drift = app.driftCheckService;
+  if (drift === undefined) {
+    inv.io.stderr.write("Error: this composition has no drift-check service, so anchored paths cannot be judged (BR-1355); nothing was landed\n");
+    return 1;
+  }
+  const oracleService = app.integrateOracleService;
+  if (oracleService === undefined) {
+    inv.io.stderr.write("Error: this composition has no oracle service, so the landing's contract oracles cannot be run (AC-DCS2-1); nothing was landed\n");
+    return 1;
+  }
+  const createQueue = app.createIntegrateQueue;
+  if (createQueue === undefined) {
+    inv.io.stderr.write("Error: this composition has no merge queue, so landings cannot be serialized (AC-DCS2-5); nothing was landed\n");
+    return 1;
+  }
+  const commonDir = runGit(projectRoot, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  if (commonDir.status !== 0 || commonDir.stdout.trim() === "") {
+    inv.io.stderr.write(`Error: cannot locate the git common dir of ${projectRoot} for the merge queue: ${commonDir.stderr.trim()}\n`);
+    return 1;
+  }
+  const log = (line: string): void => {
+    inv.io.stdout.write(`${line}\n`);
+  };
+  // reason: BR-1532 — the landing takes `batch:<machine>` itself and hands it to the batch it spawns (REVIEW_BATCH_HANDOFF_ENV).
+  const batchLeases = buildReviewLeases(app, `${resolveActor(inv)}:integrate:${String(process.pid)}`);
+  // reason: a composition with no lease store cannot take the batch lease, so it starts no review batch (same as a missing decision reader).
+  const reviewBatch = batchLeases === undefined ? undefined : buildReviewTriggerService(app, (handoff) =>
+    spawnDetachedReviewBatch({
+      handoff,
+      cwd: projectRoot,
+      corpusDir,
+      execPath: inv.execPath,
+      isCompiled: inv.isCompiled,
+      env: inv.env,
+      // reason: #501 — the batch outlives this process, so it gets a child run registered by THIS (verified) caller
+      runService: app.runService,
+      caller: { claimedRun: inv.identity.harnessRun, verified: verifiedIdentity ?? { ok: true, value: undefined } },
+    }),
+    batchLeases,
+  );
+  const service = new IntegrateService({
+    git: runGit,
+    lease: sqliteIntegrationLease,
+    runFloor: floorRunnerFor(inv.env),
+    corpus: {
+      take: (worktree) => takeCorpusSnapshot(corpusDir, worktree),
+      remove: (worktree) => removeCorpusSnapshot(worktree),
+    },
+    // AC-DCS2-1: the landing's contract oracles run on the merged tree before main moves, and their rows are recorded after
+    oracles: oracleService,
+    ledger: new IntegrateLossLedger(corpusDir),
+    queue: opts.queue ?? createQueue({ commonDir: commonDir.stdout.trim(), log }),
+    attempts: new IntegrateAttemptLedger(corpusDir),
+    // the landing is recorded through the corpus write route (TaskWorkflowService -> CorpusService.writeDoc)
+    landings: { record: (landing) => app.taskWorkflowService.recordLanding(landing) },
+    // BR-1355: spec and knowledge anchors follow the files the branch renamed, through the corpus write route
+    anchors: { follow: (moves, landing) => drift.followMovedFiles(moves, landing) },
+    // BR-1356: the done walk for every task of the landed branch; a refusal prints and never un-lands main
+    completion: {
+      complete: async (tasks) => {
+        const identity = await app.verifiedInvocationIdentity?.();
+        if (identity !== undefined && !identity.ok) {
+          return tasks.map((task) => ({ task, outcome: "refused" as const, message: formatErrorFor(inv, identity.error) }));
+        }
+        const by = resolveActor(inv);
+        const callerSession = resolveCallerSession(undefined, inv.env);
+        const doneOpts = {
+          by,
+          harnessRun: identity?.value?.harnessRun ?? null,
+          source: app.callerSurface,
+          ...(callerSession !== undefined ? { callerSession } : {}),
+          // reason: AC-DCS2-11 — the landing starts the review batch itself as its last step (BR-1379), after the rebuild and the schema
+          // migration; an archive inside the done walk must not start it earlier
+          deferPlanClose: true,
+        };
+        const completions: TaskCompletion[] = [];
+        for (const task of tasks) {
+          const done = await app.taskWorkflowService.done(task, doneOpts);
+          if (done.ok) {
+            completions.push({ task, outcome: "archived" });
+            continue;
+          }
+          const floor = (done.error as { details?: { floor?: unknown } }).details?.floor;
+          completions.push({ task, outcome: "refused", ...(typeof floor === "string" ? { floor } : {}), message: formatErrorFor(inv, done.error) });
+        }
+        return completions;
+      },
+    },
+    // BR-1379: after a landing, one detached review batch when plans need review and no lease is live; never waited for
+    ...(reviewBatch !== undefined ? { reviewBatch: { start: () => reviewBatch.start() } } : {}),
+    // the branch's own change is judged before the floor (BR-1346, BR-1347, BR-1348); it reads the repository and the claims only
+    ownDiff: new OwnDiffJudgment({
+      git: runGit,
+      projectRoot,
+      ownership,
+      codeAnchors: {
+        read: async () => {
+          const declared = await drift.listDeclaredAnchors();
+          if (!declared.ok) return declared;
+          return ok(
+            declared.value
+              .filter((entry) => !isTerminalStatus(entry.doc_status as DocStatus, entry.doc_type))
+              .map((entry) => ({ doc_slug: entry.doc_slug, anchor: entry.anchor.raw, path: entry.anchor.path, is_dir: entry.anchor.isDir })),
+          );
+        },
+      },
+      // AC-LG-7: the prose bound to each changed file (what `lore refs <path>` lists), replacing the post-edit hook
+      boundProse: {
+        read: async (paths) => {
+          const declared = await drift.listDeclaredAnchors();
+          if (!declared.ok) return declared;
+          const probe = buildRealFsProbe(projectRoot);
+          let knownScripts: ReadonlySet<string> = new Set();
+          if (probe.stat(GOVERNING_PACKAGE_JSON) === "file") {
+            const scripts = scanPackageScripts(probe.readFile(GOVERNING_PACKAGE_JSON) ?? "");
+            if (scripts === undefined) {
+              return err({ code: "VALIDATION_ERROR", field: GOVERNING_PACKAGE_JSON, message: `${GOVERNING_PACKAGE_JSON} has no usable scripts object` });
+            }
+            knownScripts = scripts;
+          }
+          const index = buildReferenceIndex({
+            declaredAnchors: declared.value,
+            memoryFiles: discoverMemoryFiles(projectRoot, resolveMemoryFileBudgets(config).filenames),
+            fragments: discoverFragmentDocuments(projectRoot),
+            knownScripts,
+            probe,
+          });
+          return ok(paths.map((path) => ({ path, bindings: findBindings(index, path) })));
+        },
+      },
+      loadCoChangeRules: () => loadCoChangeRules(projectRoot, readFileOrNull),
+      matchesGlob: (pattern, path) => new Bun.Glob(pattern).match(path),
+    }),
+    projectRoot,
+    // D44: a branch already in main is placed on main's first-parent history by the one mapping the milestone review uses
+    firstParentContaining: (commit, ref) => findFirstParentCommitContaining(projectRoot, inv.env, commit, ref),
+    worktreesRoot: resolvePath(mainRoot, ".claude", "worktrees"),
+    log,
+  });
+  const result = await service.integrate({
+    branch,
+    sessionId: resolveCallerSession(typeof args.session === "string" ? args.session : undefined, inv.env) ?? "",
+    floorCommand: config?.workflow?.integrate?.floor_command,
+    postRefreshCommand: config?.workflow?.integrate?.post_refresh_command,
+    migrateCommand: config?.workflow?.integrate?.migrate_command,
+    harnessRun: verifiedIdentity?.value?.harnessRun ?? undefined,
+    // the CURRENT config's oracle settings (workflow.integrate.oracle_timeout_seconds is a positive integer or the config is refused at load)
+    oracleSettings: {
+      installCommand: config?.workflow?.done_contract?.install,
+      timeoutSeconds: config?.workflow?.integrate?.oracle_timeout_seconds ?? ORACLE_TIMEOUT_DEFAULT_SECONDS,
+      floorCovers: new Set(config?.workflow?.integrate?.floor_covers ?? []),
+      by: resolveActor(inv),
+    },
+    ...(typeof args.message === "string" && args.message !== "" ? { message: args.message } : {}),
+  });
+  if (!result.ok) {
+    inv.io.stderr.write(`${formatError(result.error)}\n`);
+    return exitCode(result.error);
+  }
+  const rendered = renderOutcome(result.value);
+  if (args.json === true) inv.io.stdout.write(`${JSON.stringify({ ok: true, data: result.value }, null, 2)}\n`);
+  else if (rendered.out !== undefined) inv.io.stdout.write(`${rendered.out}\n`);
+  if (rendered.err !== undefined) inv.io.stderr.write(`${rendered.err}\n`);
+  return integrateExitCode(result.value);
+}
