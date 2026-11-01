@@ -19,6 +19,7 @@
 import {
   anchorsOverlap,
   err,
+  extractCreatesAnchors,
   formatTaskKindRequiredMessage,
   isTaskKind,
   isTestFileAnchor,
@@ -39,6 +40,7 @@ import {
 import type { StoreInterface } from "../store/store-interface.js";
 import { type DocWritePort } from "./corpus-service.js";
 import { resolvePlanGoverningSpecs } from "./plan-governing-specs.js";
+import { definitionOfDone } from "./task-workflow-service.js";
 import {
   compileDoneContract,
   contractAlreadyStored,
@@ -210,6 +212,28 @@ export function deriveWriteSetAdditions(input: WriteSetAdditionsInput): DoneCont
   return additions;
 }
 
+/**
+ * The `anchor-absent` causes of a task's test-file anchors (BR-1547, BR-1487 as amended): each anchored test file that does not
+ * exist at the compile commit and that the task did not declare with `--creates`. Pure; the caller reads the files.
+ *
+ * @param testFiles - the task's anchored test files (the ones that become test oracles)
+ * @param creates - the files declared with `--creates` (`extra.creates_anchors`)
+ * @param existsAtBase - whether a path exists at the compile commit
+ * @example
+ * anchorAbsentCauses(["tests/missing.test.ts"], [], () => false).map((cause) => cause.code) // => ["anchor-absent"]
+ */
+export function anchorAbsentCauses(testFiles: readonly string[], creates: readonly string[], existsAtBase: (path: string) => boolean): UncompilableCause[] {
+  const causes: UncompilableCause[] = [];
+  for (const file of testFiles) {
+    if (creates.includes(file) || existsAtBase(file)) continue;
+    causes.push({
+      code: "anchor-absent",
+      message: `the test file ${file} is anchored but absent at the base tip and not declared as created; remove the anchor (\`lore anchor rm\`), or declare it with \`lore anchor add <task> ${file} --creates\` when this task creates it.`,
+    });
+  }
+  return causes;
+}
+
 export class DoneContractService implements ApproveContractPort {
   /**
    * @param store - the corpus store (plans, specs, links are read from it)
@@ -245,7 +269,7 @@ export class DoneContractService implements ApproveContractPort {
     }
     if (opts.redWaiverReason !== undefined && kind !== "code") return err(redWaiverNotCode(task.slug, `a ${kind} task`));
 
-    const gathered = await this.gather(task, kind, opts.redWaiverReason);
+    const gathered = await this.gather(task, kind, opts.redWaiverReason, true);
     if (!gathered.ok) return gathered;
     return compileDoneContract(gathered.value.input);
   }
@@ -259,7 +283,7 @@ export class DoneContractService implements ApproveContractPort {
    * @returns the recompiled contract (and the falsifier paths) or the causes that stop it; an error only when the inputs cannot be read
    */
   async recompileForStart(task: DocRecord, stored: DoneContract): Promise<Result<DriftRecompile, LoreError>> {
-    const gathered = await this.gather(task, stored.kind, stored.red_required ? undefined : stored.red_waiver_reason);
+    const gathered = await this.gather(task, stored.kind, stored.red_required ? undefined : stored.red_waiver_reason, false);
     if (!gathered.ok) return gathered;
     const compiled = compileDoneContract(gathered.value.input);
     const falsifierPaths = [...gathered.value.input.falsifierFiles.keys()];
@@ -313,7 +337,7 @@ export class DoneContractService implements ApproveContractPort {
   }
 
   /** Every input of the compile, read once (the plan, the criteria, the base tip, the falsifier files). */
-  private async gather(task: DocRecord, kind: TaskKind, redWaiverReason: string | undefined): Promise<Result<{ input: DoneContractCompileInput }, LoreError>> {
+  private async gather(task: DocRecord, kind: TaskKind, redWaiverReason: string | undefined, checkAnchors: boolean): Promise<Result<{ input: DoneContractCompileInput }, LoreError>> {
     const plan = await this.resolvePlan(task);
     if (!plan.ok) return plan;
     const criteria = await this.resolveCriteria(task, plan.value);
@@ -335,7 +359,14 @@ export class DoneContractService implements ApproveContractPort {
       falsifierFiles.set(path, readCommit === undefined ? undefined : this.git.fileAt(readCommit, path));
     }
 
-    return ok({ input: { task, kind, redWaiverReason, criteria: criteria.value, config: this.config, base, falsifierFiles } });
+    // reason: only a compile that STORES a contract refuses an absent anchor; the recompile of `lore start` judges a contract that
+    // is already stored and must not turn a created-since test file into a cause (BR-1547).
+    const anchorCauses = !checkAnchors || kind !== "code"
+      ? []
+      : anchorAbsentCauses(definitionOfDone(task, criteria.value).unfiltered_pass_files, extractCreatesAnchors(task), (path) =>
+          readCommit !== undefined && this.git.fileAt(readCommit, path) !== undefined);
+
+    return ok({ input: { task, kind, redWaiverReason, criteria: criteria.value, config: this.config, base, falsifierFiles, anchorCauses } });
   }
 
   /**

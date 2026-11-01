@@ -24,7 +24,7 @@
  * Source: spec-done-contract-compiled-at-approve-task-kinds-write-sets (AC-DCS1-15, AC-DCS1-16, AC-DCS1-17), ledger D28, D33.
  */
 
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import {
   CAPTURE_TAIL_CHARS,
@@ -33,6 +33,7 @@ import {
   err,
   extractHeldClaim,
   ok,
+  oracleCreatedByTask,
   parseFailedCaseCount,
   type CaptureSource,
   type DocRecord,
@@ -499,6 +500,15 @@ export class TaskFinishService {
       if (oracle.id.startsWith("ac:")) continue;
       // reason: proved by `finishInSharedCheckout` itself from the file comparison, never spawned.
       if (oracle.id === CORPUS_ORACLE_ID) continue;
+      // reason: BR-1547 — a file the task declared with `--creates` and has not yet written is an unmet item of its own, named for the
+      // path; the runner would call the same run inconclusive ("no test ran"), which says nothing about what is missing.
+      if (oracle.id.startsWith("test:") && oracleCreatedByTask(oracle)) {
+        const path = oracle.id.slice("test:".length);
+        if (!existsSync(resolve(root, path))) {
+          results.push({ name: "test-file-absent", passed: false, cause: `${path} is declared with --creates and does not exist in ${root}; write the test file and commit it, then run lore finish again` });
+          continue;
+        }
+      }
       const runnable = oracleToRun(oracle);
       if (runnable === undefined) {
         results.push({ name: oracle.id, passed: false, cause: "this oracle has no command finish can run" });

@@ -835,7 +835,7 @@ describe("AC-DCF-1: approve refuses an absent undeclared test anchor; --creates 
   beforeAll(async () => {
     df = await makeDoneContractFixture();
     df.setDoneContractConfig(FINISH_CONFIG);
-    patchLoreConfig(df.dir, { workflow: { gates: { "plan-close": { enabled: false }, "plan-promote": { enabled: false } }, integrate: { floor_command: "true" } } });
+    patchLoreConfig(df.dir, { workflow: { gates: { "plan-close": { enabled: false }, "plan-promote": { enabled: false }, "task-claim": { enabled: false } }, integrate: { floor_command: "true" } } });
     mkdirSync(join(df.dir, "tests"), { recursive: true });
     writeFileSync(join(df.dir, EXISTING), "// seed\n");
     df.git(["add", "-A"]);
