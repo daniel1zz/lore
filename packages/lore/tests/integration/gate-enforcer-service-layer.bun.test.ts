@@ -124,10 +124,14 @@ const JUDGMENT_NOT_REQUIRED_CONFIG = {
   workflow: { review: { judgment_required_types: [] } },
 } as unknown as LoreConfig;
 
+// reason: BR-4's `hasSkeleton` is retired, so a missing `## ` heading no longer denies a spec-create. The remaining
+// content-level predicate a service-layer create can trip is `acQuantifiable`: an abstract-quality AC with no threshold.
+const UNQUANTIFIED_AC = { id: "AC-VAGUE-1", statement: "the dashboard loads fast", verify: { mode: "human" as const } };
+
 // ─── spec-create ──────────────────────────────────────────────────────────────
 
 describe("GateEnforcer — spec-create (via CorpusService.create, default config ON)", () => {
-  it("NEGATIVE: a spec with no `## ` skeleton heading is BLOCKED (err VALIDATION_ERROR)", async () => {
+  it("NEGATIVE: a spec declaring an unquantified acceptance criterion is BLOCKED (err VALIDATION_ERROR); a missing `## ` heading no longer is", async () => {
     const app = openApp();
     try {
       const prd = await app.corpusService.create({ type: "prd", title: "Root PRD", content: "PRD body" } as CreateDocInput);
@@ -136,14 +140,14 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
       const spec = await app.corpusService.create({
         type: "spec",
         title: "Minimal Spec",
-        content: "no heading here",
+        content: "no heading here", extra: { acceptance_criteria: [UNQUANTIFIED_AC] },
       } as CreateDocInput);
 
       expect(spec.ok).toBe(false);
       if (!spec.ok) {
         expect(spec.error.code).toBe("VALIDATION_ERROR");
-        expect((spec.error as { field?: string }).field).toBe("gate:spec-create");
-        expect((spec.error as { message?: string }).message).toContain("MISSING_SKELETON");
+        expect((spec.error as { field?: string }).field).toBe("gate:spec-create:ac-quantifiable");
+        expect((spec.error as { message?: string }).message).toContain("AC_NOT_QUANTIFIABLE");
       }
     } finally {
       app.close();
@@ -177,7 +181,7 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
       const spec = await app.corpusService.create({
         type: "spec",
         title: "Ungated Minimal Spec",
-        content: "no heading here",
+        content: "no heading here", extra: { acceptance_criteria: [UNQUANTIFIED_AC] },
       } as CreateDocInput);
 
       expect(spec.ok).toBe(true);
@@ -211,16 +215,16 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
         const spec = await app.corpusService.create({
           type: "spec",
           title: "D3 Enrichment Spec",
-          content: "no heading here",
+          content: "no heading here", extra: { acceptance_criteria: [UNQUANTIFIED_AC] },
         } as CreateDocInput);
 
         expect(spec.ok).toBe(false);
         if (spec.ok) return;
-        expect((spec.error as { field?: string }).field).toBe("gate:spec-create");
+        expect((spec.error as { field?: string }).field).toBe("gate:spec-create:ac-quantifiable");
         const message = (spec.error as { message?: string }).message ?? "";
         expect(message).toContain(`[source: ${skillApprove.value.slug}, trust: team-authored]`);
         expect(message).toContain("Every spec needs a `## ` heading skeleton.");
-        expect(message).toContain("MISSING_SKELETON");
+        expect(message).toContain("AC_NOT_QUANTIFIABLE");
       } finally {
         app.close();
       }
@@ -249,7 +253,7 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
         const spec = await app.corpusService.create({
           type: "spec",
           title: "No Feeding Skill Spec",
-          content: "no heading here",
+          content: "no heading here", extra: { acceptance_criteria: [UNQUANTIFIED_AC] },
         } as CreateDocInput);
 
         expect(spec.ok).toBe(false);
@@ -258,7 +262,7 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
         expect(message).not.toContain("[source: unknown");
         expect(message).toContain("[source: built-in fallback (no seeded rule doc), trust: team-authored]");
         expect(message).toContain("Missing:");
-        expect(message).toContain("MISSING_SKELETON");
+        expect(message).toContain("AC_NOT_QUANTIFIABLE");
         // The fallback rule slice itself must be genuinely present, not just a
         // non-"unknown" source label with an empty body.
         expect(message).toContain("## Rules a candidate spec must satisfy");
@@ -293,7 +297,7 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
         const spec = await app.corpusService.create({
           type: "spec",
           title: "Disabled Gate D3 Spec",
-          content: "no heading here",
+          content: "no heading here", extra: { acceptance_criteria: [UNQUANTIFIED_AC] },
         } as CreateDocInput);
 
         expect(spec.ok).toBe(true);
@@ -622,13 +626,13 @@ describe("GateEnforcer — LORE_GATE_BYPASS write-path boundary note (task-lore-
       const spec = await app.corpusService.create({
         type: "spec",
         title: "No-Bypass-Env Spec",
-        content: "no heading here",
+        content: "no heading here", extra: { acceptance_criteria: [UNQUANTIFIED_AC] },
       } as CreateDocInput);
 
       expect(spec.ok).toBe(false);
       if (spec.ok) return;
       const message = (spec.error as { message?: string }).message ?? "";
-      expect(message).toContain("MISSING_SKELETON");
+      expect(message).toContain("AC_NOT_QUANTIFIABLE");
       expect(message).not.toContain("LORE_GATE_BYPASS");
       expect(message).not.toContain("workflow.gates");
     } finally {
@@ -649,14 +653,14 @@ describe("GateEnforcer — LORE_GATE_BYPASS write-path boundary note (task-lore-
       const spec = await app.corpusService.create({
         type: "spec",
         title: "Bypass-Env-Set Spec",
-        content: "no heading here",
+        content: "no heading here", extra: { acceptance_criteria: [UNQUANTIFIED_AC] },
       } as CreateDocInput);
 
       expect(spec.ok).toBe(false);
       if (spec.ok) return;
       expect((spec.error as { code?: string }).code).toBe("VALIDATION_ERROR");
       const message = (spec.error as { message?: string }).message ?? "";
-      expect(message).toContain("MISSING_SKELETON");
+      expect(message).toContain("AC_NOT_QUANTIFIABLE");
       // Two INDEPENDENT lone tokens, not one contiguous remembered phrase.
       expect(message).toContain("LORE_GATE_BYPASS");
       expect(message).toContain("workflow.gates");
@@ -678,7 +682,7 @@ describe("GateEnforcer — LORE_GATE_BYPASS write-path boundary note (task-lore-
       const spec = await app.corpusService.create({
         type: "spec",
         title: "Bypass-Env-Truthy Spec",
-        content: "no heading here",
+        content: "no heading here", extra: { acceptance_criteria: [UNQUANTIFIED_AC] },
       } as CreateDocInput);
 
       expect(spec.ok).toBe(false);
@@ -728,7 +732,7 @@ describe("GateEnforcer — LORE_GATE_BYPASS write-path boundary note (task-lore-
       const spec = await app.corpusService.create({
         type: "spec",
         title: "Bypass-Env-Audit Spec",
-        content: "no heading here",
+        content: "no heading here", extra: { acceptance_criteria: [UNQUANTIFIED_AC] },
       } as CreateDocInput);
       expect(spec.ok).toBe(false);
 
@@ -758,7 +762,7 @@ describe("GateEnforcer — LORE_GATE_BYPASS write-path boundary note (task-lore-
       const spec = await app.corpusService.create({
         type: "spec",
         title: "Bypass-Env-And-Config-Disabled Spec",
-        content: "no heading here", // would otherwise fail MISSING_SKELETON
+        content: "no heading here", extra: { acceptance_criteria: [UNQUANTIFIED_AC] }, // would otherwise fail MISSING_SKELETON
       } as CreateDocInput);
 
       expect(spec.ok).toBe(true);
