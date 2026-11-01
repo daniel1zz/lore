@@ -107,5 +107,5 @@ Apply conventions from [database-design.md](database-design.md): naming, ID type
 ```
 
 ## Persist
-- Create via `lore create spec --title ... --kind tech --content ...`
+- Create via `lore template show spec --kind tech --blank > f.yaml` → fill → `lore create spec --title ... --kind tech --fields-file f.yaml`
 - Link to upstream PRD/spec via `lore link <from> <to> --type=implements`

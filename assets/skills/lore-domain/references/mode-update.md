@@ -13,7 +13,7 @@
    - entities.md, rules.md, workflows.md, codebase.md as needed
    - aggregates.md: update invariants, cross-aggregate references, consistency choices
    - glossary.md: add new terms, update definitions, flag code-UL mismatches
-   - Tools: serena: replace_content; lore: `lore set <doc> --content ...`, `lore link` / `lore unlink`
+   - Tools: serena: replace_content; lore: `lore set <doc> --fields-file <file>` (a legacy unconverted doc: `--content`), `lore link` / `lore unlink`
 
 3. **Update metadata** at `docs/domain/{domain}/index.yaml`
    - updated date, entity_count/aggregate_count/rule_count/workflow_count/glossary_term_count, dependencies
@@ -27,7 +27,7 @@ When updating after bug fixes or incident resolution, also evolve Expert Lenses:
    - Edge case missed → add to relevant lens's `checklist`
    - Anti-pattern caused bug → add to relevant lens's `red_flags`
    - New user scenario discovered → add to `scenarios`
-3. Update via `lore set <doc> --content ...` for the registered knowledge doc
+3. Update via `lore set <doc> --fields-file <file>` (changed fields only) for the registered knowledge doc
 4. Output: `**[LENS_EVOLVE]** {domain} | {lens} | added: {checklist|red_flag|scenario} — "{item}"`
 
 Skip if bug was purely technical (no domain/business dimension).

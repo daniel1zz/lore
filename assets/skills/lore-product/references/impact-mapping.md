@@ -128,7 +128,7 @@ For each impact:
 - **Stale maps**: Impact Maps are living documents. Revisit quarterly or when strategy shifts.
 
 ## Persist Output
-- Artifact: `lore create knowledge --parent <spec or prd it concerns> --sub-type research --title '{goal} Impact Map' --content ...`
+- Artifact: `lore create knowledge --parent <spec or prd it concerns> --sub-type research --title '{goal} Impact Map' --fields-file f.yaml` (skeleton: `lore template show knowledge --kind research --blank`)
 - Link to: PRDs derived from this map (`lore link <impact-map> <prd> --type=informs`)
 
 ## Triggers

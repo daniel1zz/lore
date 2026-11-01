@@ -54,8 +54,8 @@ Before finalizing roadmap, verify:
 See [cross-cutting-concerns.md](cross-cutting-concerns.md) for full framework.
 
 ## Required Output
-- Roadmap doc via `lore create prd --title '<roadmap-title>' --content ...` (the living-root strategic doc)
-- Per-theme epic doc via `lore create plan --title '<theme>' --parent <roadmap-prd> --content ...`
+- Roadmap doc via `lore template show prd --blank` → fill → `lore create prd --title '<roadmap-title>' --fields-file f.yaml` (the living-root strategic doc)
+- Per-theme epic doc via `lore template show plan --blank` → fill → `lore create plan --title '<theme>' --parent <roadmap-prd> --fields-file f.yaml`
 - Link epics to roadmap via `lore link <epic-plan> <roadmap-prd> --type=implements`
 - Strategic context (why this sequence)
 - Trade-offs explicitly stated

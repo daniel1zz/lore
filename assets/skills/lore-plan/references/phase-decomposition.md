@@ -17,7 +17,7 @@ that justified a task lives only in the planning conversation, it is already los
 - Key files: known files to create/modify
 - Constraints: performance/security/compatibility requirements
 
-### Task content (`lore create task --content-file ...`) — MUST carry:
+### Task content (`lore template show task --blank` → fill → `lore create task --fields-file ...`) — MUST carry:
 - `Estimate:` / `Approach:` / `Source:` (implement tasks) — see plan-file-format.md
 - `Covers:` — spec AC ids this task satisfies (evidence records against them via `--ac`)
 - `AC:` — Given/When/Then, oracle-verifiable (see ac-quality.md); ≥1 dimension,
@@ -40,7 +40,7 @@ Lore's model requires FULL upfront decomposition (mode-create § 5.1) — there 
 1. MUST check: `lore list --type task --plan-id <plan> --phase "<name>" --json` per declared
    phase — any phase with zero tasks?
 2. For each thin phase/task, verify the Cold-Start standard above
-3. If any fails the standard — enrich it NOW (`lore set <task> --content-file ...`,
+3. If any fails the standard — enrich it NOW (`lore set <task> --fields-file ...`,
    `lore phase add --description` on recreate), not "next session"
 4. Capture the volatile context before it evaporates:
    - `lore handoff --plan <plan> --next "decompose Phase N per ..." --decision "..."`

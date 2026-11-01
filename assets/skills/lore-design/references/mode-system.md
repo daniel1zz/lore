@@ -141,5 +141,5 @@ After all 4 agents return, synthesize:
 ```
 
 ## Persist
-- Create via `lore create spec --title ... --kind design --content ...` or `lore create adr --parent <spec it governs> --title ... --decision-status proposed --content ...`
+- Create via `lore template show spec --kind design --blank > f.yaml` → fill → `lore create spec --title ... --kind design --fields-file f.yaml`, or for a decision record `lore template show adr --blank` → fill → `lore create adr --parent <spec it governs> --title ... --decision-status proposed --fields-file f.yaml`
 - Link to upstream PRD (`implements`) and related ADRs (`relates`) via `lore link <from> <to> --type=<type>`

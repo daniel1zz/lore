@@ -210,7 +210,7 @@ The PRD keeps strategy only (why, for whom, non-goals). What the product does NO
 2. **Product requirements** (`R-##`) → declare with `lore requirement add`; once a baseline rule states the behaviour, `lore requirement migrate <prd> <R-id> <BR-n>` — coverage then comes from criteria citing that rule.
 3. **Landing-spec chain unchanged** — feature/tech/design specs take no parent (BR-2) and their criteria cite the rules they implement (`lore ac add ... --cite BR-n`).
 
-⛔ **Never edit the root PRD body wholesale** via `lore set <prd> --content …` — strategy edits are small and reviewed; behaviour belongs in the baseline tree.
+⛔ **Never rewrite the root PRD wholesale** via `lore set <prd> --fields-file …` — pass only the fields that change; strategy edits are small and reviewed; behaviour belongs in the baseline tree.
 
 ## Exit Criteria (all modes)
 

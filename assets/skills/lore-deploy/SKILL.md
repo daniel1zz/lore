@@ -124,7 +124,7 @@ See `references/methodology-rollback.md` for full procedures.
 3. Data migrations — maintain old+new paths until verified, then cleanup
 4. Always test rollback path in staging before production
 
-**Post-rollback**: Re-run Phase 4 verification. Create incident doc via lore (`lore create knowledge --parent <plan or spec it reviews> --sub-type retro --title ... --content ...`). Hand off to `operate` skill if extended investigation needed.
+**Post-rollback**: Re-run Phase 4 verification. Create incident doc via lore (`lore create knowledge --parent <plan or spec it reviews> --sub-type retro --title ... --fields-file f.yaml`; skeleton: `lore template show knowledge --kind retro --blank`). Hand off to `operate` skill if extended investigation needed.
 
 ---
 
@@ -280,6 +280,6 @@ A mode is COMPLETE only when ALL exit criteria are met. Report as checklist.
 
 ## Persist
 
-- Create/update runbook: `lore create knowledge --parent <spec or prd it concerns> --sub-type reference --title ... --content ...` or `lore set <runbook> --content ...`
+- Create/update runbook: `lore create knowledge --parent <spec or prd it concerns> --sub-type reference --title ... --fields-file f.yaml` (skeleton: `lore template show knowledge --kind reference --blank`) or `lore set <runbook> --fields-file f.yaml`
 - Link to upstream specs: `lore link <runbook> <tech-spec> --type=implements`, `lore link <runbook> <adr> --type=relates-to`
 - Update task: `lore evidence <task> --oracle build --command "<cmd>" --result pass --capture` then `lore release <task>`

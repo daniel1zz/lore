@@ -343,7 +343,7 @@ export default defineLoreCommand({
         "input-json": {
           type: "string",
           description:
-            'JSON matching lore_create\'s input shape: {type, title, parent_id?, content, extra?: {spec_kind?}}',
+            'JSON matching lore_create\'s input shape: {type, title, parent_id?, extra?: {spec_kind?, acceptance_criteria?}}. A spec is created structured (`lore template show spec --kind <k> --blank` → fill → `lore create spec --fields-file`), so no body is passed; a legacy `content` key is accepted and ignored by every predicate.',
           required: true,
         },
       },

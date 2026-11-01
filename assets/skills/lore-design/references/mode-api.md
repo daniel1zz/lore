@@ -107,5 +107,5 @@ Before finalizing, verify ALL gates pass (see SKILL.md Quality Gates table):
 **REFUSE to finalize** if any gate fails. Report failing gates and iterate.
 
 ## Persist
-- Create via `lore create spec --title ... --kind tech --content ...`
+- Create via `lore template show spec --kind tech --blank > f.yaml` → fill → `lore create spec --title ... --kind tech --fields-file f.yaml`
 - Link to upstream PRD/spec via `lore link <from> <to> --type=implements`

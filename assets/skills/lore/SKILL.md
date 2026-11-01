@@ -14,7 +14,8 @@ Not installed? `ln -sf <lore-repo>/dist/lore /usr/local/bin/lore`, then `lore in
 ```bash
 lore search "optimistic locking" --limit 5   # FTS5 full-text, BEFORE writing something new
 lore get <id-or-slug>                        # read one doc (slug format: {type}-{kebab-title})
-lore create prd --title "Payment module" --content "..." --tags payments,p0
+lore template show prd --blank > prd.yaml    # fill the skeleton
+lore create prd --title "Payment module" --fields-file prd.yaml --tags payments,p0
 lore link spec-payment-api prd-payment-module --type=implements
 ```
 
@@ -48,7 +49,7 @@ Always search first — duplicating an existing doc fragments team knowledge. Li
 
 All six types are CLI-creatable. `requires_uat` on a plan is set with `lore set <plan> --requires-uat`.
 
-Flags: `--title --parent --content --content-file <path> --priority critical|high|medium|low --tags a,b --json`.
+Flags: `--title --parent --fields-file <path> --priority critical|high|medium|low --tags a,b --json`. Documents are stored as structured fields validated by a versioned template: `lore template show <type> [--kind k] --blank` prints the skeleton, `lore create <type> … --fields-file <file>` creates, `lore set <doc> --fields-file <file>` revises (the text is rendered from the fields; a supplied body is refused for a templated document). A legacy document not yet converted (`lore convert`) is still edited with `--content`.
 
 ## Plans with phases (SPEC-023)
 

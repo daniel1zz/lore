@@ -91,8 +91,9 @@ The matrix is an **input**, not a decision. Route it:
 
 ```bash
 lore search "{category} benchmark" --json          # may already exist — update instead
+lore template show knowledge --kind research --blank > f.yaml   # fill with the teardown
 lore create knowledge --parent <spec or prd it concerns> --sub-type research \
-  --title '{category} Benchmark Teardown' --content ...
+  --title '{category} Benchmark Teardown' --fields-file f.yaml
 ```
 
 Re-run rather than trust an old teardown when it is more than ~2 quarters old; benchmark products ship continuously and a stale matrix is worse than none because it reads as current.

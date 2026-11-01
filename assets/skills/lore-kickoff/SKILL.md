@@ -47,10 +47,11 @@ lore init --name <project-name> --author <name>     # creates .lore/
 ### 2b. Seed the root PRD (PRD-as-living-root)
 
 ```bash
-lore create prd --title "<project> — <one-liner>" --content-file <prd.md>
+lore template show prd --blank > prd-fields.yaml     # fill the skeleton from the intake
+lore create prd --title "<project> — <one-liner>" --fields-file prd-fields.yaml
 ```
 
-Body: structured overview from intake — problem, target users, scope, non-goals, constraints. The PRD is a *living root*: it may embed MDX placeholders that resolve at read time (`lore get <prd> --resolve-mdx`), e.g. `<ChildrenOf />` (child specs), `<ActivePlans />`, `<RecentDecisions />`, `<HealthStats />` — so the PRD stays current without manual edits.
+Fields: structured overview from intake — problem, target users, scope, non-goals, constraints. The body is rendered from the fields (a supplied body is refused). The PRD is a *living root*: it may embed MDX placeholders that resolve at read time (`lore get <prd> --resolve-mdx`), e.g. `<ChildrenOf />` (child specs), `<ActivePlans />`, `<RecentDecisions />`, `<HealthStats />` — so the PRD stays current without manual edits.
 
 ### 2c. Optional: tree blueprint
 

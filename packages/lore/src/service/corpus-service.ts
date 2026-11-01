@@ -3042,7 +3042,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     const guidance =
       lines.length === 0
         ? "no document that could take it exists yet - create the requirements document first " +
-          "(`lore create prd --title <title>`), then pass it as --parent"
+          "(`lore template show prd --blank`, fill it, `lore create prd --title <title> --fields-file <file>`), then pass it as --parent"
         : `pass --parent <slug> naming the document it concerns; candidates:\n${lines.join("\n")}`;
     return err({
       code: "VALIDATION_ERROR",

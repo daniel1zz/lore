@@ -17,12 +17,12 @@ AI judges are advisory only. Never bypass a gate (`LORE_GATE_BYPASS=1`) without 
 | `get_session_bootstrap` | pulled on demand with `lore bootstrap --json` (root, active_plans, pending_reviews, my_claims, armed_gates, latest_handoffs, resume_hint, active_sessions); the session-start injection carries only this seat's claims and plan handoff |
 | `search` | `lore search "<q>" [--type t] --json` |
 | `get_doc` / `get_topic_context` | `lore get <id-or-slug>` (+ `--resolve-mdx`); `lore tree [<plan>]` |
-| `create_intent` | `lore create prd --title ... --content ...` |
+| `create_intent` | `lore template show prd --blank > f.yaml`, fill, `lore create prd --title ... --fields-file f.yaml` (every templated type is created this way: `lore template show <type> [--kind k] --blank` → fill → `--fields-file`; a supplied body is refused) |
 | `create_spec` | `lore feed spec-create` FIRST, then `lore create spec --title ... [--kind feature\|tech\|design]`; ACs via `lore ac add <spec> ... --cite BR-<n>` (a spec takes no parent; cite rules with `lore ac cite <spec> <AC> BR-<n>`; no approval without a citing criterion, BR-1007) |
 | `create_decision` | `lore create adr --parent <spec it governs> --title ... --decision-status proposed` |
 | `create_knowledge` | `lore create knowledge --parent <spec or prd it concerns> --sub-type ideation\|retro\|research\|reference\|assessment\|prompt\|skill\|handoff` |
 | `create_architecture` / `init_*` / `get_module` / `update_module` | RETIRED — module context lives in layered CLAUDE.md files (`zz-init-context` skill) |
-| `update_doc` | `lore set <doc> --title/--content/--status ...` (editing an approved doc auto-resets to draft) |
+| `update_doc` | `lore set <doc> --title/--fields-file/--status ...` (a legacy unconverted doc still takes `--content`; editing an approved doc auto-resets to draft) |
 | `manage_links` | `lore link <from> <to> --type=parent\|implements\|informs\|supersedes\|relates-to\|blocks\|governs` / `lore unlink` |
 | `create_plan` | `lore create plan --title ... --parent <spec>` |
 | `create_plan_phases` / `decompose_phase` | `lore phase add <plan> <name>`; `lore create task --parent <plan> --plan-id <plan> --phase <name> --anchor <path>` |

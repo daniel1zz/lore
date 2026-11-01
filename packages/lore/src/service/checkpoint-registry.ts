@@ -1604,7 +1604,8 @@ function feedRecordEdit(ctx: GateContext, _failures: PredicateResult[]): string 
   const lines: string[] = [`${slug} is a locked record (${reason}).`];
 
   const correction =
-    `Typo-level fix of the stored text: lore set ${slug} --content <fixed text> --correction "<reason>" ` +
+    `Typo-level fix of the stored text: lore set ${slug} --fields-file <fixed fields> --correction "<reason>" ` +
+    "(a legacy document not yet converted takes --content <fixed text> instead) " +
     "(audited, one version, status kept).";
   const replace = (what: string, link: string): string =>
     `Substantive change: ${what}, and link it to ${slug} with ${link} so the old record points at its replacement.`;
