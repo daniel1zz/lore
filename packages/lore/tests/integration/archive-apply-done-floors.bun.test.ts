@@ -147,6 +147,8 @@ function buildFixture(dir: string): Fixture {
     dir,
   );
 
+  // BR-1528: `lore handoff` creates the document structured through the approved `knowledge/handoff` template.
+  mustRun(["migrate", "templates", "--apply"], dir);
   const handoffOut = mustRun(["handoff", "--next", "resume the floor work", "--plan", planSlug], dir);
   const r3 = parseSlug(handoffOut);
   backdate(r3, dir);

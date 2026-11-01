@@ -80,6 +80,8 @@ beforeAll(() => {
   judgeScript = join(corpus, "fake-judge.sh");
   writeFileSync(judgeScript, `#!/bin/sh\ncat > "${capture}"\nn=$(grep -o '### Item [0-9]*' "${capture}" | grep -o '[0-9]*' | head -1)\nsed "s/@N@/$n/g" "${replyFile}"\n`, { mode: 0o755 });
   mustRun(["init"]);
+  // BR-1528: the fidelity record is created structured through the approved `knowledge/research` template.
+  mustRun(["migrate", "templates", "--apply"]);
   patchLoreConfig(
     corpus,
     [
@@ -125,10 +127,13 @@ describe("lore baseline fidelity (CLI)", () => {
     expect(readFileSync(capture, "utf8")).toContain("<<DATA-");
     const titles = researchTitles();
     expect(titles).toContain("seed 7");
-    const doc = JSON.parse(mustRun(["get", out.data.doc.slug, "--json"]).stdout) as { data: { doc?: { extra: { sub_type?: string }; content: string }; extra?: { sub_type?: string }; content?: string } };
+    const doc = JSON.parse(mustRun(["get", out.data.doc.slug, "--json"]).stdout) as { data: { doc?: { extra: { sub_type?: string; template_ref?: string }; content: string }; extra?: { sub_type?: string; template_ref?: string }; content?: string } };
     const stored = doc.data.doc ?? doc.data;
     expect(stored.extra?.sub_type).toBe("research");
-    expect(stored.content).toContain("faithful_share");
+    // BR-1528: the body is rendered from the research template's fields: the share is the conclusion, each sampled item a finding
+    expect(stored.extra).toMatchObject({ template_ref: "knowledge-research-template@1" });
+    expect(stored.content).toContain("100.0% of 1 sampled citations judged faithful");
+    expect(stored.content).toContain("## Findings");
   });
 
   it("STATE: a different judge reply changes the stored share (0 when the judge says not_faithful)", () => {
@@ -186,6 +191,6 @@ describe("lore baseline fidelity (CLI)", () => {
     expect(readFileSync(capture, "utf8")).not.toContain("missing-fid");
     const slug = r.stdout.match(/Stored (\S+):/)?.[1] ?? "";
     const doc = JSON.parse(mustRun(["get", slug, "--json"]).stdout) as { data: { doc?: { content: string }; content?: string } };
-    expect((doc.data.doc ?? doc.data).content).toContain("not_seen: 1");
+    expect((doc.data.doc ?? doc.data).content).toContain("not_seen 1");
   });
 });
