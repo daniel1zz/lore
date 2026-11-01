@@ -667,7 +667,8 @@ async function runSpecCreateGate(
     // resolves to nothing, is refused; `parentLegal` only needs to know a parent was named.
     parentType: parentDoc !== null ? parentDoc.type : input.parent_id !== undefined ? "unresolved" : null,
     ...(input.extra?.spec_kind !== undefined ? { specKind: input.extra.spec_kind } : {}),
-    content: input.content ?? "",
+    // reason: a `content` key never reaches here (refused in `run`); no predicate reads a body (BR-4 retired).
+    content: "",
     ...(acceptanceCriteriaParsed.success
       ? { acceptanceCriteria: acceptanceCriteriaParsed.data }
       : {}),
