@@ -1,3 +1,4 @@
+// @reads assets/templates/**
 /**
  * Tests for SessionService.writeHandoff (SPEC-041 S2 lossless handoff write path).
  * Uses InMemoryStore — no file I/O, no SQLite.
@@ -23,11 +24,12 @@ import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
-import { renderHandoffContent, DEGRADED_HANDOFF_MARKER, canonicaliseBody } from "@lore/core";
+import { renderHandoffContent, DEGRADED_HANDOFF_MARKER } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
 import { actedStore } from "../../live-invocation.js";
 
 import { ensureRequirementsDocId } from "../../helpers/parented-create.js";
+import { wireStructuredCorpus } from "../../helpers/structured-docs.js";
 function makeServices() {
   const store = actedStore(new InMemoryStore());
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
@@ -39,6 +41,13 @@ function makeServices() {
   return { store, corpusService, sessionService };
 }
 
+/** `makeServices` over a corpus armed with the template write path and the seeded templates (BR-1528): the body is rendered. */
+async function makeStructuredServices() {
+  const services = makeServices();
+  await wireStructuredCorpus(services.corpusService, services.store);
+  return services;
+}
+
 async function mustCreate(cs: CorpusService, input: CreateDocInput) {
   const result = await cs.create(input);
   if (!result.ok) throw new Error(`create failed: ${JSON.stringify(result.error)}`);
@@ -46,8 +55,8 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput) {
 }
 
 describe("SessionService.writeHandoff — HAPPY (AC-SL-3)", () => {
-  it("creates a draft knowledge/handoff doc parented to the given plan, content = renderHandoffContent projection", async () => {
-    const { corpusService, sessionService } = makeServices();
+  it("creates a draft knowledge/handoff doc parented to the given plan, content = the body rendered from its template fields", async () => {
+    const { corpusService, sessionService } = await makeStructuredServices();
     const plan = await mustCreate(corpusService, { parent_id: await ensureRequirementsDocId(corpusService), type: "plan", title: "Plan A", content: "# Plan" } as CreateDocInput);
     const task = await mustCreate(corpusService, {
       type: "task",
@@ -82,13 +91,14 @@ describe("SessionService.writeHandoff — HAPPY (AC-SL-3)", () => {
     expect(handoff["key_decisions"]).toEqual([{ judgment: "extra is SSOT", confidence: 90 }]);
     expect(handoff["next_steps"]).toEqual(["wire into app.ts"]);
 
-    // reason: CorpusService._createImpl canonicalises content at write time
-    // (CRLF→LF, trim, exactly one trailing newline — SPEC-021 §4 whitespace parity,
-    // applied to EVERY doc, not handoff-specific) — so doc.content is the
-    // canonicalised projection, not the raw renderHandoffContent output.
-    expect(doc.content).toBe(
-      canonicaliseBody(renderHandoffContent(handoff as Parameters<typeof renderHandoffContent>[0])),
-    );
+    // BR-1528: the body is rendered from `extra.fields` by the approved `knowledge/handoff` template; the doc pins it.
+    expect((doc.extra as { template_ref?: string }).template_ref).toBe("knowledge-handoff-template@1");
+    expect(doc.content).toContain("## Next steps");
+    expect(doc.content).toContain("- wire into app.ts");
+    expect(doc.content).toContain("- packages/core/src/session.ts");
+    expect(doc.content).toContain("decision: extra is SSOT");
+    // `lore resume` still re-renders the typed `extra.handoff`, never `doc.content` read verbatim.
+    expect(renderHandoffContent(handoff as Parameters<typeof renderHandoffContent>[0])).toContain("wire into app.ts");
   });
 
   it("defaults task_refs/modified_files/key_decisions to [] rather than leaving them undefined", async () => {
@@ -231,7 +241,7 @@ describe("SessionService.writeHandoff — ERROR (AC-SL-12)", () => {
 
 describe("SessionService.writeHandoff — degraded handoff (AC-SL-12)", () => {
   it("degraded: true renders the exact DEGRADED_HANDOFF_MARKER string, imported not hardcoded", async () => {
-    const { corpusService, sessionService } = makeServices();
+    const { corpusService, sessionService } = await makeStructuredServices();
     await ensureRequirementsDocId(corpusService);
     const result = await sessionService.writeHandoff({
       by: "stop-hook",

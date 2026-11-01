@@ -30,7 +30,8 @@ export interface StructuredWriteDeps {
   /**
    * When true a NEW document of any type must be created structured (BR-1528); when false only a create that
    * supplies `extra.fields` (or a `template_ref`) is structured and a plain create keeps today's free body.
-   * Source: `workflow.structured_documents.require_create` (default false until the open documents are converted).
+   * Source: `workflow.structured_documents.require_create` (default false until the open documents are converted;
+   * a later task deletes the switch after the test migration).
    */
   readonly requireStructuredCreate: boolean;
 }

@@ -1,5 +1,6 @@
 // @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 // @reads assets/project/lore-config-template.yaml
+// @reads assets/templates/**
 /**
  * @spec_ref spec-070-deterministic-task-dispatch-bundle-lore-feed-task-start
  *   §Design D1, D7; §Acceptance Criteria AC-070-7, AC-070-18.
@@ -281,6 +282,10 @@ async function createHandoffChain(dir: string): Promise<{ planSlug: string; hand
   expect(planResult.exitCode).toBe(0);
   const planSlug = parseSlug(planResult.stdout);
 
+  // BR-1528: `lore handoff` creates the document structured through the approved `knowledge/handoff` template. Seeded here,
+  // not in `initCorpus`: the spec-create regression cases in this file pin the output of a corpus with NO approved template.
+  const seeded = await runLore(["migrate", "templates", "--apply"], dir, "alice");
+  expect(seeded.exitCode, seeded.stderr).toBe(0);
   const handoffResult = await runLore(
     [
       "handoff",

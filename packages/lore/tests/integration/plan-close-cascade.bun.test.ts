@@ -1,3 +1,4 @@
+// @reads assets/templates/**
 /**
  * @spec_ref spec-lifecycle-archival-plan-close-cascade-deterministic
  *   §Candidate Rules R1, §Design Decisions D2, AC-097-2
@@ -57,6 +58,7 @@ import type { VerifiedEvidenceInput } from "../../src/service/task-workflow-serv
 import type { PlanCloseCascadeResult } from "../../src/service/corpus-service.js";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 import { runOfName } from "../helpers/test-run-identity.js";
+import { seedTemplatesInApp } from "../helpers/structured-docs.js";
 import { passMilestoneReview } from "../helpers/plan-review-fixture.js";
 
 let tmpDir: string;
@@ -156,6 +158,7 @@ describe("plan-close cascade (R1) — HAPPY", () => {
   it("AC-097-2: archives an unclaimed task and a plan-parented handoff, each with an archive-cascade audit entry", async () => {
     const app = openApp();
     try {
+      await seedTemplatesInApp(app);
       const plan = await makeApprovedPlan(app);
       const task = await makeTask(app, plan, "Unclaimed straggler task");
       // re-baselined (#47): this task used to hold NO evidence and was archived anyway.
@@ -326,6 +329,8 @@ interface FloorFixture {
 }
 
 async function seedFloorFixture(app: App): Promise<FloorFixture> {
+  // BR-1528: the handoff below is created structured through the approved `knowledge/handoff` template.
+  await seedTemplatesInApp(app);
   const plan = await makeApprovedPlan(app);
   const t1 = await makeTask(app, plan, "T1 attested");
   await giveAttestedPass(app, t1);

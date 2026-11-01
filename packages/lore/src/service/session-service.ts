@@ -100,6 +100,7 @@ import type {
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
+import { handoffFields, withGeneratedFields } from "./generated-fields.js";
 import type { GateCheckpoint } from "./checkpoint-registry.js";
 import { computeArmedGates } from "./checkpoint-registry.js";
 import { isPlanMember } from "./plan-membership.js";
@@ -926,13 +927,18 @@ export class SessionService {
       }
     }
 
-    const createInput: CreateDocInput = {
-      type: "knowledge",
-      title: `Handoff — ${handoff.by}`,
-      ...(parentId !== null ? { parent_id: parentId } : {}),
-      content: renderHandoffContent(handoff),
-      extra: { sub_type: "handoff", handoff },
-    };
+    // reason: BR-1528 — the handoff is created structured through the `knowledge/handoff` template: `extra.handoff` stays the
+    // typed SSOT the resume read path consumes, `extra.fields` + `extra.dimensions` are what the template validates, and the
+    // body is rendered from them (a supplied body would be refused).
+    const createInput: CreateDocInput = withGeneratedFields(
+      {
+        type: "knowledge",
+        title: `Handoff — ${handoff.by}`,
+        ...(parentId !== null ? { parent_id: parentId } : {}),
+        extra: { sub_type: "handoff", handoff },
+      },
+      handoffFields(handoff),
+    );
 
     return this.deps.createHandoffDoc(createInput);
   }

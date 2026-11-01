@@ -85,6 +85,9 @@ export function makeConsumerCorpus(options: ConsumerCorpusOptions): string {
     base,
   );
   if (prd.exitCode !== 0) throw new Error(`root PRD creation failed (exit ${prd.exitCode}): ${prd.stderr}`);
+  // BR-1528: a filed report's GitHub body is rendered from the approved `issue-report` template, so the corpus carries the seeds.
+  const seeded = runLore(["migrate", "templates", "--apply"], base);
+  if (seeded.exitCode !== 0) throw new Error(`'lore migrate templates --apply' failed (exit ${seeded.exitCode}): ${seeded.stderr}`);
 
   if (options.feedbackYaml !== null) {
     patchLoreConfig(root, options.feedbackYaml);

@@ -114,6 +114,7 @@ import { exitCli } from "./cli-exit.js";
 import {
   err,
   ok,
+  validationError,
   VENDOR_INTAKE_REPO,
   type FeedbackConfig,
   type IssueSeverity,
@@ -123,6 +124,7 @@ import {
   type Result,
 } from "@lore/core";
 import type { CorpusService } from "../../service/corpus-service.js";
+import { renderIssueReportBody } from "../../service/issue-report-body.js";
 import { checkReproCommand, type ReproCheck } from "../../service/report-issue-repro.js";
 import { GhRunner, createNodeGhExecFile } from "../../service/gh-runner.js";
 import { GitHubIntakePort, type GithubListedIssue } from "../../service/github-intake-port.js";
@@ -669,36 +671,6 @@ async function resolveLocalRootPrd(
   return ok(rootPrd ? { id: rootPrd.id, slug: rootPrd.slug } : null);
 }
 
-/**
- * Fence for a repro command: `max(3, longest backtick run in the command + 1)` backticks, so no command can
- * close its own block early (D5).
- */
-function fenceFor(command: string): string {
-  const longestRun = Math.max(0, ...(command.match(/`+/g) ?? []).map((run) => run.length));
-  return "`".repeat(Math.max(3, longestRun + 1));
-}
-
-/**
- * Joins the report's free-form fields into ONE body block — the consumer-authority content the Per-Field-Authority table assigns to the issue body (never the front-matter block).
- * Order: description, Expected, Actual, Repro command (fenced), Repro steps, Suggested fix, Refs, [Context], then the caller's `Reported by:`.
- * A field that is absent contributes no heading; each marker appears once.
- */
-function buildIssueDescriptionBlock(input: GithubReportInput): string {
-  const lines = [input.description, "", `**Expected:** ${input.expected}`, `**Actual:** ${input.actual}`];
-  if (input.repro_command !== undefined) {
-    const fence = fenceFor(input.repro_command);
-    lines.push("", "**Repro command:**", fence, input.repro_command, fence);
-  }
-  if (input.repro_steps !== undefined) lines.push("", "**Repro steps:**", input.repro_steps);
-  if (input.suggested_fix !== undefined) lines.push("", "**Suggested fix:**", input.suggested_fix);
-  if (input.refs !== undefined && input.refs.length > 0) {
-    lines.push("", "**Refs:**", ...input.refs.map((ref) => `- ${ref}`));
-  }
-  // reason: `**Context:**` (attached test-file spec refs / header, AC-RI-3/4) comes last, right before `Reported by:`.
-  if (input.context !== undefined) lines.push("", input.context);
-  return lines.join("\n");
-}
-
 /** The slice of an Invocation the repro-command check reads: its PATH (never the process default) and its cwd. */
 export interface ReproCheckEnvironment {
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -844,9 +816,19 @@ export async function fileGithubIssue(
     actor: ctx.actor,
   };
 
+  // reason: BR-1528 — the body is rendered from the approved `issue-report` template (validated, fail loud), not hand-built.
+  // reason: the template reader is the one the reporter's own CorpusService validates its writes with, so every composition
+  // site that already passes `corpusService` (report-issue, assess, issues-migrate) gets it without a new context field.
+  const templates = ctx.corpusService.templateReader;
+  if (templates === undefined) {
+    return err(validationError("templates", "the reporter's corpus service has no template reader, so the report cannot be rendered from the issue-report template (internal wiring error: nothing was filed)", undefined, "BR-1528"));
+  }
+  const body = await renderIssueReportBody(templates, input);
+  if (!body.ok) return body;
+
   const fileResult = await port.fileIssue({
     title: input.title,
-    description: buildIssueDescriptionBlock(input),
+    description: body.value,
     severity: input.severity,
     category: input.category,
     tags: input.tags,

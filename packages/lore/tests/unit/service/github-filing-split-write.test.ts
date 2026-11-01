@@ -1,3 +1,4 @@
+// @reads assets/templates/**
 /**
  * @spec_ref spec-github-owns-issue-report-state-no-mirror-task-work-carries D7 (GS-T7)
  *
@@ -24,6 +25,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ok, err } from "@lore/core";
 import type { CorpusService } from "../../../src/service/corpus-service.js";
+import { TemplateService } from "../../../src/service/template-service.js";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { actedStore } from "../../live-invocation.js";
+import { seededTemplateReader } from "../../helpers/structured-corpus-wiring.js";
 
 // ─── GitHubIntakePort mocked wholesale — see this file's own header ────────
 
@@ -73,13 +78,17 @@ function makeCorpusService(): { service: CorpusService; writes: ReturnType<typeo
     update: writes,
     set: writes,
     link: writes,
+    // BR-1528: the filing renders its body from the approved `issue-report` template, read through the corpus service.
+    templateReader: seededReader,
   } as unknown as CorpusService;
   return { service, writes };
 }
 
 let corpusRoot: string;
+let seededReader: TemplateService;
 
-beforeEach(() => {
+beforeEach(async () => {
+  seededReader = await seededTemplateReader();
   corpusRoot = mkdtempSync(join(tmpdir(), "lore-github-filing-no-write-"));
   verifyTargetMock.mockReset().mockResolvedValue(ok({ login: "acme", id: 555 }));
   searchDuplicatesMock.mockReset().mockResolvedValue(ok([]));
@@ -117,6 +126,45 @@ describe("GS-T7: fileGithubIssue never writes the corpus", () => {
     // Falsifier: re-enabling the mint call reddens this from 0 to 1.
     expect(writes).not.toHaveBeenCalled();
     expect(fileIssueMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("HAPPY: the filed body is rendered from the approved issue-report template (the description is its first section)", async () => {
+    const { service } = makeCorpusService();
+    const result = await fileGithubIssue(INPUT, CFG, makeContext(service));
+    expect(result.ok).toBe(true);
+    const filed = fileIssueMock.mock.calls[0]?.[0] as { description: string };
+    expect(filed.description.startsWith(`## Description\n\n${INPUT.description}`)).toBe(true);
+    expect(filed.description).toContain("## Expected\n\nexit 0");
+    expect(filed.description).toContain("## Actual\n\nexit 4");
+  });
+
+  it("NEGATIVE: a corpus with no approved issue-report template refuses the filing naming the slot, and nothing is filed", async () => {
+    const { service, writes } = makeCorpusService();
+    const bare = { ...service, templateReader: new TemplateService(actedStore(new InMemoryStore())) } as unknown as CorpusService;
+    const result = await fileGithubIssue(INPUT, CFG, makeContext(bare));
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected err");
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    expect(JSON.stringify(result.error)).toContain("issue-report");
+    expect(fileIssueMock).not.toHaveBeenCalled();
+    expect(writes).not.toHaveBeenCalled();
+  });
+
+  it("NEGATIVE: a corpus service with no template reader at all refuses loudly, never a hand-built body", async () => {
+    const { service } = makeCorpusService();
+    const unwired = { ...service, templateReader: undefined } as unknown as CorpusService;
+    const result = await fileGithubIssue(INPUT, CFG, makeContext(unwired));
+    expect(result.ok).toBe(false);
+    expect(fileIssueMock).not.toHaveBeenCalled();
+  });
+
+  it("ERROR: a report the template rejects (category over 48 characters) is refused naming the field, before any gh call", async () => {
+    const { service } = makeCorpusService();
+    const result = await fileGithubIssue({ ...INPUT, category: "x".repeat(60) }, CFG, makeContext(service));
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected err");
+    expect(JSON.stringify(result.error)).toContain("category");
+    expect(fileIssueMock).not.toHaveBeenCalled();
   });
 
   it("ERROR: a fileIssue failure propagates unchanged and writes nothing", async () => {

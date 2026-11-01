@@ -1,3 +1,4 @@
+// @reads assets/templates/**
 /**
  * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones  AC-LG-12 (stale cited evidence is re-verified
  *   once per batch through the trusted runner, also for a criterion no task declares); business rule BR-1372.
@@ -24,6 +25,7 @@ import { indexLatestAttestedRuns, attestedRunKey } from "../../src/service/attes
 import { createApp, type App } from "../../src/app.js";
 import { createAppStaleRefresher } from "../../src/adapters/cli/assess-stale-refresh.js";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
+import { seedTemplatesInApp } from "../helpers/structured-docs.js";
 
 let dir: string;
 let app: App;
@@ -41,6 +43,8 @@ beforeEach(async () => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), "lore-stale-refresh-wiring-")));
   mkdirSync(join(dir, ".lore"), { recursive: true });
   app = createApp(join(dir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
+  // BR-1528: the ad-hoc refresh task is created structured through the approved `task` template.
+  await seedTemplatesInApp(app);
   const prd = await must(app.corpusService.create({ type: "prd", title: "Refresh PRD", content: "root" } as CreateDocInput), "prd");
   void prd;
   const spec = await must(app.corpusService.create({ type: "spec", title: "Refresh spec", content: "## Overview/Goal\n\nRefresh.\n\n## Scope\n\nOne criterion.\n\n## Acceptance Criteria\n\nAC-RF-1." } as CreateDocInput), "spec");

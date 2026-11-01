@@ -1,4 +1,5 @@
 // @reads assets/project/lore-config-template.yaml
+// @reads assets/templates/**
 /**
  * `lore get` structured-`extra` loss notice — COMPILED-BINARY end-to-end contract
  * (task-lore-get-s-default-render-silently-omits-structured-extra, AC-1/AC-2/AC-4/AC-5).
@@ -147,6 +148,8 @@ beforeAll(async () => {
       tmpDir,
     )).stdout,
   );
+  // BR-1528: `lore handoff` creates the document structured through the approved `knowledge/handoff` template.
+  await mustRun(["migrate", "templates", "--apply"], tmpDir);
   handoffSlug = parseSlug(
     (await mustRun(["handoff", "--decision", "probe decision@0.9", "--next", "probe next step", "--plan", planSlug], tmpDir))
       .stdout,
