@@ -4611,8 +4611,8 @@ export class TursoStore implements StoreInterface {
     try {
       await this.ensureReady();
       // reason: BR-1535 — deletion is by last-read age only; never by template_hash, provider or model.
-      const rs = await this.client.execute({ sql: "DELETE FROM judge_verdicts WHERE last_read_at < ?", args: [cutoff] });
-      return ok(rs.rowsAffected);
+      const rs = await this.client.execute({ sql: "DELETE FROM judge_verdicts WHERE last_read_at < ? RETURNING key", args: [cutoff] });
+      return ok(rs.rows.length);
     } catch (e) {
       return wrapStoreError(e);
     }
