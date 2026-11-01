@@ -1,3 +1,4 @@
+// @reads assets/templates/**
 /**
  * @spec_ref spec-github-owns-issue-report-state-no-mirror-task-work-carries D7 (GS-T7)
  *
@@ -24,6 +25,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ok, err } from "@lore/core";
 import type { CorpusService } from "../../../src/service/corpus-service.js";
+import type { TemplateService } from "../../../src/service/template-service.js";
+import { seededTemplateReader } from "../../helpers/structured-corpus-wiring.js";
 
 // ─── GitHubIntakePort mocked wholesale — see this file's own header ────────
 
@@ -73,13 +76,17 @@ function makeCorpusService(): { service: CorpusService; writes: ReturnType<typeo
     update: writes,
     set: writes,
     link: writes,
+    // BR-1528: the filing renders its body from the approved `issue-report` template, read through the corpus service.
+    templateReader: seededReader,
   } as unknown as CorpusService;
   return { service, writes };
 }
 
 let corpusRoot: string;
+let seededReader: TemplateService;
 
-beforeEach(() => {
+beforeEach(async () => {
+  seededReader = await seededTemplateReader();
   corpusRoot = mkdtempSync(join(tmpdir(), "lore-github-filing-no-write-"));
   verifyTargetMock.mockReset().mockResolvedValue(ok({ login: "acme", id: 555 }));
   searchDuplicatesMock.mockReset().mockResolvedValue(ok([]));

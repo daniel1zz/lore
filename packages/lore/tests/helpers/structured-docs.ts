@@ -5,7 +5,7 @@
  *   approved seed template of a (type, kind) so a test creates a document without hand-writing its fields; and
  *   `requireCreateConfig`, the config that turns `workflow.structured_documents.require_create` ON, so a test proves a
  *   generator no longer depends on the switch being off.
- * Public surface: {@link seedTemplates}, {@link seedTemplatesWith}, {@link seedTemplatesInApp}, {@link wireStructuredCorpus}, {@link requireCreateConfig}, {@link armRequireCreate}, {@link fillTemplate},
+ * Public surface: {@link seedTemplates}, {@link seedTemplatesWith}, {@link seedTemplatesInApp}, {@link wireStructuredCorpus}, {@link seededTemplateReader}, {@link requireCreateConfig}, {@link armRequireCreate}, {@link fillTemplate},
  *   {@link createStructured}.
  * Invariants:
  *   - Fill values are minimal and deterministic: first enum member, `"sample"` strings cut to `maxLength`, the schema's
@@ -21,9 +21,6 @@ import { fileURLToPath } from "node:url";
 import type { App } from "../../src/app.js";
 import { readShippedTemplateSeeds } from "../../src/adapters/cli/template-seeds.js";
 import { TemplateSeedService } from "../../src/service/template-seed-service.js";
-import { TemplateService } from "../../src/service/template-service.js";
-import type { CorpusService } from "../../src/service/corpus-service.js";
-import type { StoreInterface } from "../../src/store/store-interface.js";
 import { must, type StructuredRig } from "./structured-corpus.js";
 import { patchLoreConfig } from "./patch-lore-config.js";
 
@@ -62,23 +59,8 @@ export async function seedTemplatesInApp(app: App): Promise<void> {
   await must(new TemplateSeedService(app.templateService, app.corpusService).apply(seeds.value), "seed templates");
 }
 
-/**
- * Arm a bare `CorpusService` (the unit-test construction over an in-memory store) with the template write path and seed
- * the shipped templates into it, so a generator that creates structured documents works against it.
- * Declares nothing itself: a test using it declares `// @reads assets/templates/**`.
- *
- * @param corpus - the service under test
- * @param store - the store it was built over (the template reader reads the same store)
- * @param options - `requireCreate` arms the create switch (default off)
- * @throws when a seed is invalid or a write is refused
- */
-export async function wireStructuredCorpus(corpus: CorpusService, store: StoreInterface, options: { requireCreate?: boolean } = {}): Promise<void> {
-  const templates = new TemplateService(store);
-  corpus.setStructuredWrite({ templates, requireStructuredCreate: options.requireCreate === true });
-  const seeds = readShippedTemplateSeeds(fileURLToPath(new URL("../../../../assets", import.meta.url)));
-  if (!seeds.ok) throw new Error(`wireStructuredCorpus: ${JSON.stringify(seeds.error)}`);
-  await must(new TemplateSeedService(templates, corpus).apply(seeds.value), "seed templates");
-}
+// The runtime-neutral wiring lives in `structured-corpus-wiring.ts` (a Node-run test cannot import this file); re-exported here.
+export { wireStructuredCorpus, seededTemplateReader } from "./structured-corpus-wiring.js";
 
 /**
  * A config with the create switch ON (`workflow.structured_documents.require_create: true`).
