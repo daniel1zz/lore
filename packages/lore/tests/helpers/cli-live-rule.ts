@@ -20,6 +20,10 @@ export type LoreRunner = (args: string[]) => string;
 
 const ruleByCorpus = new Map<string, string>();
 
+// The baseline tree is created from the approved baseline templates. A corpus built bare (`createApp(dbPath)`, no `lore init`)
+// holds none, so the fixture first seeds the shipped ones the production way; on a seeded corpus this writes nothing (idempotent).
+const SEED_TEMPLATES_ARGS = ["migrate", "templates", "--apply"];
+
 /**
  * Adapts a test file's own `runLore(args, cwd) -> {exitCode, stdout, stderr}` into a {@link LoreRunner}
  * for one corpus directory: stdout on success, a thrown Error carrying stderr on failure.
@@ -64,6 +68,7 @@ export function ensureLiveRuleViaCli(lore: LoreRunner, corpusKey: string, prdSlu
   const known = ruleByCorpus.get(corpusKey);
   if (known !== undefined) return known;
   prdSlug ??= firstPrdSlug(lore);
+  lore(SEED_TEMPLATES_ARGS);
   const root = slugOf(lore(["baseline", "add", prdSlug, "--node", "root", "--label", "Root", "--title", "Fixture Root", ...templatedFieldsArgs("baseline", { kind: "root" })]));
   const branch = slugOf(lore(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "Fixture Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })]));
   const leaf = slugOf(lore(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "Fixture Leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })]));
@@ -141,6 +146,7 @@ export async function ensureLiveRuleViaAsyncCli(lore: AsyncLoreRunner, corpusKey
     prdSlug = parsed.data?.docs?.[0]?.slug;
     if (prdSlug === undefined) throw new Error("live-rule fixture needs a PRD in the corpus and found none");
   }
+  await lore(SEED_TEMPLATES_ARGS);
   const root = slugOf(await lore(["baseline", "add", prdSlug, "--node", "root", "--label", "Root", "--title", "Fixture Root", ...templatedFieldsArgs("baseline", { kind: "root" })]));
   const branch = slugOf(await lore(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "Fixture Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })]));
   const leaf = slugOf(await lore(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "Fixture Leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })]));

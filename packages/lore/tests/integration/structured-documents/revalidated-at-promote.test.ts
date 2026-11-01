@@ -33,6 +33,7 @@ import { createMachineAuthStores, type MachineAuthStores } from "../../../src/ad
 import type { App } from "../../../src/app.js";
 import { createLiveApp } from "../../helpers/live-app.js";
 import { asyncLoreRunnerFor, ensureLiveRuleViaAsyncCli } from "../../helpers/cli-live-rule.js";
+import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { makeCleanTreeRepo } from "../../helpers/clean-tree-repo.js";
 import { liveIo } from "../../live-invocation.js";
@@ -40,6 +41,7 @@ import {
   createStructuredRig,
   installTemplate,
   must,
+  removeSeededTemplates,
   specTechTemplate,
   validSpecFiles,
   writeFieldsFile,
@@ -49,6 +51,7 @@ import {
 const SPEC = "spec-every-document-is-stored-as-structured-fields-validated-by";
 
 let rig: StructuredRig;
+let liveRuleId = "";
 let httpApp: App;
 let machineAuth: MachineAuthStores;
 let machineDir: string;
@@ -65,7 +68,11 @@ function title(label: string): string {
 const INVALID_FIELDS = { fields: { risks: ["no summary"] }, dimensions: [] as unknown[] };
 
 beforeAll(async () => {
-  rig = await createStructuredRig("lore-revalidated", { templates: "none" });
+  // reason: the live-rule fixture creates its baseline tree from the SHIPPED templates, so it runs before they are removed
+  rig = await createStructuredRig("lore-revalidated");
+  const fixturePrd = await ensureRequirementsDocSlugAsync(async (args) => await rig.lore(args));
+  liveRuleId = await ensureLiveRuleViaAsyncCli(asyncLoreRunnerFor((args) => rig.lore(args), rig.dir), rig.dir, fixturePrd);
+  await removeSeededTemplates(rig);
   // reason: approving a task compiles its done contract, which needs the base branch (main) to exist; the task is a corpus task (it changes no files)
   makeCleanTreeRepo(rig.dir);
   await installTemplate(rig, "Spec tech template", specTechTemplate(1));
@@ -292,7 +299,7 @@ describe(`${SPEC}#AC-ST-4 promote-time cross-field checks for every type`, () =>
     expect(prd.exitCode, prd.stderr).toBe(0);
     prdId = (JSON.parse(prd.stdout) as { data: { id: string } }).data.id;
     for (const slot of SLOTS) await installTemplate(rig, `Promote ${slot.label} template`, goalTemplate(slot));
-    ruleId = await ensureLiveRuleViaAsyncCli(asyncLoreRunnerFor((args) => rig.lore(args), rig.dir), rig.dir);
+    ruleId = liveRuleId;
     await rig.withApp(async (app) => {
       for (const slot of SLOTS) {
         const parentId = slot.parent === "prd" ? prdId : slot.parent === "plan" ? planId : undefined;

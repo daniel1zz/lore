@@ -4,7 +4,7 @@
  * Purpose: `mkdtemp` + `lore init` (never the repository's own `.lore/`), a live in-process `App` over the same
  *   database for fixtures, spec/tech and knowledge/reference templates, and fields-file writers. The surfaces under test
  *   (CLI, HTTP, `CorpusService`) are driven by the suites; this file only builds the rig.
- * Public surface: {@link createStructuredRig}, {@link StructuredRig}, {@link specTechTemplate}, {@link validSpecFiles},
+ * Public surface: {@link createStructuredRig}, {@link removeSeededTemplates}, {@link StructuredRig}, {@link specTechTemplate}, {@link validSpecFiles},
  *   {@link installTemplate}, {@link reviseTemplate}, {@link writeFieldsFile}.
  * Invariants:
  *   - Fixtures never fail silently: a refused fixture write throws with the error.
@@ -68,16 +68,7 @@ export async function createStructuredRig(prefix = "lore-structured", opts: { te
       app.close();
     }
   };
-  if ((opts.templates ?? "seeded") === "none") {
-    // reason: `lore init` seeds one approved template per shipped seed (BR-807 as modified). A suite that installs its OWN
-    // fixture templates (a lower version than the seed would lose to it at resolve) starts from a corpus with none: the
-    // seeded template documents are soft-deleted, so only the fixtures resolve.
-    await withApp(async (app) => {
-      const templates = await must(app.corpusService.list({ type: "template", limit: 500 } as never), "list seeded templates");
-      for (const template of templates.docs) await must(app.corpusService.delete(template.id, true), `remove seeded template ${template.slug}`);
-    });
-  }
-  return {
+  const rig: StructuredRig = {
     dir,
     home,
     dbPath,
@@ -89,6 +80,24 @@ export async function createStructuredRig(prefix = "lore-structured", opts: { te
       rmSync(home, { recursive: true, force: true });
     },
   };
+  if ((opts.templates ?? "seeded") === "none") await removeSeededTemplates(rig);
+  return rig;
+}
+
+/**
+ * Soft-delete every template document of the corpus. `lore init` seeds one approved template per shipped seed (BR-807 as
+ * modified); a suite that installs its OWN fixture templates (a lower version than the seed would lose to it at resolve)
+ * needs a corpus with none. A suite that first needs the SHIPPED templates (a shared fixture such as the live rule) builds
+ * the rig seeded, runs that fixture, then calls this.
+ *
+ * @param rig - the structured rig
+ * @throws when a template cannot be removed
+ */
+export async function removeSeededTemplates(rig: StructuredRig): Promise<void> {
+  await rig.withApp(async (app) => {
+    const templates = await must(app.corpusService.list({ type: "template", limit: 500 } as never), "list seeded templates");
+    for (const template of templates.docs) await must(app.corpusService.delete(template.id, true), `remove seeded template ${template.slug}`);
+  });
 }
 
 /**
