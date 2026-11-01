@@ -9,6 +9,7 @@ import { ulid } from "ulidx";
 import { isContentChange, buildStateChange, type ContentComparableRow, type StateChange } from "@lore/core";
 import { err, ok, DEDICATED_EXTRA_KEYS, MILESTONE_DIMENSIONS, isGateDimension, issueRefSchema, judgeKnownDefectsExtra, readKnownDefects, MAX_ISSUE_REFS_PER_CARRIER, type GateDimension, type KnownDefectEntry, type Result } from "@lore/core";
 import { admitAcWrite, applyAcChange } from "./ac-write-chokepoint.js";
+import { resolvePlanGoverningSpecs } from "./plan-governing-specs.js";
 import type { LoreError } from "@lore/core";
 // reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
 // Node-only-subpath-gated purely for the browser-safety barrel-isolation
@@ -5359,9 +5360,10 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
    * Source: SPEC-038 §4, §7 D4
    */
   async resolveDeclaredAcIds(planIdOrSlug: string): Promise<Result<Set<string> | null, LoreError>> {
-    const planResult = await this._resolvePlanForAcLookup(planIdOrSlug);
-    if (!planResult.ok) return planResult;
-    return this._resolveDeclaredAcIdsForParent(planResult.value.parent_id);
+    const criteriaResult = await this.resolveDeclaredAcCriteria(planIdOrSlug);
+    if (!criteriaResult.ok) return criteriaResult;
+    const criteria = criteriaResult.value;
+    return ok(criteria === null ? null : new Set(criteria.map((c) => c.id)));
   }
 
   /**
@@ -5391,7 +5393,20 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
   ): Promise<Result<AcceptanceCriterion[] | null, LoreError>> {
     const planResult = await this._resolvePlanForAcLookup(planIdOrSlug);
     if (!planResult.ok) return planResult;
-    return this._resolveDeclaredAcCriteriaForParent(planResult.value.parent_id);
+    // reason: a task's ac_ref (evidence admission, oracle generation) resolves over EVERY spec governing the plan
+    // (parent + `implements`) — the set the done-contract compiler resolves — via the one resolver (issue 622). The
+    // create-time `ac_scope` check keeps the parent-only walk: a plan being created has no links yet.
+    const governing = await resolvePlanGoverningSpecs(this.store, planResult.value);
+    if (!governing.ok) return governing;
+    const criteria: AcceptanceCriterion[] = [];
+    let anyDeclared = false;
+    for (const spec of governing.value) {
+      const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
+      if (!parsed.success) continue;
+      anyDeclared = true;
+      for (const criterion of parsed.data) if (!criteria.some((known) => known.id === criterion.id)) criteria.push(criterion);
+    }
+    return ok(anyDeclared ? criteria : null);
   }
 
   /**
