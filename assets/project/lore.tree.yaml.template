@@ -21,6 +21,9 @@ root:
         - { type: task, min: 0 }
         - { type: knowledge, min: 0 }
     - { type: knowledge, min: 0 }
+    # template sits here to show its place in the layout, but takes NO parent (BR-2), like spec: its slot is
+    # "no parent", so a parentless template is neither orphan nor misplaced and review's tree_position passes it.
+    - { type: template, min: 0 }
 # knowledge → knowledge deliberately unmodeled (unbounded recursion; see SPEC-032 §3.2 prose)
 # task is deliberately NOT declared as a child of prd here: SPEC-069 §Design
 # Decisions D2 ad-hoc tasks (extra.adhoc===true, incl. issue reports) ARE

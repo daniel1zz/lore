@@ -155,9 +155,9 @@ describe("repo-root lore.tree.yaml — parsed shape pinning (STATE)", () => {
     expect(nestedAdr.children[0]?.type).toBe("knowledge");
   });
 
-  it("AC-2.SHAPE-06: root-level children are exactly spec, adr, plan, knowledge, baseline (no duplicates, no extras)", () => {
+  it("AC-2.SHAPE-06: root-level children are exactly spec, adr, plan, knowledge, baseline, template (no duplicates, no extras)", () => {
     const types = blueprint.root.children.map((c) => c.type).sort();
-    expect(types).toEqual(["adr", "baseline", "knowledge", "plan", "spec"]);
+    expect(types).toEqual(["adr", "baseline", "knowledge", "plan", "spec", "template"]);
   });
 });
 
