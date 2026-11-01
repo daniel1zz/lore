@@ -689,10 +689,10 @@ const WorkflowConfigSchema = z
      */
     structured_documents: z
       .object({
-        require_create: z.boolean().default(true),
+        require_create: z.boolean().default(false),
       })
       .strict()
-      .default({ require_create: true }),
+      .default({}),
     /**
      * Turn-end review knobs (spec-interception-moves-off-every-tool-call-one-turn-end-review,
      * Scope 4a). Read by `assets/hooks/stop-turn-review.mjs`, which is a standalone script and so
