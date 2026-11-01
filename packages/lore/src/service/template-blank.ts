@@ -6,12 +6,15 @@
  * Public surface: {@link blankFieldValue}, {@link blankFields}, {@link blankDimensions}, {@link renderBlankYaml}.
  * Invariants:
  *   - Only REQUIRED properties are emitted (recursively); optional ones are left for the author.
+ *   - Every array with an items schema shows ONE placeholder entry carrying the item shape (its required properties), so
+ *     the author sees what an entry looks like; when the array's `minItems` is 0 the YAML marks that entry optional
+ *     (delete it to leave the array empty). The JSON blank keeps the entry.
  *   - A skeleton is a starting point, never valid by itself: empty strings fail `minLength`, `answer` is empty.
  *   - Deterministic: property order is the schema's, dimension order is the template's.
  * Side-effect class: pure.
  */
 
-import { stringify } from "yaml";
+import { Document, isMap, isSeq, stringify } from "yaml";
 import type { JsonSchemaNode, Template } from "@lore/core";
 
 function isNode(value: unknown): value is JsonSchemaNode {
@@ -36,7 +39,10 @@ export function blankFieldValue(schema: JsonSchemaNode | undefined): unknown {
     case "array": {
       const minItems = typeof schema["minItems"] === "number" ? schema["minItems"] : 0;
       const items = isNode(schema["items"]) ? schema["items"] : undefined;
-      return Array.from({ length: minItems }, () => blankFieldValue(items));
+      // reason: one entry even when minItems is 0, so an array shows its item shape (an optional entry is marked in the
+      // YAML and may be deleted); see task-template-show-blank-prints-one-entry-for-every-optional.
+      const length = items === undefined ? minItems : Math.max(minItems, 1);
+      return Array.from({ length }, () => blankFieldValue(items));
     }
     case "integer":
     case "number":
@@ -80,6 +86,39 @@ export function blankDimensions(template: Template, kind: string | undefined): {
   return applicableDimensions(template, kind).map((dimension) => ({ id: dimension.id, status: "handled" as const, answer: "", refs: [] }));
 }
 
+const OPTIONAL_ENTRY_COMMENT = " optional: this entry only shows the item shape; delete it to leave the list empty";
+
+/** Mark the first entry of every optional (minItems 0) array in `node`, walking `schema` in step. */
+function annotateOptionalEntries(schema: JsonSchemaNode | undefined, node: unknown): void {
+  if (schema === undefined) return;
+  if (isSeq(node)) {
+    const first = node.items[0];
+    if (first === undefined) return;
+    const items = isNode(schema["items"]) ? schema["items"] : undefined;
+    const minItems = typeof schema["minItems"] === "number" ? schema["minItems"] : 0;
+    annotateOptionalEntries(items, first);
+    if (minItems === 0 && typeof first === "object" && first !== null && "commentBefore" in first) {
+      (first as { commentBefore?: string | null }).commentBefore = OPTIONAL_ENTRY_COMMENT;
+    }
+    return;
+  }
+  if (isMap(node) && isNode(schema["properties"])) {
+    const properties = schema["properties"] as Record<string, unknown>;
+    for (const pair of node.items) {
+      const key = String((pair.key as { value?: unknown } | null)?.value ?? pair.key);
+      const child = properties[key];
+      annotateOptionalEntries(isNode(child) ? child : undefined, pair.value);
+    }
+  }
+}
+
+/** The `fields:` body: required fields as YAML, optional array entries commented. */
+function renderFieldsYaml(template: Template): string {
+  const document = new Document(blankFields(template.fields as JsonSchemaNode));
+  annotateOptionalEntries(template.fields as JsonSchemaNode, document.contents);
+  return document.toString().trimEnd();
+}
+
 /**
  * The YAML skeleton: a `fields:` block of the required fields and a `dimensions:` block with each question as a comment
  * above its entry (and a note where refs are required).
@@ -93,7 +132,7 @@ export function renderBlankYaml(template: Template, kind: string | undefined): s
   lines.push("fields:");
   const fields = blankFields(template.fields as JsonSchemaNode);
   if (Object.keys(fields).length === 0) lines.push("  {}");
-  else lines.push(...stringify(fields).trimEnd().split("\n").map((line) => `  ${line}`));
+  else lines.push(...renderFieldsYaml(template).split("\n").map((line) => `  ${line}`));
   lines.push("dimensions:");
   for (const dimension of applicableDimensions(template, kind)) {
     lines.push(`  # ${dimension.question}`);
