@@ -20,6 +20,7 @@
  */
 
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createApp } from "../../src/app";
 import { SQLiteStore } from "../../src/store/sqlite-store";
@@ -122,6 +123,11 @@ interface Legacy {
 async function buildLegacy(): Promise<Legacy> {
   const fixture = await makeDoneContractFixture();
   fixtures.push(fixture);
+  // The legacy task anchors a test file; the migration compiles like approve, which refuses an absent undeclared test anchor (BR-1547).
+  mkdirSync(join(fixture.dir, "tests"), { recursive: true });
+  writeFileSync(join(fixture.dir, "tests", "a.test.ts"), "// seed\n");
+  fixture.git(["add", "-A"]);
+  fixture.git(["commit", "-q", "-m", "seed the anchored test file"]);
   const plan = await fixture.createPlan("Legacy plan");
   fixture.git(["branch", "feat-legacy"]);
   const head = fixture.git(["rev-parse", "HEAD"]);

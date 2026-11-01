@@ -17,7 +17,7 @@
  * Source: spec-done-contract-compiled-at-approve-task-kinds-write-sets (AC-DCS1-1, AC-DCS1-2, AC-DCS1-5), ledger D28 to D43.
  */
 
-import { err, extractFileAnchors, isAcSuperseded, ok, type AcceptanceCriterion, type DocRecord, type DoneContract, type DoneContractOracle, type LoreError, type Result, type TaskKind } from "@lore/core";
+import { err, extractCreatesAnchors, extractFileAnchors, isAcSuperseded, ok, type AcceptanceCriterion, type DocRecord, type DoneContract, type DoneContractOracle, type LoreError, type Result, type TaskKind } from "@lore/core";
 import { definitionOfDone } from "./task-workflow-service.js";
 
 /** The stable name every uncompilable-contract refusal prints first. */
@@ -54,6 +54,11 @@ export interface DoneContractCompileInput {
   readonly base: DoneContractBase;
   /** Content of each falsifier path at `base.readCommit`; a missing key or `undefined` means the file is absent there. */
   readonly falsifierFiles: ReadonlyMap<string, string | undefined>;
+  /**
+   * The `anchor-absent` causes of the task's test-file anchors (BR-1547, BR-1487): decided where the files are read
+   * (`DoneContractService.anchorAbsentCauses`), carried here so approve, migrate and the amendment all refuse the same way.
+   */
+  readonly anchorCauses: readonly UncompilableCause[];
 }
 
 /** The causes a contract can fail to compile for (AC-DCS1-2). */
@@ -65,7 +70,8 @@ export type UncompilableCauseCode =
   | "no-oracle"
   | "kind-anchor"
   | "ac-unresolved"
-  | "falsifier-literal-absent";
+  | "falsifier-literal-absent"
+  | "anchor-absent";
 
 /** One cause: its stable name and a message that says what to do. */
 export interface UncompilableCause {
@@ -212,6 +218,8 @@ export function compileDoneContract(input: DoneContractCompileInput): Result<Don
     });
   }
 
+  causes.push(...input.anchorCauses);
+
   if (causes.length > 0) return err(uncompilable(causes));
   // reason: only reachable with a tip (a missing one is a cause above); the guard keeps the types honest without a cast.
   if (base.tip === undefined) return err(uncompilable(causes));
@@ -222,8 +230,10 @@ export function compileDoneContract(input: DoneContractCompileInput): Result<Don
   }));
   if (kind === "code") {
     const template = config.test_file ?? "";
+    const declaredCreates = new Set(extractCreatesAnchors(task));
     for (const file of definitionOfDone(task, [...criteria]).unfiltered_pass_files) {
-      oracles.push({ id: `test:${file}`, command: template.split("{file}").join(file) });
+      // reason: the marker is written only when true, so a plain oracle stays byte-identical to a pre-marker one (BR-1547).
+      oracles.push({ id: `test:${file}`, command: template.split("{file}").join(file), ...(declaredCreates.has(file) ? { created_by_task: true } : {}) });
     }
     oracles.push({ id: "typecheck", command: config.typecheck ?? "" });
   }

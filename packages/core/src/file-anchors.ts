@@ -344,6 +344,16 @@ export function extractFileAnchors(task: DocRecord): string[] {
   return raw.filter((entry): entry is string => typeof entry === "string");
 }
 
+/**
+ * The files a task declared with `--creates` (`extra.creates_anchors`, BR-1547): test files it will create, which approve
+ * accepts although they are absent at the base tip. Every entry is also in `file_anchors`. `[]` when absent or malformed.
+ */
+export function extractCreatesAnchors(task: DocRecord): string[] {
+  const raw = safeTaskExtra(task)["creates_anchors"];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((entry): entry is string => typeof entry === "string");
+}
+
 // ─── Resolution Classification (task-a-mistyped-task-file-anchor-is-stored-and-consulted) ──
 
 /**

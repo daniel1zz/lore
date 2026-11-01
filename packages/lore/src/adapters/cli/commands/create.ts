@@ -66,7 +66,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
 import type { DocRecord, DocType, JudgeIdentity, KnowledgeSubType, LoreError, Priority } from "@lore/core";
-import { KNOWLEDGE_SUB_TYPES, SPEC_KINDS, TASK_KINDS, extractFileAnchors, formatTaskKindRequiredMessage, isTaskKind } from "@lore/core";
+import { KNOWLEDGE_SUB_TYPES, SPEC_KINDS, TASK_KINDS, extractFileAnchors, formatTaskKindRequiredMessage, isTaskKind, isTestFileAnchor, normalizeFileAnchors } from "@lore/core";
 import { createWithSupersedes, renderSupersedeRepairMessage } from "../../../flows/supersede-flow.js";
 import { collectFileAnchorResolution, renderFileAnchorAdvisory } from "../../../service/anchor-resolution.js";
 import { buildFileAnchorProbeContext } from "../../real-fs-probe.js";
@@ -125,6 +125,7 @@ const TYPE_SPECIFIC_FLAGS: Readonly<Record<string, readonly DocType[]>> = {
   phase: ["task"],
   kind: ["spec", "task"],
   anchor: ["task"],
+  creates: ["task"],
   "ac-scope": ["task"],
   "code-anchor": ["spec"],
   "requires-uat": ["plan"],
@@ -211,6 +212,11 @@ export default defineLoreCommand({
       type: "string",
       description:
         "[task only, repeatable] Declare a file_anchors entry (repo-relative POSIX path; trailing '/' = directory scope). Validated + normalized by CorpusService (SPEC-042 D3). A path that does not resolve on disk is ADVISED on stderr, never refused — a task may anchor a file it is about to create.",
+    },
+    creates: {
+      type: "string",
+      description:
+        "[task only, repeatable] Anchor a test file this task will create (a path that is absent at the base tip). Approve accepts it, the contract marks its oracle created_by_task, and `lore finish` reports it absent as test-file-absent until it exists. A test file anchored with --anchor that is absent at approve is refused (anchor-absent).",
     },
     "ac-scope": {
       type: "string",
@@ -581,7 +587,25 @@ export default defineLoreCommand({
         args.spec as string | undefined,
         args.kind,
       );
-      const extra = issueRefs.length > 0 ? { ...(baseExtra ?? {}), issues: issueRefs } : baseExtra;
+      // BR-1547: `--creates` anchors the files and records them as declared, so approve accepts them while absent at the base tip.
+      let createsExtra = baseExtra;
+      const createsRaw = normalizeRepeatable(args.creates);
+      if (createsRaw.length > 0) {
+        const normalizedCreates = normalizeFileAnchors(createsRaw);
+        if (!normalizedCreates.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, normalizedCreates.error) + "\n");
+          return exitCode(normalizedCreates.error);
+        }
+        const notTests = normalizedCreates.value.filter((entry) => !isTestFileAnchor(entry));
+        if (notTests.length > 0) {
+          const error: LoreError = { code: "VALIDATION_ERROR", field: "creates", message: `--creates declares test files the task will create; ${notTests.join(", ")} is not a test file path. Nothing was written.`, value: notTests };
+          inv.io.stderr.write(formatErrorFor(inv, error) + "\n");
+          return exitCode(error);
+        }
+        const declared = Array.isArray(baseExtra?.["file_anchors"]) ? (baseExtra?.["file_anchors"] as string[]) : [];
+        createsExtra = { ...(baseExtra ?? {}), file_anchors: [...declared, ...normalizedCreates.value], creates_anchors: normalizedCreates.value };
+      }
+      const extra = issueRefs.length > 0 ? { ...(createsExtra ?? {}), issues: issueRefs } : createsExtra;
 
       // SPEC-065 D4: --parent defaults to the (already-resolved) --plan-id when
       // omitted — for every non-task type resolvedPlanId is always undefined, so

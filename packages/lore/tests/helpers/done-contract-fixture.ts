@@ -21,10 +21,10 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { TaskKind } from "@lore/core";
+import { isTestFileAnchor, type TaskKind } from "@lore/core";
 import { createApp } from "../../src/app";
 import { liveAmbient, liveWriteContext } from "../live-invocation";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "./clean-tree-repo";
@@ -61,6 +61,8 @@ export interface CreateTaskOptions {
   readonly title?: string;
   /** `--anchor` entries (repo-relative paths). */
   readonly anchors?: readonly string[];
+  /** `true`: every anchor is passed as `--anchor`, even an absent test file (the AC-DCF-1 refusal); default: an absent test file is `--creates`. */
+  readonly plainAnchors?: boolean;
   /** `--ac-scope` ids; default: every criterion the spec declares as a script AC is NOT claimed (an explicit empty scope). */
   readonly acScope?: readonly string[];
 }
@@ -164,7 +166,12 @@ export async function makeDoneContractFixture(options: MakeFixtureOptions = {}):
         "create", "task", "--title", options.title ?? `Fixture ${options.kind} task`, "--plan-id", options.plan, "--kind", options.kind,
         "--content", "## Task\n\nBody.\n", "--no-ai",
       ];
-      for (const anchor of options.anchors ?? []) args.push("--anchor", anchor);
+      for (const anchor of options.anchors ?? []) {
+        // reason: BR-1547 — approve refuses a test file that is anchored, absent at the base tip and not declared `--creates`; a
+        // fixture task whose test file does not exist yet declares it, as its author would. `plainAnchors` keeps the refusal reachable.
+        const absentTest = options.plainAnchors !== true && isTestFileAnchor(anchor) && !existsSync(join(dir, anchor));
+        args.push(absentTest ? "--creates" : "--anchor", anchor);
+      }
       const scope = options.acScope ?? [];
       if (scope.length === 0) args.push("--ac-scope", "");
       for (const id of scope) args.push("--ac-scope", id);

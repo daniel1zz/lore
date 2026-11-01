@@ -340,6 +340,8 @@ export const taskExtraSchema = z
      * safety net's SSOT (SPEC-042 §3 D3). See this schema's own @invariant above.
      */
     file_anchors: z.array(z.string()).optional(),
+    /** BR-1547: the `file_anchors` entries declared with `--creates` (test files the task will create). */
+    creates_anchors: z.array(z.string()).optional(),
     /**
      * Marks this task as planless (SPEC-069 §Design Decisions D2, ad-hoc task
      * channel). Set only via `lore create task --adhoc`; relaxes `plan_id`
