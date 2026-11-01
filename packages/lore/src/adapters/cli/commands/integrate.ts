@@ -268,7 +268,8 @@ export default defineLoreCommand({
       }
       // reason: BR-1532 — the landing takes `batch:<machine>` itself and hands it to the batch it spawns (REVIEW_BATCH_HANDOFF_ENV).
       const batchLeases = buildReviewLeases(app, `${resolveActor(inv)}:integrate:${String(process.pid)}`);
-      const reviewBatch = buildReviewTriggerService(app, (handoff) =>
+      // reason: a composition with no lease store cannot take the batch lease, so it starts no review batch (same as a missing decision reader).
+      const reviewBatch = batchLeases === undefined ? undefined : buildReviewTriggerService(app, (handoff) =>
         spawnDetachedReviewBatch({
           handoff,
           cwd: projectRoot,
