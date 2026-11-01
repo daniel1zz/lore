@@ -502,19 +502,29 @@ export class IntegrateService {
       if (!known.ok) return known;
     }
 
-    const worktree = this.ensureWorktree(request.sessionId);
-    if (!worktree.ok) return worktree;
-    const wt = worktree.value;
+    // reason: a worktree that already exists can be leased before the queue ticket, so a second run of one session is refused at
+    // once instead of queueing behind itself. A worktree that does not exist yet has no other holder and is created only AFTER the
+    // own-diff judgment (inside the turn), so a refused run never leaves a worktree behind (BR-1346..1348, AC-DJ-1..3).
+    const existing = this.findWorktree(request.sessionId);
+    if (!existing.ok) return existing;
+    const floorCommand = request.floorCommand;
+    if (existing.value === undefined) return await this.landInTurn(request, floorCommand, undefined);
+    return await this.withLease(request, existing.value, (wt) => this.landInTurn(request, floorCommand, wt));
+  }
 
-    // one run at a time per integration worktree: a second run would re-take the corpus snapshot under the first floor.
-    // reason: taken BEFORE the queue ticket, so a second run of one session is refused at once instead of queueing behind itself.
-    const gitDir = git(wt, ["rev-parse", "--path-format=absolute", "--git-dir"]);
+  /**
+   * Holds the integration worktree's lease around `body`: outcome `busy` (exit 75) when another run holds it, the lease released
+   * however `body` ends. One run at a time per integration worktree: a second run would re-take the corpus snapshot under the first floor.
+   */
+  private async withLease(request: IntegrateRequest, wt: string, body: (wt: string) => Promise<Result<IntegrateOutcome, LoreError>>): Promise<Result<IntegrateOutcome, LoreError>> {
+    const clock = this.deps.clock ?? Date.now;
+    const gitDir = this.deps.git(wt, ["rev-parse", "--path-format=absolute", "--git-dir"]);
     if (gitDir.status !== 0) return err(gitFailure("locating the git dir of the integration worktree", gitDir));
     const granted = this.deps.lease.acquire(gitDir.stdout.trim(), { pid: this.deps.pid ?? process.pid, branch: request.branch, started_at: new Date(clock()).toISOString() });
     if (!granted.ok) return granted;
     if (granted.value.kind === "busy") return ok({ kind: "busy", branch: request.branch, worktree: wt, holder: granted.value.holder });
     try {
-      return await this.landInTurn(request, request.floorCommand, wt);
+      return await body(wt);
     } finally {
       /** @lore-site BR-1312 */
       granted.value.release();
@@ -526,7 +536,7 @@ export class IntegrateService {
    * turn: the fetch, the tip, the own-diff judgment (BR-1346..1348: before any merge or snapshot, a refusal leaves main and every
    * tree unchanged) and the one attempt.
    */
-  private async landInTurn(request: IntegrateRequest, floorCommand: string, wt: string): Promise<Result<IntegrateOutcome, LoreError>> {
+  private async landInTurn(request: IntegrateRequest, floorCommand: string, leasedWorktree: string | undefined): Promise<Result<IntegrateOutcome, LoreError>> {
     const ticket = await this.queue.take({ session: request.sessionId, branch: request.branch }).catch((cause: unknown) => cause as Error);
     if (ticket instanceof Error) return this.queueFailure(request.branch, ticket);
     try {
@@ -542,7 +552,12 @@ export class IntegrateService {
       const tip = tipResult.value;
       const footprint = await this.judgeOwnDiff(request.branch, tip);
       if (!footprint.ok) return footprint;
-      return await this.landOn(request, floorCommand, tip, wt, footprint.value);
+      const land = (wt: string) => this.landOn(request, floorCommand, tip, wt, footprint.value);
+      if (leasedWorktree !== undefined) return await land(leasedWorktree);
+      // reason: the first worktree of a session is created only now, after every refusal that can precede it.
+      const created = this.ensureWorktree(request.sessionId);
+      if (!created.ok) return created;
+      return await this.withLease(request, created.value, land);
     } finally {
       this.deps.queue.release(ticket);
     }
@@ -1059,21 +1074,30 @@ export class IntegrateService {
     return subject === "" ? `merge(${branch})` : `merge(${branch}): ${subject}`;
   }
 
+  /** Query: the session's integration worktree when it exists on disk (`undefined` when not yet created); never creates anything. */
+  private findWorktree(sessionId: string): Result<string | undefined, LoreError> {
+    const { git, projectRoot, worktreesRoot } = this.deps;
+    const path = integrationWorktreePath(worktreesRoot, sessionId);
+    if (!existsSync(path)) return ok(undefined);
+    const registered = git(projectRoot, ["worktree", "list", "--porcelain"]);
+    if (registered.status !== 0) return err(gitFailure("git worktree list", registered));
+    const known = registered.stdout.split("\n").filter((l) => l.startsWith("worktree ")).map((l) => l.slice("worktree ".length));
+    const canonical = realpathSync(path);
+    if (known.some((k) => k === path || k === canonical)) return ok(path);
+    return err({ code: "STORE_ERROR", message: `integrate: ${path} exists but is not a worktree of this repository; remove it or use another session id`, rule: "BR-1278" });
+  }
+
   /** Creates the session's detached integration worktree on first use, reuses it afterwards. */
   private ensureWorktree(sessionId: string): Result<string, LoreError> {
     const { git, projectRoot, worktreesRoot } = this.deps;
     const path = integrationWorktreePath(worktreesRoot, sessionId);
+    const found = this.findWorktree(sessionId);
+    if (!found.ok) return found;
+    if (found.value !== undefined) return ok(found.value);
+    // registered-but-deleted (a cleaned-up directory): drop the stale registration before adding again
     const registered = git(projectRoot, ["worktree", "list", "--porcelain"]);
     if (registered.status !== 0) return err(gitFailure("git worktree list", registered));
-    const known = registered.stdout.split("\n").filter((l) => l.startsWith("worktree ")).map((l) => l.slice("worktree ".length));
-    const onDisk = existsSync(path);
-    const canonical = onDisk ? realpathSync(path) : path;
-    if (onDisk) {
-      if (known.some((k) => k === path || k === canonical)) return ok(path);
-      return err({ code: "STORE_ERROR", message: `integrate: ${path} exists but is not a worktree of this repository; remove it or use another session id`, rule: "BR-1278" });
-    }
-    // registered-but-deleted (a cleaned-up directory): drop the stale registration before adding again
-    if (known.includes(path)) git(projectRoot, ["worktree", "prune"]);
+    if (registered.stdout.split("\n").some((l) => l === `worktree ${path}`)) git(projectRoot, ["worktree", "prune"]);
     const base = this.resolveCommit(TARGET_REF);
     if (!base.ok) return base;
     const added = git(projectRoot, ["worktree", "add", "-q", "--detach", path, base.value]);
