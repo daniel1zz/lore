@@ -143,7 +143,7 @@ async function openList(): Promise<OpenRow[]> {
 const versionTotal = (): number => sql<{ n: number }>("SELECT COUNT(*) AS n FROM versions")[0]!.n;
 
 beforeAll(async () => {
-  rig = await createStructuredRig("lore-legacy-convert");
+  rig = await createStructuredRig("lore-legacy-convert", { templates: "none" });
   patchLoreConfig(rig.dir, {
     workflow: { review: { judgment_required_types: [] } },
     ai: { provider: "claude-cli", providers: { "claude-cli": { command: writeStubProvider(), args: [], timeout_ms: 30_000 } } },

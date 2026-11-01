@@ -12,9 +12,11 @@
  * initialised `config.yaml`. The user's decision (BR-807 as modified) is that a fresh corpus carries
  * the template; such fixtures must merge their overrides instead of appending.
  *
- * It writes no rule document (BR-807): the rule the spec-create gate feeds is the approved corpus template of the spec's
- * kind (the spec-rules document and the rule file shipped with the binary are retired), and the template documents
- * themselves are seeded separately from `assets/templates/`.
+ * The only documents it writes are the approved template documents, one per shipped seed (BR-807 as modified;
+ * BR-1528: a type/kind with no approved template is refused at create). The rule the spec-create gate feeds is the
+ * approved corpus template of the spec's kind. Seeding always happens: a write needs a known party (BR-1351), so an
+ * invocation with none records the templates under the setup run (`api-key:lore-init`), which `init` registers
+ * itself; it never skips them.
  *
  * Side-effect class: IO (fs writes, SQLite, one rename).
  */
@@ -31,6 +33,9 @@ import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import { initCorpusAt } from "../../../flows/init-corpus.js";
 import { resolveAssetsRoot } from "../setup-args.js";
+import { readShippedTemplateSeeds } from "../template-seeds.js";
+import { TemplateSeedService } from "../../../service/template-seed-service.js";
+import { runWithRequestIdentity } from "../../../store/write-context-store.js";
 
 // packages/lore/src/adapters/cli/commands/init.ts -> repo root is 6 levels up (same as setup.ts).
 const MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
@@ -74,6 +79,47 @@ async function registerInvokingMainRun(app: App, inv: Invocation): Promise<void>
 type ArmOutcome =
   | { readonly kind: "not_armed"; readonly reason: "not_a_git_repo" | "no_known_party" }
   | { readonly kind: "armed"; readonly arming_rev: number; readonly status: string; readonly would_become_unbound_rows: number };
+
+/** The setup run: the party that records the templates of an init made by an invocation with no known party. */
+const SETUP_PARTY_NAME = "lore-init";
+
+/**
+ * Seed one approved template per shipped seed into the corpus `init` is building (BR-807 as modified: the only
+ * documents a fresh corpus carries are its template documents; BR-1528: a type/kind with no approved template is
+ * refused at create, so a corpus without them could create nothing).
+ *
+ * @param app - the App over the staging corpus
+ * @param by - the writing actor's name
+ * @returns the number of templates seeded, or the first failure (it aborts the scaffold: nothing is left behind)
+ */
+async function seedShippedTemplates(app: App, by: string): Promise<Result<number, LoreError>> {
+  const seeds = readShippedTemplateSeeds();
+  if (!seeds.ok) return seeds;
+  if (app.templateService === undefined) {
+    return err({ code: "STORE_ERROR", message: "lore init: templateService is not wired on this App (internal wiring error)" });
+  }
+  const seeded = await new TemplateSeedService(app.templateService, app.corpusService).apply(seeds.value, { by });
+  if (!seeded.ok) return seeded;
+  const blocked = seeded.value.find((outcome) => outcome.action === "blocked");
+  if (blocked !== undefined) {
+    return err({ code: "STORE_ERROR", message: `lore init: seeding ${blocked.slot} was blocked: ${blocked.reason}` });
+  }
+  return ok(seeded.value.filter((outcome) => outcome.action === "seeded").length);
+}
+
+/**
+ * Seed the templates under the setup run: register it (first registration wins) and make it the write party of the
+ * seeding. Used when the invocation is no known party, so the templates are attested, never skipped.
+ */
+async function seedUnderSetupRun(app: App): Promise<Result<number, LoreError>> {
+  if (app.runService === undefined) {
+    return err({ code: "STORE_ERROR", message: "lore init: runService is not wired on this App (internal wiring error)" });
+  }
+  const registered = await app.runService.registerParty({ harness: "api-key", name: SETUP_PARTY_NAME });
+  if (!registered.ok) return registered;
+  const identity = { harnessRun: registered.value.id, claimed: SETUP_PARTY_NAME, claimedSource: "api-key" as const };
+  return await runWithRequestIdentity(identity, () => seedShippedTemplates(app, SETUP_PARTY_NAME));
+}
 
 export default defineLoreCommand({
   meta: {
@@ -140,6 +186,34 @@ export default defineLoreCommand({
     // `lore run register`.
     const insideGit = isInsideGitRepository(cwd);
     const armedBox: { outcome?: ArmOutcome } = {};
+    const seededBox: { count?: number } = {};
+
+    const armStateBinding = async (app: App, inGit: boolean, knownParty: boolean): Promise<Result<void, LoreError>> => {
+      if (!inGit) {
+        armedBox.outcome = { kind: "not_armed", reason: "not_a_git_repo" };
+        return ok(undefined);
+      }
+      if (!knownParty) {
+        armedBox.outcome = { kind: "not_armed", reason: "no_known_party" };
+        return ok(undefined);
+      }
+      const stateBinding = app.stateBindingService;
+      if (stateBinding === undefined) {
+        return err({
+          code: "STORE_ERROR",
+          message: "stateBindingService is not wired on this App (internal wiring error)",
+        });
+      }
+      const armed = await stateBinding.arm({ actor: resolveActor(inv), nowIso: new Date().toISOString() });
+      if (!armed.ok) return armed;
+      armedBox.outcome = {
+        kind: "armed",
+        arming_rev: armed.value.arming_rev,
+        status: armed.value.status,
+        would_become_unbound_rows: armed.value.status === "armed" ? armed.value.report.would_become_unbound_rows : 0,
+      };
+      return ok(undefined);
+    };
 
     const scaffold = await initCorpusAt(cwd, ambientOfInvocation(inv), {
       name: projectName,
@@ -148,31 +222,15 @@ export default defineLoreCommand({
       writeContext: { identity: inv.identity },
       onDatabaseReady: async (app) => {
         await registerInvokingMainRun(app, inv);
-        if (!insideGit) {
-          armedBox.outcome = { kind: "not_armed", reason: "not_a_git_repo" };
-          return ok(undefined);
-        }
         const verifiedParty = inv.identity.claimed === null ? undefined : await app.verifiedInvocationIdentity?.();
         const knownParty = inv.identity.claimed !== null && (verifiedParty === undefined || verifiedParty.ok);
-        if (!knownParty) {
-          armedBox.outcome = { kind: "not_armed", reason: "no_known_party" };
-          return ok(undefined);
-        }
-        const stateBinding = app.stateBindingService;
-        if (stateBinding === undefined) {
-          return err({
-            code: "STORE_ERROR",
-            message: "stateBindingService is not wired on this App (internal wiring error)",
-          });
-        }
-        const armed = await stateBinding.arm({ actor: resolveActor(inv), nowIso: new Date().toISOString() });
+        // reason: seeding runs AFTER the arm decision so the template documents are stamped with the state binding like
+        // any later write; an invocation with no known party seeds under the setup run, never skips (BR-807 as modified).
+        const armed = await armStateBinding(app, insideGit, knownParty);
         if (!armed.ok) return armed;
-        armedBox.outcome = {
-          kind: "armed",
-          arming_rev: armed.value.arming_rev,
-          status: armed.value.status,
-          would_become_unbound_rows: armed.value.status === "armed" ? armed.value.report.would_become_unbound_rows : 0,
-        };
+        const seeded = knownParty ? await seedShippedTemplates(app, resolveActor(inv)) : await seedUnderSetupRun(app);
+        if (!seeded.ok) return seeded;
+        seededBox.count = seeded.value;
         return ok(undefined);
       },
     });
@@ -188,6 +246,12 @@ export default defineLoreCommand({
 
     const outcome = armedBox.outcome;
     if (outcome === undefined) return fail("internal wiring error: the arm step did not report an outcome");
+    const seededCount = seededBox.count;
+    if (seededCount === undefined) return fail("internal wiring error: the template seeding step did not report a count");
+    const templatesJson = { seeded: seededCount };
+    const seedingLine = (): void => {
+      printLine(inv.io.stdout, `Seeded ${String(seededCount)} approved templates (one per shipped seed).`);
+    };
     if (outcome.kind === "not_armed") {
       if (args.json) {
         printLine(
@@ -199,6 +263,7 @@ export default defineLoreCommand({
               project: projectName,
               author: args.author,
               state_binding: { armed: false, reason: outcome.reason },
+              templates: templatesJson,
             },
           }),
         );
@@ -210,6 +275,7 @@ export default defineLoreCommand({
             : "state binding not armed: no known party yet (a write needs an attested agent run registered in this corpus, or a human session); " +
                 "run `lore session start --human <name>` (or `lore run register`), then `lore audit arm --confirm`",
         );
+        seedingLine();
         footer();
       }
       return 0;
@@ -230,6 +296,7 @@ export default defineLoreCommand({
               arming_rev: outcome.arming_rev,
               would_become_unbound_rows: outcome.would_become_unbound_rows,
             },
+            templates: templatesJson,
           },
         }),
       );
@@ -238,6 +305,7 @@ export default defineLoreCommand({
         inv.io.stdout,
         `State binding armed (audit row id ${outcome.arming_rev}); ${outcome.would_become_unbound_rows} existing rows affected.`,
       );
+      seedingLine();
       footer();
     }
     return 0;

@@ -115,7 +115,7 @@ async function findingsOf(slug: string): Promise<{ check: string; entry: string 
 }
 
 beforeAll(async () => {
-  rig = await createStructuredRig("lore-cross-field");
+  rig = await createStructuredRig("lore-cross-field", { templates: "none" });
   patchLoreConfig(rig.dir, { workflow: { review: { judgment_required_types: [] } } });
   await installTemplate(rig, "Cross field tech template", crossFieldTemplate("tech", ALL_CHECKS));
   await installTemplate(rig, "Cross field design template", crossFieldTemplate("design", []));

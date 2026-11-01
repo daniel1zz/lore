@@ -52,7 +52,7 @@ async function resolvedVersion(): Promise<number> {
 }
 
 beforeAll(async () => {
-  rig = await createStructuredRig("lore-seed-revision");
+  rig = await createStructuredRig("lore-seed-revision", { templates: "none" });
   await installTemplate(rig, "Spec tech template", specTechTemplate(1));
 }, 180_000);
 

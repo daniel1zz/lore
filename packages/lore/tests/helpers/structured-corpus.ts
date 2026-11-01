@@ -53,7 +53,7 @@ export async function must<T>(result: Promise<Result<T, LoreError>>, what: strin
  *
  * @returns the rig
  */
-export async function createStructuredRig(prefix = "lore-structured"): Promise<StructuredRig> {
+export async function createStructuredRig(prefix = "lore-structured", opts: { templates?: "seeded" | "none" } = {}): Promise<StructuredRig> {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), `${prefix}-`)));
   const home = realpathSync(mkdtempSync(join(tmpdir(), `${prefix}-home-`)));
   const dbPath = join(dir, ".lore", "lore.db");
@@ -68,13 +68,22 @@ export async function createStructuredRig(prefix = "lore-structured"): Promise<S
       app.close();
     }
   };
+  if ((opts.templates ?? "seeded") === "none") {
+    // reason: `lore init` seeds one approved template per shipped seed (BR-807 as modified). A suite that installs its OWN
+    // fixture templates (a lower version than the seed would lose to it at resolve) starts from a corpus with none: the
+    // seeded template documents are soft-deleted, so only the fixtures resolve.
+    await withApp(async (app) => {
+      const templates = await must(app.corpusService.list({ type: "template", limit: 500 } as never), "list seeded templates");
+      for (const template of templates.docs) await must(app.corpusService.delete(template.id, true), `remove seeded template ${template.slug}`);
+    });
+  }
   return {
     dir,
     home,
     dbPath,
     lore,
     withApp,
-    countDocs: () => withApp(async (app) => (await must(app.corpusService.list({} as never), "list")).total),
+    countDocs:() => withApp(async (app) => (await must(app.corpusService.list({} as never), "list")).total),
     cleanup: () => {
       rmSync(dir, { recursive: true, force: true });
       rmSync(home, { recursive: true, force: true });

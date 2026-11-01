@@ -185,11 +185,11 @@ function isCreatableByCreateCommand(docType: string, kind: string | undefined): 
 describe("AC-ST-8: the first template is created in an empty corpus", () => {
   let rig: StructuredRig;
   beforeAll(async () => {
-    rig = await createStructuredRig("lore-first-template");
+    rig = await createStructuredRig("lore-first-template", { templates: "none" });
   }, 180_000);
   afterAll(() => rig.cleanup());
 
-  it("a fresh lore init corpus holds no template, and creating the first one (a shipped seed) succeeds and resolves", async () => {
+  it("a corpus with every template removed holds none, and creating the first one (a shipped seed) succeeds and resolves", async () => {
     const before = await rig.withApp(async (app) => (await must(app.corpusService.list({ type: "template" } as never), "list templates")).total);
     expect(before, "this test is about a corpus with no template at all").toBe(0);
 
@@ -258,7 +258,7 @@ describe("AC-ST-8: the filled blank of every type and kind creates in a fresh co
   beforeAll(async () => {
     rig = await createStructuredRig("lore-roundtrip");
     patchLoreConfig(rig.dir, { workflow: { structured_documents: { require_create: true } } });
-    // `lore init` does not seed the templates yet; the seeds reach the corpus through `lore migrate templates --apply`.
+    // `lore init` already seeded every template; this migrate is the idempotent second pass and must write nothing.
     const migrated = await rig.lore(["migrate", "templates", "--apply"]);
     expect(migrated.exitCode, `${migrated.stderr}${migrated.stdout}`).toBe(0);
   }, 240_000);

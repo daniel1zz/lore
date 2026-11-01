@@ -16,7 +16,8 @@
  *   REGRESSION: (b) the ignore list is exactly the four entries; after setup --project --check the cache
  *               file exists on disk yet git does not list it
  *   HAPPY:      (c) config.yaml carries workflow.verification_profiles; status does not say "not configured"
- *   STATE:      (d) after init: no document, no audit entry, `lore status --check-tree` exits 0
+ *   STATE:      (d) after init: exactly the seeded approved templates (BR-807 as modified, AC-DC2-5), no other document or
+ *               doc-scoped audit entry, `lore status --check-tree` exits 0
  */
 
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -24,8 +25,15 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readShippedTemplateSeeds } from "../../src/adapters/cli/template-seeds.js";
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
+
+const SEED_COUNT = (() => {
+  const seeds = readShippedTemplateSeeds();
+  if (!seeds.ok) throw new Error(JSON.stringify(seeds.error));
+  return seeds.value.length;
+})();
 
 const SPEC = "spec-the-write-spec-rule-ships-with-the-binary-lore-init-writes";
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -144,22 +152,26 @@ describe(`${SPEC}#AC-WSR-1 lore init is one atomic scaffold`, () => {
     expect(status.stdout).not.toContain("Verification profiles: not configured");
   });
 
-  it(`${SPEC}#AC-WSR-1 (d) right after init the corpus holds no document, no audit entry, and the tree check passes`, { timeout: 120_000 }, () => {
+  it(`${SPEC}#AC-WSR-1 (d) right after init the corpus holds exactly the seeded templates, no other document, and the tree check passes`, { timeout: 120_000 }, () => {
     const { repo, home } = makeInitialisedRepo();
 
     const list = runLore(["list", "--json"], repo, home);
     expect(list.exitCode, list.stderr).toBe(0);
-    const listed = (JSON.parse(list.stdout) as { data: { docs: unknown[]; total?: number } }).data;
-    expect(listed.docs).toHaveLength(0);
+    const listed = (JSON.parse(list.stdout) as { data: { docs: Array<{ id: string; type: string; status: string }>; total?: number } }).data;
+    // BR-807 as modified: the only documents init writes are one approved template per shipped seed.
+    expect(listed.docs).toHaveLength(SEED_COUNT);
+    expect(listed.docs.every((doc) => doc.type === "template" && doc.status === "approved")).toBe(true);
 
     const audit = runLore(["audit", "--json"], repo, home);
     expect(audit.exitCode, audit.stdout + audit.stderr).toBe(0);
     const trail = (JSON.parse(audit.stdout) as { data: { entries?: Array<{ action: string; doc_id?: string }> } }).data;
     // reason: inside a git repo `lore init` arms state binding (SPEC-143 AC-CT-3), which records one corpus-level
     // `state-binding-armed` entry. That entry belongs to no document; "no audit entry" here means no document's
-    // creation (or any other doc-scoped action) was recorded.
+    // creation (or any other doc-scoped action) of a document other than a seeded template was recorded.
     const docEntries = (trail.entries ?? []).filter((entry) => entry.action !== "state-binding-armed" || entry.doc_id !== undefined);
-    expect(docEntries).toEqual([]);
+    const templateIds = new Set(listed.docs.map((doc) => doc.id));
+    expect(docEntries.length).toBeGreaterThanOrEqual(SEED_COUNT);
+    expect(docEntries.filter((entry) => entry.doc_id === undefined || !templateIds.has(entry.doc_id))).toEqual([]);
 
     // reason: the tree check needs the project's blueprint and its root PRD to run clean (exit 4 without a blueprint;
     // "expected at least 1 prd" without the root). Both belong to the project, not to init, so the test supplies the

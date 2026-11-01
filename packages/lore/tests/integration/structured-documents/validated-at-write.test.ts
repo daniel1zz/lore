@@ -17,13 +17,20 @@
  *   BOUNDARY:   all five problems at once are named in ONE message; a kind with no template is refused naming it
  *   STATE:      after @2 the document still validates against @1; set --template-version latest refuses until the new
  *               dimension is answered and then writes nothing on the refusal
- *   REGRESSION: lore migrate templates seeds a missing slot, leaves an approved corpus template untouched and is
- *               idempotent; init itself writes no document (BR-807)
+ *   REGRESSION: after init every slot is seeded (BR-807 as modified); lore migrate templates finds nothing to seed,
+ *               leaves a newer approved corpus template untouched and is idempotent
  *
  * @spec_ref spec-every-document-is-stored-as-structured-fields-validated-by
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { readShippedTemplateSeeds } from "../../../src/adapters/cli/template-seeds.js";
+
+const SEED_COUNT = (() => {
+  const seeds = readShippedTemplateSeeds();
+  if (!seeds.ok) throw new Error(JSON.stringify(seeds.error));
+  return seeds.value.length;
+})();
 import {
   createStructuredRig,
   installTemplate,
@@ -62,7 +69,7 @@ async function expectRefusedCreate(content: unknown, needles: string[]): Promise
 }
 
 beforeAll(async () => {
-  rig = await createStructuredRig("lore-validated-at-write");
+  rig = await createStructuredRig("lore-validated-at-write", { templates: "none" });
   const installed = await installTemplate(rig, "Spec tech template", specTechTemplate(1));
   templateId = installed.id;
   templateSlug = installed.slug;
@@ -171,29 +178,27 @@ describe(`${SPEC}#AC-ST-1 lore migrate templates seeds what is missing and never
   it("seeds a missing slot, leaves an approved corpus template untouched, and a second run writes nothing", async () => {
     const seedRig = await createStructuredRig("lore-seed-templates");
     try {
-      // BR-807: `lore init` writes no document, so a fresh corpus has no template until a migrate seeds it.
-      expect(await seedRig.countDocs()).toBe(0);
-      const custom = await installTemplate(seedRig, "Spec tech template", specTechTemplate(1));
+      // BR-807 as modified: `lore init` seeds one approved template per shipped seed, so a migrate finds every slot filled.
+      const seeded = await seedRig.countDocs();
+      expect(seeded).toBe(SEED_COUNT);
 
       const preview = await seedRig.lore(["migrate", "templates"]);
       expect(preview.exitCode, preview.stderr).toBe(0);
-      expect(preview.stdout).toContain("would seed");
-      expect(await seedRig.countDocs()).toBe(1);
+      expect(preview.stdout).not.toContain("would seed");
+      expect(await seedRig.countDocs()).toBe(seeded);
 
+      // an approved corpus template NEWER than the seed (v3 vs the seed's v2) is left untouched
+      const custom = await installTemplate(seedRig, "Spec tech template", specTechTemplate(3));
       const applied = await seedRig.lore(["migrate", "templates", "--apply", "--json"]);
       expect(applied.exitCode, applied.stdout + applied.stderr).toBe(0);
       const outcomes = (JSON.parse(applied.stdout) as { data: { outcomes: { slot: string; action: string }[] } }).data.outcomes;
-      // the shipped spec/tech seed is NEWER than the approved corpus template (v2 vs v1): it becomes a proposed revision
-      // of that template document, never an in-place overwrite
-      expect(outcomes.find((o) => o.slot === "spec/tech")?.action).toBe("revise");
-      expect(outcomes.find((o) => o.slot === "task")?.action).toBe("seeded");
+      expect(outcomes.every((o) => o.action === "present")).toBe(true);
+      expect(outcomes).toHaveLength(SEED_COUNT);
+      expect(await seedRig.countDocs()).toBe(seeded + 1);
 
-      // the approved version 1 keeps resolving (the proposed revision is a draft awaiting review)
       const tech = JSON.parse((await seedRig.lore(["template", "show", "spec", "--kind", "tech", "--json"])).stdout) as { data: { ref: string; dimensions: unknown[] } };
-      expect(tech.data.ref).toBe(`${custom.slug}@1`);
+      expect(tech.data.ref).toBe(`${custom.slug}@3`);
       expect(tech.data.dimensions).toHaveLength(3);
-      const revised = JSON.parse((await seedRig.lore(["get", custom.slug, "--json"])).stdout) as { data: { doc: { status: string } } };
-      expect(revised.data.doc.status).toBe("draft");
       const task = await seedRig.lore(["template", "show", "task"]);
       expect(task.exitCode, task.stderr).toBe(0);
 

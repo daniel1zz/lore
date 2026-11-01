@@ -26,7 +26,7 @@ const ENTRY = join(new URL("../../", import.meta.url).pathname, "src", "index.ts
 
 const seeds = (() => {
   const read = readShippedTemplateSeeds();
-  if (!read.ok) throw new Error(read.error.message);
+  if (!read.ok) throw new Error(JSON.stringify(read.error));
   return read.value;
 })();
 
