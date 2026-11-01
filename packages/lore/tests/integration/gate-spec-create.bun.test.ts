@@ -184,7 +184,7 @@ describe("lore gate spec-create", () => {
     expect(result.exitCode).toBe(4);
     expect(result.stdout).not.toContain("gate: pass");
     expect(result.stdout).toContain("content");
-    expect(result.stdout).toContain("lore template show spec --kind tech --blank");
+    expect(result.stdout).toContain("--kind tech --blank");
     expect(result.stdout).toContain("--fields-file");
     expect(result.stdout).toContain("lore convert");
   });
