@@ -115,7 +115,10 @@ describe("shipped done-contract text", () => {
       expect(text, `${path}: lore integrate`).toContain("lore integrate");
       expect(text, `${path}: flaky`).toMatch(/flaky/);
       expect(text, `${path}: FIFO`).toMatch(/FIFO/);
-      expect(text, `${path}: migrate waiver`).toContain("lore migrate done-contract --apply --red-waiver <slug>=<reason>");
+      // Key tokens, all on one line, so dropping the migrate-waiver instruction goes red without pinning its prose.
+      const tokens = ["lore migrate done-contract", "--apply", "--red-waiver", "<slug>=<reason>"];
+      const migrateLine = text.split("\n").find((line) => tokens.every((token) => line.includes(token)));
+      expect(migrateLine, `${path}: migrate waiver line naming ${tokens.join(", ")}`).toBeDefined();
     }
   });
 
