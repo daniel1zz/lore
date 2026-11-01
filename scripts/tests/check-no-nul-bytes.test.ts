@@ -13,6 +13,7 @@
 // @reads assets/agents/lore-implementer.md
 // @reads assets/agents/lore-reader.md
 // @reads assets/context/**
+// @reads assets/dispatch-standing-rules.md
 // @reads assets/governance/claude-md-contract.md
 // @reads assets/governance/seat-briefing.md
 // @reads assets/hooks/**

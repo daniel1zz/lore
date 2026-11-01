@@ -34,6 +34,7 @@ import type { App } from "../../../src/app.js";
 import { createLiveApp } from "../../helpers/live-app.js";
 import { asyncLoreRunnerFor, ensureLiveRuleViaAsyncCli } from "../../helpers/cli-live-rule.js";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { makeCleanTreeRepo } from "../../helpers/clean-tree-repo.js";
 import { liveIo } from "../../live-invocation.js";
 import {
   createStructuredRig,
@@ -65,6 +66,8 @@ const INVALID_FIELDS = { fields: { risks: ["no summary"] }, dimensions: [] as un
 
 beforeAll(async () => {
   rig = await createStructuredRig("lore-revalidated");
+  // reason: approving a task compiles its done contract, which needs the base branch (main) to exist; the task is a corpus task (it changes no files)
+  makeCleanTreeRepo(rig.dir);
   await installTemplate(rig, "Spec tech template", specTechTemplate(1));
   httpApp = createLiveApp(rig.dbPath);
   machineDir = mkdtempSync(join(tmpdir(), "lore-revalidated-machine-"));
@@ -249,7 +252,7 @@ describe(`${SPEC}#AC-ST-4 promote-time cross-field checks for every type`, () =>
     { label: "spec", docType: "spec", kind: "feature", extra: { spec_kind: "feature" } },
     { label: "adr", docType: "adr", extra: { decision_status: "proposed" }, parent: "prd" },
     { label: "plan", docType: "plan", extra: {}, parent: "prd" },
-    { label: "task", docType: "task", extra: {}, parent: "plan" },
+    { label: "task", docType: "task", extra: { kind: "corpus" }, parent: "plan" },
     { label: "knowledge/research", docType: "knowledge", kind: "research", extra: { sub_type: "research" }, parent: "prd" },
     { label: "baseline root", docType: "baseline", kind: "root", extra: { node: "root", label: "Root" }, parent: "prd" },
   ];

@@ -283,7 +283,7 @@ function mirrorFixture(): MirrorFixture {
   createDoc(root, ["knowledge", "--parent", prdSlug, "--sub-type", "reference", "--title", "Fixture Kn", "--content", "k"]);
   const planSlug = createDoc(root, ["plan", "--parent", prdSlug, "--title", "Fixture Plan", "--content", "pl"]);
   loreIn(root, ["link", planSlug, specSlug, "--json"]);
-  createDoc(root, ["task", "--title", "Fixture Task", "--plan-id", planSlug, "--content", "t"]);
+  createDoc(root, ["task", "--kind", "code", "--title", "Fixture Task", "--plan-id", planSlug, "--content", "t"]);
 
   const dbPath = join(root, ".lore", "lore.db");
   const driverPath = join(root, "mirror-fixture-driver.ts");
