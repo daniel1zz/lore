@@ -29,6 +29,7 @@ import { loadLoreApp } from "../loader.js";
 import { buildLegacyServices } from "../conversion-wiring.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
+import { DECISION_FLAG_ARGS, parseDecisionFlags } from "../decision-flags.js";
 import { printLine } from "../output.js";
 
 export default defineLoreCommand({
@@ -44,6 +45,8 @@ export default defineLoreCommand({
       description: "Classify every document of a templated type once: completed ones are frozen (extra.legacy), the rest stay open. Preview unless --apply",
     },
     apply: { type: "boolean", description: "[--classify] write the classification (default is preview)" },
+    // BR-1476 — an agent's rewrite of a non-draft spec/adr/baseline node carries a decision, as `lore set` does.
+    ...DECISION_FLAG_ARGS,
     json: { type: "boolean", description: "Output result as JSON" },
   },
   async run(context): Promise<number> {
@@ -103,7 +106,15 @@ export default defineLoreCommand({
         }
         return 0;
       }
-      const converted = await services.value.conversion.convert(doc as string, { by: resolveActor(inv) });
+      const decisionFlags = parseDecisionFlags(args);
+      if (!decisionFlags.ok) {
+        inv.io.stderr.write(formatErrorFor(inv, decisionFlags.error) + "\n");
+        return exitCode(decisionFlags.error);
+      }
+      const converted = await services.value.conversion.convert(doc as string, {
+        by: resolveActor(inv),
+        ...(decisionFlags.value !== undefined ? { decision: decisionFlags.value } : {}),
+      });
       if (!converted.ok) {
         inv.io.stderr.write(formatErrorFor(inv, converted.error) + "\n");
         return exitCode(converted.error);

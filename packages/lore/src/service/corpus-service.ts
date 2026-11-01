@@ -3319,6 +3319,13 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // is revalidated against the PINNED template and re-rendered. From here on the patch carries the rendered text, so
     // every gate below (record lock, demotion, spec-promote) judges what will actually be stored. A legacy document
     // (no template_ref) passes through untouched.
+    // reason: AC-ST-7 — a conversion is judged against the version its draft was made from. Without this early compare a
+    // second convert would meet the first one's result as "already converted" (exit 4) instead of the stale-version
+    // refusal (exit 5) that tells it to re-read; the store's compare-and-set below still guards the write itself.
+    if (opts?.convertToTemplate === true && opts.expectedVersion !== undefined && existing.version !== opts.expectedVersion) {
+      return err({ code: "STALE_VERSION", id: existing.id, expected: opts.expectedVersion, actual: existing.version });
+    }
+
     // AC-ST-7 — a legacy-frozen document refuses every edit but a lifecycle transition; checked before anything is prepared.
     const frozenRefusal = guardLegacyFrozenWrite(
       existing,

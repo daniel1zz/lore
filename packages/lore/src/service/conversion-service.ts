@@ -20,6 +20,7 @@
 
 import { err, ok, validationError, type DocRecord, type LoreError, type Result } from "@lore/core";
 import { z } from "zod";
+import type { DecisionDraft } from "./decision-gate.js";
 import { isLegacyFrozen } from "./legacy-freeze.js";
 import { documentKindOf, type ResolvedTemplate } from "./template-service.js";
 
@@ -39,6 +40,7 @@ export interface ConversionCorpusPort {
       expectedVersion: number;
       convertToTemplate: true;
       correction?: { reason: string };
+      decision?: DecisionDraft;
     },
   ): Promise<Result<DocRecord, LoreError>>;
 }
@@ -137,7 +139,7 @@ export class ConversionService {
    * @returns the outcome, or the refusal (completed/frozen/templated, missing template, unusable draft, invalid content,
    *   STALE_VERSION when another write landed first)
    */
-  async convert(idOrSlug: string, opts: { by?: string } = {}): Promise<Result<ConversionOutcome, LoreError>> {
+  async convert(idOrSlug: string, opts: { by?: string; decision?: DecisionDraft } = {}): Promise<Result<ConversionOutcome, LoreError>> {
     const found = await this.deps.corpus.get(idOrSlug);
     if (!found.ok) return found;
     const doc = found.value.doc;
@@ -161,6 +163,7 @@ export class ConversionService {
         expectedVersion: doc.version,
         convertToTemplate: true,
         ...(opts.by !== undefined ? { by: opts.by } : {}),
+        ...(opts.decision !== undefined ? { decision: opts.decision } : {}),
         ...(locked.value ? { correction: { reason: `converted to the structured template ${resolved.value.ref} (lore convert)` } } : {}),
       },
     );
