@@ -16,6 +16,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { DocId } from "@lore/core";
 import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { TursoStore } from "../../../src/store/turso-store.js";
@@ -26,9 +27,20 @@ interface FileRunRow {
   inconclusive_cause: string | null;
 }
 
+/** Opens with migrate, forces schema init to finish (TursoStore inits lazily on first use), then closes. Rejects if the migration throws. */
+async function migrateAndClose(store: SQLiteStore | TursoStore): Promise<void> {
+  const acted = actedStore(store);
+  try {
+    const probe = await acted.find("00000000-0000-0000-0000-000000000000" as DocId);
+    if (!probe.ok) throw new Error(`store open failed: ${JSON.stringify(probe.error)}`);
+  } finally {
+    store.close();
+  }
+}
+
 const CASES = [
-  { label: "SQLiteStore", open: (path: string) => actedStore(new SQLiteStore(path, { migrate: true })) },
-  { label: "TursoStore", open: (path: string) => actedStore(new TursoStore({ localPath: path, migrate: true })) },
+  { label: "SQLiteStore", open: (path: string) => migrateAndClose(new SQLiteStore(path, { migrate: true })) },
+  { label: "TursoStore", open: (path: string) => migrateAndClose(new TursoStore({ localPath: path, migrate: true })) },
 ] as const;
 
 function insertRun(db: Database, id: number, exitCode: number, classification: string, cause: string | null): void {
@@ -64,8 +76,8 @@ describe.each(CASES)("migration 047 replay ($label)", ({ open }) => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  function seedMigrated(): void {
-    open(path).close();
+  async function seedMigrated(): Promise<void> {
+    await open(path);
     const db = new Database(path);
     insertRun(db, 1, 1, "red", null);
     insertRun(db, 2, 0, "green", null);
@@ -73,11 +85,11 @@ describe.each(CASES)("migration 047 replay ($label)", ({ open }) => {
     db.close();
   }
 
-  it.each([46, 34])("reopening a store rewound to user_version %i succeeds and keeps every classification", (version) => {
-    seedMigrated();
+  it.each([46, 34])("reopening a store rewound to user_version %i succeeds and keeps every classification", async (version) => {
+    await seedMigrated();
     rewind(path, version);
 
-    open(path).close();
+    await open(path);
 
     const runs = readRuns(path);
     expect(runs.get(1)).toMatchObject({ classification: "red", inconclusive_cause: null });
@@ -88,8 +100,8 @@ describe.each(CASES)("migration 047 replay ($label)", ({ open }) => {
     db.close();
   });
 
-  it("a v46 file without the columns gets them and its failing row is backfilled inconclusive/unclassified", () => {
-    seedMigrated();
+  it("a v46 file without the columns gets them and its failing row is backfilled inconclusive/unclassified", async () => {
+    await seedMigrated();
     const db = new Database(path);
     db.exec("DROP INDEX IF EXISTS uq_suite_file_runs_single_file_key");
     db.exec("ALTER TABLE suite_file_runs DROP COLUMN classification");
@@ -97,7 +109,7 @@ describe.each(CASES)("migration 047 replay ($label)", ({ open }) => {
     db.exec("PRAGMA user_version = 46");
     db.close();
 
-    open(path).close();
+    await open(path);
 
     const runs = readRuns(path);
     expect(runs.get(1)).toMatchObject({ classification: "inconclusive", inconclusive_cause: "unclassified" });

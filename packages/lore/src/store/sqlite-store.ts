@@ -201,7 +201,7 @@ import { MIGRATION_043_SQL } from "./migrations/migration-043.js";
 import { MIGRATION_044_SQL } from "./migrations/migration-044.js";
 import { MIGRATION_045_SQL } from "./migrations/migration-045.js";
 import { MIGRATION_046_SQL } from "./migrations/migration-046.js";
-import { MIGRATION_047_SQL } from "./migrations/migration-047.js";
+import { MIGRATION_047_ADD_COLUMNS, MIGRATION_047_SQL } from "./migrations/migration-047.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey, DecisionVersionQuery } from "./store-interface.js";
@@ -1130,7 +1130,12 @@ export class SQLiteStore implements StoreInterface {
 
     if (currentVersion < 47 && 47 <= ceiling) {
       // reason: migration-047 classifies every stored file run (BR-1533) and narrows the single-file unique index to conclusive rows, in ONE BEGIN/COMMIT; a failure rolls back and leaves schema 46.
+      // Two-phase like 041/042 (#587): each column is added only where `PRAGMA table_info` lacks it, so a replay does not throw.
       try {
+        for (const { table, column, ddl } of MIGRATION_047_ADD_COLUMNS) {
+          const cols = this.db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+          if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
+        }
         this.db.exec(MIGRATION_047_SQL);
       } catch (error) {
         try {

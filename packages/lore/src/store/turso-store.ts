@@ -49,7 +49,7 @@ import { MIGRATION_043_SQL } from "./migrations/migration-043.js";
 import { MIGRATION_044_SQL } from "./migrations/migration-044.js";
 import { MIGRATION_045_SQL } from "./migrations/migration-045.js";
 import { MIGRATION_046_SQL } from "./migrations/migration-046.js";
-import { MIGRATION_047_SQL } from "./migrations/migration-047.js";
+import { MIGRATION_047_ADD_COLUMNS, MIGRATION_047_SQL } from "./migrations/migration-047.js";
 import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migration-017.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
@@ -1304,6 +1304,11 @@ export class TursoStore implements StoreInterface {
 
       if (currentVersion < 47) {
         // reason: migration-047 classifies every stored file run (BR-1533) and narrows the single-file unique index to conclusive rows.
+        // Two-phase like 041/042 (#587): each column is added only where `PRAGMA table_info` lacks it, so a replay does not throw.
+        for (const { table, column, ddl } of MIGRATION_047_ADD_COLUMNS) {
+          const info = await this.client.execute(`PRAGMA table_info(${table})`);
+          if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
+        }
         await this.client.executeMultiple(MIGRATION_047_SQL);
       }
     })();
