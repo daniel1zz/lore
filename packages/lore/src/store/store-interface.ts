@@ -293,6 +293,8 @@ export type CalibrationRecordWithPromptVersion = CalibrationRecord & {
 // is store-shared.ts; this module re-exports so a consumer of
 // StoreInterface's trace methods has ONE import surface for both).
 export type {
+  FileRunClassification,
+  InconclusiveCause,
   SuiteFileRunRecord,
   SuiteResultRecord,
   CheckOutcomeInput,

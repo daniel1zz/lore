@@ -134,7 +134,7 @@ function build(script: Script) {
   /** Stores one file's `batch` row at a commit, as an earlier review's search would have. */
   const storeBatchRow = async (index: number, file: string, exitCode: number): Promise<void> => {
     const inserted = await store.insertSuiteFileRuns([
-      { suite_result_id: singleFileRunKey("batch", sha(index)), commit_sha: sha(index), file, exit_code: exitCode, output_tail: "", duration_ms: 1, measured_at: "2026-10-30T09:30:00.000Z" },
+      { suite_result_id: singleFileRunKey("batch", sha(index)), commit_sha: sha(index), file, exit_code: exitCode, output_tail: "", duration_ms: 1, measured_at: "2026-10-30T09:30:00.000Z", classification: exitCode === 0 ? "green" : "red", inconclusive_cause: null },
     ]);
     if (!inserted.ok) throw new Error(`could not store the fixture batch row: ${inserted.error.code}`);
   };
@@ -336,13 +336,13 @@ describe("batched attribution: the production batched invocation against a real 
     }
   });
 
-  it("AC-AC-2 a batched run that exits 1 with no readable failing file is incomplete for every file, never all green or all red", () => {
+  it("AC-AC-2 a batched run that exits 1 with no outcome report is inconclusive (no-report) for every file, never all green or all red, whatever its console shows", () => {
     const outcomes = outcomesOfTogetherRun([A, B], { status: 1, output: "something broke before any test ran", durationMs: 1 });
-    expect(outcomes.map((o) => [o.exit_code, o.incomplete !== undefined])).toEqual([[1, true], [1, true]]);
-    // coloured output (FORCE_COLOR) is read the same as plain output
+    expect(outcomes.map((o) => [o.classification, o.inconclusive_cause])).toEqual([["inconclusive", "no-report"], ["inconclusive", "no-report"]]);
+    // a FAIL line naming a file (coloured or not) is not a report: it classifies nothing
     const esc = String.fromCharCode(27);
     const coloured = outcomesOfTogetherRun([A, B], { status: 1, output: ` ${esc}[41m${esc}[1m FAIL ${esc}[22m${esc}[49m  ${B} > case\n`, durationMs: 1 });
-    expect(coloured.map((o) => o.exit_code)).toEqual([0, 1]);
+    expect(coloured.map((o) => [o.classification, o.inconclusive_cause])).toEqual([["inconclusive", "no-report"], ["inconclusive", "no-report"]]);
   });
 });
 
@@ -358,14 +358,22 @@ describe("build first for a selection holding a declared-spawn test", () => {
   it("build first:buildFirst runs `bun run build` before the tests: a build that writes a marker is seen by the test script", { timeout: 120_000 }, async () => {
     // reason: the runner appends the file names to `test:file`, so the script is a program that ignores its arguments.
     const root = packageWith({ build: "echo built > built.marker", testFile: "node check.js" });
-    writeFileSync(join(root, "check.js"), 'process.exit(require("node:fs").existsSync("built.marker") ? 0 : 4);\n');
+    // reason: a run is read from its outcome report only (BR-1533), so the passing script writes the report a real run would.
+    writeFileSync(
+      join(root, "check.js"),
+      [
+        'const fs = require("node:fs"), path = require("node:path");',
+        'if (!fs.existsSync("built.marker")) process.exit(4);',
+        `fs.writeFileSync(path.join(process.env.TEST_FILE_OUTCOME_DIR, "outcome-1.json"), JSON.stringify({ files: [{ path: "/fixture/${A}", state: "pass", errors: [] }] }));`,
+        "",
+      ].join("\n"),
+    );
     try {
       const without = await runTestFilesTogether(root, "fixture", [A], cleanEnv());
-      // the script fails without the build: not a green (the exit is whatever the script gave, which is no test result: a runner
-      // exit outside {0, 1} is refused by the service, and exit 1 with no readable failing file is incomplete)
+      // the script fails without the build: not a green (exit 4 is no test result: a runner exit outside {0, 1} is refused by the service)
       expect(without[0]?.exit_code).not.toBe(0);
       const built = await runTestFilesTogether(root, "fixture", [A], cleanEnv(), undefined, { buildFirst: true });
-      expect(built.map((o) => [o.exit_code, o.incomplete])).toEqual([[0, undefined]]);
+      expect(built.map((o) => [o.exit_code, o.incomplete, o.classification])).toEqual([[0, undefined, "green"]]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -5,7 +5,7 @@
  * Purpose: give every plan's regression dimension its measured file runs, without ever running tests in the shared
  *   checkout and without writing the repo's `.lore`.
  * Public surface: createGitCommitSuiteRunner (resolve a commit, re-run named test files one by one or together in one
- *   invocation, `withWorktree`, `disposeWorktrees`), runTestFilesTogether, outcomesOfTogetherRun, finishedTestFiles, suiteChildEnv,
+ *   invocation, `withWorktree`, `disposeWorktrees`), runTestFilesTogether, outcomesOfTogetherRun, suiteChildEnv,
  *   FILE_TEST_SCRIPT, runInThrowawayWorktree, prepareDependencies.
  * Invariants:
  *   - The commands are the project's own package.json scripts (`test:file`, and `build` before a batch with a declared
@@ -34,11 +34,20 @@
  */
 
 import { execFileSync, spawn as spawnChild } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { err, ok, type LoreError, type Result } from "@lore/core";
-import { parseFailingTestFiles } from "../../service/milestone-review-inputs.js";
+import {
+  NO_REPORT_RUN,
+  TEST_OUTCOME_DIR_ENV,
+  TIMED_OUT_RUN,
+  classifyReportedFile,
+  findReportedFile,
+  parseOutcomeReports,
+  type ClassifiedRun,
+  type ReportedFile,
+} from "../../service/test-run-classification.js";
 import type { CommitSuiteRunnerPort, FileRunOutcome, RunBatchOptions } from "../../service/suite-result-service.js";
 import { assessWorktreeDirPrefix, pruneStaleAssessWorktrees, type StaleWorktreePorts } from "./assess-stale-worktrees.js";
 import { PreparedWorktreeCache, type PreparedWorktree } from "./assess-worktree-cache.js";
@@ -51,8 +60,6 @@ const SUITE_TIMEOUT_MS = 60 * 60 * 1000;
 const KILL_GRACE_MS = 10 * 1000;
 /** After the child exited or the group was killed, how long to wait for the stdio pipes before closing them ourselves. */
 const PIPE_DRAIN_MS = 2000;
-/** ANSI colour escape sequences (`ESC [ ... m`). */
-const ANSI_COLOR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 
 /** Time limits of one spawned command; the defaults are the production values. */
 export interface ProcessLimits {
@@ -374,11 +381,12 @@ export function createGitCommitSuiteRunner(cwd: string, env: NodeJS.ProcessEnv, 
         const outcomes: FileRunOutcome[] = [];
         for (const file of files) {
           const startedMs = Date.now();
-          const ran = await spawn("bun", ["run", FILE_TEST_SCRIPT, file], root, childEnv, limits);
+          const { ran, reported } = await spawnTestFiles(root, [file], childEnv, limits);
           // reason: a run the timeout ended (or whose tree could not be ended) is a failed file for a re-run (AC-AF-2) but did not
           // COMPLETE: `incomplete` lets a caller that must not read it as red (single-file bisection, BR-1496) refuse it.
           const incomplete = ran.killFailure ?? (ran.timeout !== undefined ? `timed out after ${String(ran.timeout.elapsedMs)} ms` : undefined);
-          outcomes.push({ file, exit_code: ran.status, output_tail: tail(ran.output), duration_ms: Date.now() - startedMs, ...(incomplete !== undefined ? { incomplete } : {}) });
+          const classified = classifySingleRun(file, ran, reported);
+          outcomes.push({ file, exit_code: ran.status, output_tail: tail(ran.output), duration_ms: Date.now() - startedMs, ...(incomplete !== undefined ? { incomplete } : {}), ...classified });
         }
         return outcomes;
       }),
@@ -432,74 +440,100 @@ export async function runTestFilesTogether(
       return outcomesOfTogetherRun(files, { status: 1, output: built.output, durationMs: Date.now() - startedMs, incomplete: why });
     }
   }
-  const ran = await spawn("bun", ["run", FILE_TEST_SCRIPT, ...files], root, suiteChildEnv(env), limits);
+  const { ran, reported } = await spawnTestFiles(root, files, suiteChildEnv(env), limits);
   const incomplete = ran.killFailure ?? (ran.timeout !== undefined ? `timed out after ${String(ran.timeout.elapsedMs)} ms` : undefined);
-  return outcomesOfTogetherRun(files, { status: ran.status, output: ran.output, durationMs: Date.now() - startedMs, ...(incomplete !== undefined ? { incomplete } : {}) });
+  return outcomesOfTogetherRun(files, {
+    status: ran.status,
+    output: ran.output,
+    durationMs: Date.now() - startedMs,
+    reported,
+    // reason: BR-1533 — only the invocation's own time limit, with its process group ended cleanly, is a timeout; a tree that could not be ended is not.
+    timedOut: ran.timeout !== undefined && ran.killFailure === undefined,
+    ...(incomplete !== undefined ? { incomplete } : {}),
+  });
 }
 
 /**
- * The test files a runner's output shows as finished: a `✓ <file> (N tests ...)` line is a passed file (exit 0), a
- * `❯ <file> (N tests | M failed ...)` line a failed one (exit 1). The dot reporter `test:file` uses prints no such line, so
- * today only a verbose reporter's output yields entries; nothing is guessed for a file with no line.
+ * Runs `bun run test:file <files>` and reads the per-file outcome report the runner's reporter wrote (`TEST_FILE_OUTCOME_DIR`,
+ * `scripts/test-outcome-reporter.ts`). The directory is private to this invocation and removed afterwards.
  *
- * @param output - plain (colour-stripped) combined output of an invocation
- * @returns file path to the exit code its line shows, in first-seen order
+ * @returns the spawned result and every reported file; the map is empty when the run wrote no readable report (killed, a runner without the reporter)
  */
-export function finishedTestFiles(output: string): Map<string, number> {
-  const finished = new Map<string, number>();
-  for (const line of output.split("\n")) {
-    const match = /^\s*(✓|❯)\s+(?:\[[^\]]*\]\s+)?(\S+\.(?:test|spec)\.[cm]?[tj]sx?)\s+\(\d+ tests?(?:\s*\|\s*(\d+) failed)?/.exec(line);
-    if (match?.[2] === undefined) continue;
-    const failed = match[1] === "❯" ? Number(match[3] ?? 0) : 0;
-    if (match[1] === "❯" && failed === 0) continue; // reason: `❯` with no failed count is a file still running (partial), not a result.
-    if (!finished.has(match[2])) finished.set(match[2], failed > 0 ? 1 : 0);
+async function spawnTestFiles(
+  root: string,
+  files: readonly string[],
+  childEnv: NodeJS.ProcessEnv,
+  limits: ProcessLimits,
+): Promise<{ readonly ran: Spawned; readonly reported: ReadonlyMap<string, ReportedFile> }> {
+  const outcomeDir = mkdtempSync(join(tmpdir(), "lore-assess-outcome-"));
+  try {
+    const ran = await spawn("bun", ["run", FILE_TEST_SCRIPT, ...files], root, { ...childEnv, [TEST_OUTCOME_DIR_ENV]: outcomeDir }, limits);
+    const texts = readdirSync(outcomeDir)
+      .filter((name) => name.endsWith(".json"))
+      .map((name) => readFileSync(join(outcomeDir, name), "utf8"));
+    // reason: an unreadable report is the same as no report (the exit-code path below decides); it never classifies a file by itself.
+    return { ran, reported: parseOutcomeReports(texts).files };
+  } finally {
+    rmSync(outcomeDir, { recursive: true, force: true });
   }
-  return finished;
+}
+
+/**
+ * The classification of a one-file run, from its outcome report only (spec D4: the console cannot tell a timeout from an assertion).
+ * A process tree that could not be ended, or an exit outside {0, 1} (a run that never ran tests), is no test result and gets none.
+ *
+ * @returns the report's classification; a limit-ended run is `timeout`; any other run without a usable entry is `no-report`
+ */
+function classifySingleRun(file: string, ran: Spawned, reported: ReadonlyMap<string, ReportedFile>): Partial<FileRunOutcome> {
+  if (ran.killFailure !== undefined) return {};
+  if (ran.timeout !== undefined) return TIMED_OUT_RUN;
+  if (ran.status !== 0 && ran.status !== 1) return {};
+  const entry = findReportedFile(reported, file);
+  return (entry === undefined ? undefined : classifyReportedFile(entry)) ?? NO_REPORT_RUN;
 }
 
 /**
  * The per-file outcomes of ONE invocation that ran `files` together (`bun run test:file f1 f2 ...`).
  *
- * reason: exit 0 = every file passed; exit 1 = some failed and the failing files are read from the runner's own output
- * (`parseFailingTestFiles`); an exit-1 run from which no requested file can be read as failing says nothing about any file
- * and is `incomplete`, never "all green" and never "all red". Any other exit is no test result and is reported as is.
+ * Classification (BR-1533, spec D4): each file is classified from the outcome report alone (`classifyReportedFile`: green, red, or inconclusive
+ * when every error is a test or hook timeout). A file with no usable report entry (no report written, an unreadable one, or the file absent from it)
+ * is inconclusive with cause `no-report`: the console text is never read as a result. An invocation the time limit ended makes every file
+ * inconclusive with cause `timeout`. An exit outside {0, 1} is no test result and is reported as is; a build or process-tree failure stays `incomplete`.
  *
  * @param files - the files the invocation was given
- * @param run - the invocation's exit status, merged output, duration and, when it did not complete, why
+ * @param run - the invocation's exit status, merged output, duration, the outcome report's files, whether its own limit ended it, and, when it did not complete, why
  */
 export function outcomesOfTogetherRun(
   files: readonly string[],
-  run: { readonly status: number; readonly output: string; readonly durationMs: number; readonly incomplete?: string },
+  run: {
+    readonly status: number;
+    readonly output: string;
+    readonly durationMs: number;
+    readonly incomplete?: string;
+    readonly reported?: ReadonlyMap<string, ReportedFile>;
+    readonly timedOut?: boolean;
+  },
 ): FileRunOutcome[] {
   const outputTail = tail(run.output);
-  const outcome = (file: string, exitCode: number, incomplete?: string): FileRunOutcome => ({
+  const outcome = (file: string, exitCode: number, incomplete?: string, classified?: ClassifiedRun): FileRunOutcome => ({
     file,
     exit_code: exitCode,
     output_tail: outputTail,
     duration_ms: run.durationMs,
     ...(incomplete !== undefined ? { incomplete } : {}),
+    ...(classified ?? {}),
   });
   if (run.incomplete !== undefined) {
-    // reason: #568 — a chunk the limit ended keeps the files whose own result line the runner had already printed; every other file is incomplete.
-    const finished = finishedTestFiles(run.output.replace(ANSI_COLOR, ""));
-    const finishedExit = (file: string): number | undefined => {
-      for (const [path, exitCode] of finished) if (path === file || path.endsWith(`/${file}`) || file.endsWith(`/${path}`)) return exitCode;
-      return undefined;
-    };
-    return files.map((file) => {
-      const exitCode = finishedExit(file);
-      return exitCode === undefined ? outcome(file, 1, run.incomplete) : outcome(file, exitCode);
-    });
+    // reason: BR-1533 — a file the invocation's own time limit left unfinished is inconclusive (stored, decides nothing). A killed run writes no report,
+    // so no file of it can be told apart; a build or process-tree failure stays incomplete (not stored).
+    return files.map((file) => outcome(file, 1, run.incomplete, run.timedOut === true ? TIMED_OUT_RUN : undefined));
   }
-  if (run.status === 0) return files.map((file) => outcome(file, 0));
-  if (run.status !== 1) return files.map((file) => outcome(file, run.status));
-  // reason: a runner that colours its output (FORCE_COLOR) wraps `FAIL` and the path in escape codes; the line pattern needs plain text.
-  const failing = parseFailingTestFiles(run.output.replace(ANSI_COLOR, ""));
-  const isFailing = (file: string): boolean => failing.some((f) => f === file || f.endsWith(`/${file}`) || file.endsWith(`/${f}`));
-  if (!files.some(isFailing)) {
-    return files.map((file) => outcome(file, 1, "the batched run failed (exit 1) but no failing test file could be read from its output"));
-  }
-  return files.map((file) => outcome(file, isFailing(file) ? 1 : 0));
+  if (run.status !== 0 && run.status !== 1) return files.map((file) => outcome(file, run.status));
+  return files.map((file) => {
+    const entry = run.reported === undefined ? undefined : findReportedFile(run.reported, file);
+    const classified = (entry === undefined ? undefined : classifyReportedFile(entry)) ?? NO_REPORT_RUN;
+    return outcome(file, classified.classification === "green" ? 0 : 1, undefined, classified);
+  });
 }
 
 /** Installs dependencies in a fresh worktree when the project has some; returns the failure text, or `undefined` when ready. */

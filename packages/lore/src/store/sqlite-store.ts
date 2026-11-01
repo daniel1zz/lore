@@ -205,6 +205,7 @@ import { MIGRATION_043_SQL } from "./migrations/migration-043.js";
 import { MIGRATION_044_SQL } from "./migrations/migration-044.js";
 import { MIGRATION_045_SQL } from "./migrations/migration-045.js";
 import { MIGRATION_046_SQL } from "./migrations/migration-046.js";
+import { MIGRATION_047_SQL } from "./migrations/migration-047.js";
 import { MIGRATION_048_ADD_COLUMNS, MIGRATION_048_SQL } from "./migrations/migration-048.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
@@ -1132,9 +1133,23 @@ export class SQLiteStore implements StoreInterface {
       }
     }
 
+    if (currentVersion < 47 && 47 <= ceiling) {
+      // reason: migration-047 classifies every stored file run (BR-1533) and narrows the single-file unique index to conclusive rows, in ONE BEGIN/COMMIT; a failure rolls back and leaves schema 46.
+      try {
+        this.db.exec(MIGRATION_047_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-044 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
     if (currentVersion < 48 && 48 <= ceiling) {
       // reason: migration-048 is two-phase like 019: nullable review_judgments columns where missing, then one BEGIN/COMMIT creates the
-      // per-dimension verdict and template revision/proposal tables and bumps user_version; a failure rolls back and leaves schema 46/47.
+      // per-dimension verdict and template revision/proposal tables and bumps user_version; a failure rolls back and leaves schema 47.
       try {
         for (const { table, column, ddl } of MIGRATION_048_ADD_COLUMNS) {
           const cols = this.db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -4202,9 +4217,9 @@ export class SQLiteStore implements StoreInterface {
       this.db.transaction(() => {
         for (const row of rows) {
           this.db.run(
-            // reason: OR IGNORE honours migration-045's partial unique index: a second single-file run of one (key, file) is dropped, first wins (#528); re-run rows under a suite id never conflict.
-            "INSERT OR IGNORE INTO suite_file_runs (suite_result_id, commit_sha, file, exit_code, output_tail, duration_ms, measured_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [row.suite_result_id, row.commit_sha, row.file, row.exit_code, row.output_tail, row.duration_ms, row.measured_at],
+            // reason: OR IGNORE honours the partial unique index (migration-045, narrowed by 047 to conclusive rows): a second CONCLUSIVE single-file run of one (key, file) is dropped, first wins (#528); inconclusive runs and re-run rows under a suite id never conflict.
+            "INSERT OR IGNORE INTO suite_file_runs (suite_result_id, commit_sha, file, exit_code, output_tail, duration_ms, measured_at, classification, inconclusive_cause) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [row.suite_result_id, row.commit_sha, row.file, row.exit_code, row.output_tail, row.duration_ms, row.measured_at, row.classification, row.inconclusive_cause],
           );
         }
       })();
