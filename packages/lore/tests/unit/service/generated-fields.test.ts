@@ -1,6 +1,6 @@
 // @reads assets/templates/**
 /**
- * @spec_ref spec-every-document-is-stored-as-structured-fields-validated-by (BR-1528, AC-ST-1)
+ * @spec_ref spec-every-document-is-stored-as-structured-fields-validated-by (BR-1528)
  *
  * Every internal generator fills fields and dimension answers through its SHIPPED seed template. This file proves the
  * builders in `generated-fields.ts` against the seeds they name, with no corpus: the output of each builder satisfies
@@ -31,11 +31,12 @@ import {
 } from "../../../src/service/generated-fields.js";
 import type { FidelityRecord } from "../../../src/service/fidelity-sample.js";
 
-const seeds = readShippedTemplateSeeds(fileURLToPath(new URL("../../../../../assets", import.meta.url)));
-if (!seeds.ok) throw new Error(`shipped seeds unreadable: ${JSON.stringify(seeds.error)}`);
+const readSeeds = readShippedTemplateSeeds(fileURLToPath(new URL("../../../../../assets", import.meta.url)));
+if (!readSeeds.ok) throw new Error(`shipped seeds unreadable: ${JSON.stringify(readSeeds.error)}`);
+const shippedSeeds = readSeeds.value;
 
 function seed(docType: string, kind?: string): Template {
-  const found = seeds.value.find((candidate) => candidate.template.doc_type === docType && candidate.template.kind === kind);
+  const found = shippedSeeds.find((candidate) => candidate.template.doc_type === docType && candidate.template.kind === kind);
   if (found === undefined) throw new Error(`no shipped seed for ${docType}/${String(kind)}`);
   return found.template;
 }

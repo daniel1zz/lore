@@ -2,7 +2,7 @@
 // @reads assets/templates/**
 // @spawns-external git builds a throwaway git repository the test runs against
 /**
- * spec-every-document-is-stored-as-structured-fields-validated-by#AC-ST-1 (BR-1528): every internal generator creates its
+ * spec-every-document-is-stored-as-structured-fields-validated-by (BR-1528): every internal generator creates its
  * document structured through its seed template, with `workflow.structured_documents.require_create` ON, so the generators
  * provably do not depend on the switch being off. Each created document pins `extra.template_ref` and `lore template check`
  * finds it clean (every field valid, every dimension answered, every ref resolving).
@@ -85,7 +85,7 @@ afterAll(() => {
   for (const dir of extraDirs) rmSync(dir, { recursive: true, force: true });
 });
 
-describe("AC-ST-1 generators create structured documents with require_create ON", () => {
+describe("BR-1528 generators create structured documents with require_create ON", () => {
   it("HAPPY: lore handoff files a templated, check-clean handoff under its plan", async () => {
     const written = await rig.lore(["handoff", "--plan", planSlug, "--decision", "keep the typed extra@0.9", "--next", "run the suite", "--json"]);
     expect(written.exitCode, written.stderr + written.stdout).toBe(0);
