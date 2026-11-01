@@ -225,6 +225,11 @@ export default defineLoreCommand({
             "[repeatable] Task: repo-relative POSIX path (trailing '/' = directory scope, holding only the files its holder touched; path#Symbol = one top-level symbol of the file). Spec/knowledge: path[#Symbol] (SPEC-045), or path#\"test title\" on a *.test.ts file to anchor a describe/it/test title (\\\" and \\\\ are the only escapes).",
           required: true,
         },
+        creates: {
+          type: "boolean",
+          description:
+            "[task only] The added test files are ones this task will create: approve accepts them although they are absent at the base tip, and `lore finish` reports one still absent as test-file-absent. Refused (exit 4, creates-after-landing) on a task that holds a landing record.",
+        },
         json: {
           type: "boolean",
           description: "Output result as JSON",
@@ -250,6 +255,7 @@ export default defineLoreCommand({
             const result = await app.taskWorkflowService.addAnchors(targetId, paths, {
               by,
               source: app.callerSurface,
+              ...(args.creates === true ? { creates: true } : {}),
             });
 
             if (!result.ok) {
