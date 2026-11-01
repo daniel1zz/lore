@@ -1,3 +1,4 @@
+// @layer e2e-cli-finish AC-DCS1-18
 // @reads assets/project/lore-config-template.yaml
 // @reads assets/project/reference-transaction
 // @spawns packages/lore/tests/helpers/approve-nodes-cli.ts

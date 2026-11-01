@@ -1,3 +1,4 @@
+// @layer e2e-cli-done-floors AC-DCS1-27 AC-DCS1-30
 // @reads assets/project/lore-config-template.yaml
 // @reads assets/project/reference-transaction
 // @spawns-external sh excludes the linked-worktree directory from the fixture repository

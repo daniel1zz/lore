@@ -1,3 +1,4 @@
+// @layer cli-claim-anchors AC-DCS1-14
 // @reads assets/project/lore-config-template.yaml
 /**
  * `lore create task --anchor` / `lore anchor add|rm|list` / `lore claim

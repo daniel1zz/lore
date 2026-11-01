@@ -1,3 +1,4 @@
+// @layer cli-create-task-validation AC-DCS1-4
 /**
  * create-task-validation.test.ts — SPEC-065 D4, AC-065-5/AC-065-6: single-pass
  * `lore create task` required-flag aggregation + `--parent`-from-`--plan-id`
