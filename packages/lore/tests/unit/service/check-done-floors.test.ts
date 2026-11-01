@@ -237,4 +237,24 @@ describe("AC-AP-9 checkDoneFloors contract and byte-identical done refusals", ()
     expect(checked.value?.floor).toBe("attested-pass");
     expect(detailsFloor(checked.value?.error as LoreError)).toBe("attested-pass");
   });
+
+  // reason: AC-DCS1-7 / BR-209 judge "not landed" first for a code task: a task with no landing record is refused
+  // [floor: not-landed] whatever evidence rows exist, and no other floor's message says "no landing record" (J2).
+  it("(h) order: an unlanded code task (no landing record, no pass row) is refused not-landed, never attested-pass", async () => {
+    const s = makeServices();
+    const { landing: _landing, ...unlanded } = landedTaskExtra();
+    const taskId = await createTask(s, "Floor H", { ...unlanded, landing: undefined });
+    await expectFloorThenDoneMatches(s, taskId, "not-landed");
+    const checked = await s.floors.checkDoneFloors(taskId);
+    expect(JSON.stringify(checked.ok ? checked.value?.error : "unreadable")).toContain("no landing record");
+  });
+
+  it("(h2) order: the same unlanded code task is still not-landed once a pass row and a runner-captured pass exist", async () => {
+    const s = makeServices();
+    const { landing: _landing, ...unlanded } = landedTaskExtra();
+    const taskId = await createTask(s, "Floor H2", { ...unlanded, landing: undefined });
+    await addAttested(s, taskId);
+    await addEvidence(s, taskId, runnerCapturedPass());
+    await expectFloorThenDoneMatches(s, taskId, "not-landed");
+  });
 });

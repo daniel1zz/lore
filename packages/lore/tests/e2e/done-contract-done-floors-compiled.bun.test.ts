@@ -467,11 +467,14 @@ describe("AC-DCS1-7: evidence binds to the code (the rule AC-DCS1-27 states)", (
     await expectFloor(built.slug, "attested-pass", "evidence-unmeasurable");
   });
 
-  it("AC-DCS1-7: a task with no landing record exits 4 [floor: attested-pass] with the cause evidence-unmeasurable even when it holds attested passes", async () => {
+  it("AC-DCS1-7: a task with no landing record exits 4 [floor: not-landed] whether or not it holds attested passes (not landed is judged first)", async () => {
     const slug = await fixture.createTask({ plan: await sharedPlanSlug(), kind: "code", title: "Never landed", anchors: [], acScope: [] });
     await fixture.mustRun(["approve", slug, "--red-waiver", "nothing to run red"]);
+    const bare = await expectFloor(slug, "not-landed", "no landing record");
+    expect(bare).not.toContain("[floor: attested-pass]");
     await capturePassIn(fixture.dir, slug, TYPECHECK);
-    await expectFloor(slug, "attested-pass", "evidence-unmeasurable");
+    const withRow = await expectFloor(slug, "not-landed", "no landing record");
+    expect(withRow).not.toContain("evidence-unmeasurable");
   });
 
   it("AC-DCS1-7: B need not be an ancestor of L: rows taken on a later commit with the same tree count", async () => {

@@ -415,8 +415,8 @@ function refuseClaim(taskSlug: string, name: "work-needs-branch" | "worktree-wit
       field: "worktree",
       message:
         `The worktree named for task "${taskSlug}" has no readable branch (detached HEAD or an unreadable ref), so the start of the work ` +
-        `cannot be measured [claim: ${name}]. Check out a branch in that worktree and claim again, or claim without --worktree when the ` +
-        "task anchors no file (corpus-only work). Nothing was written.",
+        `cannot be measured [claim: ${name}]. Check out a branch in that worktree and claim again. ` +
+        "A check or corpus task is never claimed: finish it from the shared checkout with `lore finish`. Nothing was written.",
       value: name,
       rule: "BR-1468",
     });
@@ -425,9 +425,9 @@ function refuseClaim(taskSlug: string, name: "work-needs-branch" | "worktree-wit
     code: "VALIDATION_ERROR",
     field: "worktree",
     message:
-      `Task "${taskSlug}" declares file anchors, so its work changes files and needs its own branch [claim: ${name}]. ` +
-      `Create a worktree and claim with \`lore claim ${taskSlug} --worktree <branch>\`; only a task with no file anchors ` +
-      "(corpus-only work) may be claimed without one.",
+      `Task "${taskSlug}" is a code task: its work changes files and needs its own branch [claim: ${name}]. ` +
+      `Create a worktree and claim with \`lore claim ${taskSlug} --worktree <branch>\` (or \`lore start ${taskSlug}\`). ` +
+      "A check or corpus task is never claimed: finish it from the shared checkout with `lore finish`.",
     value: name,
     rule: "BR-1468",
   });
@@ -4671,6 +4671,23 @@ export class TaskWorkflowService {
     const landingRecord = readTaskLanding(task.extra);
     const landedCommit = landingRecord?.landing_commit;
 
+    // reason: AC-DCS1-7 (BR-209) — "not landed" is judged first for a code task. measureLanding is unarmed for a task whose claim
+    // history cannot be measured (never claimed, or a corpus-only claim), so the git verdict alone would let an unlanded code task
+    // reach the evidence floors, where the missing landing surfaced as an attested-pass cause. No landing record = not landed.
+    if (contract.kind === "code" && landedCommit === undefined) {
+      const claimedOn = (landing.branches ?? []).length > 0 ? (landing.branches ?? []).join(", ") : "no branch";
+      return refuse(
+        this.floorRefusalOf("not-landed", {
+          code: "VALIDATION_ERROR",
+          field: "extra.landing",
+          message:
+            `Task "${task.slug}" (claimed on ${claimedOn}) cannot be archived as landed: no landing record. A code task is done once its branch ` +
+            `is landed: run \`lore land ${task.slug}\` (or \`lore integrate <branch>\`), then re-run \`lore done ${task.slug}\`.`,
+          value: { claimed_on: claimedOn, reason: "no-landing-record" },
+        }),
+      );
+    }
+
     // The oracle set: the contract's plus added_oracles, never fewer (AC-DCS1-11), each listed once. While the claim exists the
     // write-set additions are derived again here (they are written at release / run end, and a done before either still sees them).
     const heldClaim = contract.kind === "code" ? extractHeldClaim(task) : undefined;
@@ -4757,7 +4774,7 @@ export class TaskWorkflowService {
   private bindRow(git: GitRunner, contract: DoneContract, entry: EvidenceEntry, landedCommit: string | undefined): RowBinding {
     const head = entry.attestation?.head_sha;
     if (contract.kind === "code") {
-      if (landedCommit === undefined) return { counts: false, cause: "evidence-unmeasurable", detail: "the task has no landing record, so there is no landed commit to compare the row with" };
+      if (landedCommit === undefined) return { counts: false, cause: "evidence-unmeasurable", detail: "the task has no landed commit to compare the row with" };
       if (entry.attestation?.recorded_at_landing === landedCommit) return { counts: true };
       if (head === undefined) return { counts: false, cause: "evidence-unmeasurable", detail: "the row records no commit it ran on" };
       const verdict = treesIdentical(git, head, landedCommit);
@@ -5084,7 +5101,7 @@ export class TaskWorkflowService {
       reason = "no-measurable-claim";
       message =
         `${base} no-measurable-claim: every claim of this task was released before tips were recorded and cannot be measured. ` +
-        `Claim the task again (on a branch, or without one for corpus-only work), record evidence, then re-run \`lore done ${task.slug}\`.`;
+        `Claim the task again on a branch, record evidence, then re-run \`lore done ${task.slug}\`.`;
     } else {
       reason = "tip-not-on-main";
       message =
