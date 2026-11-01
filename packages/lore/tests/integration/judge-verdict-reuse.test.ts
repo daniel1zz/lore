@@ -202,7 +202,7 @@ function makeEnv(options: EnvOptions = {}) {
         listDecisionLog: async () => ok([]),
         judge: async () => err({ code: "STORE_ERROR", message: "judgeMeasured is wired" }),
         judgeMeasured: judge,
-        createReviewDoc: async (input) => {
+        createReviewDoc: async (input: { extra: unknown }) => {
           state.docs += 1;
           return ok({ id: "R1", slug: `review-${String(state.docs)}`, extra: input.extra } as unknown as DocRecord);
         },

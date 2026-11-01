@@ -283,15 +283,32 @@ export class AIProviderService {
   async judgeMilestoneMeasured(
     prompt: string,
     title: string,
-  ): Promise<Result<{ text: string; duration_ms: number; tokens_in?: number; tokens_out?: number }, LoreError>> {
+  ): Promise<Result<{ text: string; duration_ms: number; tokens_in?: number; tokens_out?: number; model?: string }, LoreError>> {
     const { result, duration_ms } = await this._invokeProvider({ prompt, doc_type: "knowledge", title });
     if (!result.ok) return result;
     const usage = result.value.usage;
+    const model = this.judgeIdentity().model;
     return ok({
       text: result.value.content,
       duration_ms,
       ...(usage !== undefined ? { tokens_in: usage.input_tokens, tokens_out: usage.output_tokens } : {}),
+      // reason: BR-1535 — the model a reply names is the provider's resolved model; a provider that cannot name one (the CLI) names none, never a guess.
+      ...(model !== undefined ? { model } : {}),
     });
+  }
+
+  /**
+   * Which judge answers milestone reviews: the active provider's name, the model it names (`HttpAIProvider.modelId`; the CLI
+   * provider cannot know which model served a call, so it names none and per-unit reuse is off for it, BR-1535 S5) and the
+   * model-behaviour settings it sends. No provider sends a reasoning-effort or temperature setting today, so `settings` is empty;
+   * the key reads it so a provider that starts sending one invalidates stored verdicts.
+   *
+   * @returns the identity; never throws
+   */
+  judgeIdentity(): { provider: string; model: string | undefined; settings: Record<string, string | number> } {
+    const provider = this.providers.get(this.active) as (AIProvider & Partial<ModelAwareProvider>) | undefined;
+    const modelId = provider?.modelId;
+    return { provider: this.active, model: modelId === undefined || modelId.trim() === "" ? undefined : modelId, settings: {} };
   }
 
   // ─── SPEC-017: create path ──────────────────────────────────────────────────

@@ -80,7 +80,8 @@ import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import { requireBulkLifecycleService } from "../../bulk-wiring.js";
 import { resolveBulkSelector, type BulkSelector } from "../../../service/bulk-lifecycle-service.js";
-import { failedDimensions, resolveMachineTestSlots, type MilestoneReview, type RetiredAcRef } from "@lore/core";
+import { failedDimensions, renderUnitCounts, resolveMachineTestSlots, type MilestoneReview, type RetiredAcRef } from "@lore/core";
+import { createGitCriterionContext } from "../assess-criterion-context.js";
 import { ReviewTestSlots, slotCommitSuiteRunner, slotCriterionRerunner, slotStaleRefresher } from "../../../service/review-test-slots.js";
 import type { LoreError, MilestoneFacts, PlanBundle } from "@lore/core";
 
@@ -96,6 +97,8 @@ interface AssessRow {
   readonly retired_acs?: readonly RetiredAcRef[];
   /** The one pending owner decision that confirms them (`lore pending --ask`); absent when none is open. */
   readonly pending_decision?: number;
+  /** Fresh and reused judged-unit counts per dimension (`renderUnitCounts`); absent on an ERROR or SKIPPED row. */
+  readonly units?: string;
 }
 
 /** One-line account of how a plan's diff was obtained (stored on the review as `diff_source`). */
@@ -138,6 +141,8 @@ function passFailRow(plan: string, reviewSlug: string, review: MilestoneReview):
     failed,
     diff_source: review.diff_source,
     reason: failed.length === 0 ? "no dimension failed" : `failed: ${failed.join(", ")}`,
+    // reason: BR-1535 S6 — the fresh and reused unit counts per dimension, printed with the row and kept in `--json`.
+    units: renderUnitCounts(review),
   };
 }
 
@@ -539,6 +544,7 @@ export default defineLoreCommand({
           facts,
           ...(rerunCriterion !== undefined ? { rerunCriterion } : {}),
           ...(derivation.status === "derived" ? { diffText: derivation.diff_text } : {}),
+          ...(facts.assessed_commit !== undefined ? { criterionContext: createGitCriterionContext(inv.cwd, inv.env, facts.assessed_commit) } : {}),
           diffSource: describeDiffSource(diffSource),
           maxDiffChars: app.aiProviderService.assessMaxDiffChars,
           ...(suiteOfPlan !== undefined ? { suite: suiteOfPlan } : {}),
@@ -679,7 +685,7 @@ export default defineLoreCommand({
               r.outcome,
               r.plan,
               r.review ?? "-",
-              "filed_issues" in r && r.filed_issues !== undefined ? `${r.reason}; issues ${r.filed_issues.map((n) => `#${String(n)}`).join(", ")}` : r.reason,
+              `${"filed_issues" in r && r.filed_issues !== undefined ? `${r.reason}; issues ${r.filed_issues.map((n) => `#${String(n)}`).join(", ")}` : r.reason}${r.units !== undefined ? `; units ${r.units}` : ""}`,
             ]),
           ),
         );
