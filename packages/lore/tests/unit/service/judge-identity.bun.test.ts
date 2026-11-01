@@ -1,5 +1,5 @@
 /**
- * @spec_ref spec-a-re-review-reuses-the-judge-s-verdict-for-every-unit (AC-JR-3, BR-1535 S2, S5)
+ * @spec_ref spec-a-re-review-reuses-the-judge-s-verdict-for-every-unit (BR-1535 S2, S5)
  *
  * The judge's identity for per-unit reuse. With `ai.assess.model` set, the claude-cli provider is invoked with `--model <id>
  * --output-format json` and reports the model the JSON reply names (`modelUsage`), the HTTP provider reports the response's `model`;
@@ -53,16 +53,16 @@ describe("hermetic spawn spec, fixed args and the JSON reply", () => {
   const cfg = (command: string) => ({ command, args: ["-p"], timeout_ms: 1000 });
   const ctx = { sourceEnv: {}, tmpDir: "/tmp" };
 
-  it("AC-JR-3 the claude binary is given --model <id> and --output-format json after the isolation flag", () => {
+  it("BR-1535 the claude binary is given --model <id> and --output-format json after the isolation flag", () => {
     expect(buildHermeticSpawnSpec(cfg("claude"), { ...ctx, model: "claude-opus-4-8" }).args).toEqual(["-p", "--setting-sources", "", "--model", "claude-opus-4-8", "--output-format", "json"]);
   });
 
-  it("AC-JR-3 no model, no flag; a custom command is never given the flags", () => {
+  it("BR-1535 no model, no flag; a custom command is never given the flags", () => {
     expect(buildHermeticSpawnSpec(cfg("claude"), ctx).args).toEqual(["-p", "--setting-sources", ""]);
     expect(buildHermeticSpawnSpec(cfg("./judge.sh"), { ...ctx, model: "claude-opus-4-8" }).args).toEqual(["-p"]);
   });
 
-  it("AC-JR-3 fixed provider args keep effort and sampling flags and drop every per-call flag, spaced or with =", () => {
+  it("BR-1535 fixed provider args keep effort and sampling flags and drop every per-call flag, spaced or with =", () => {
     expect(fixedProviderArgs(["-p", "--effort", "high", "--temperature=0.2", "--model", "x", "--output-format=json", "--json-schema", "s.json", "--max-tokens", "10", "--prompt-file", "p.txt"])).toEqual([
       "-p",
       "--effort",
@@ -71,7 +71,7 @@ describe("hermetic spawn spec, fixed args and the JSON reply", () => {
     ]);
   });
 
-  it("AC-JR-3 the answering model is the model of modelUsage with the most output tokens; errors and non-JSON are refused", () => {
+  it("BR-1535 the answering model is the model of modelUsage with the most output tokens; errors and non-JSON are refused", () => {
     expect(parseClaudeJsonReply(JSON_REPLY("hi", { "claude-haiku-x": 3, "claude-opus-y": 120 }))).toEqual({ ok: true, value: { text: "hi", model: "claude-opus-y" } });
     expect(parseClaudeJsonReply(JSON.stringify({ result: "hi" }))).toEqual({ ok: true, value: { text: "hi", model: undefined } });
     expect(parseClaudeJsonReply("plain text").ok).toBe(false);
@@ -81,7 +81,7 @@ describe("hermetic spawn spec, fixed args and the JSON reply", () => {
 });
 
 describe("judgeIdentity and the reply's model", () => {
-  it("AC-JR-3 claude-cli with ai.assess.model is invoked with --model and --output-format json, and reports the model the reply names", async () => {
+  it("BR-1535 claude-cli with ai.assess.model is invoked with --model and --output-format json, and reports the model the reply names", async () => {
     const { command, argsFile } = stubClaude(JSON_REPLY("an answer", { "claude-sonnet-full-id": 40 }));
     const service = serviceFor(new ClaudeCliProvider("claude-cli", { command, args: ["-p", "--effort", "high"], timeout_ms: 20000 }, runtime()), "sonnet");
     // the configured name is an alias; the identity carries it for lookups, the fixed args as the settings
@@ -97,7 +97,7 @@ describe("judgeIdentity and the reply's model", () => {
     expect(args).toContain("json");
   });
 
-  it("AC-JR-3 claude-cli with no ai.assess.model names no model, passes no --model and reads the plain reply", async () => {
+  it("BR-1535 claude-cli with no ai.assess.model names no model, passes no --model and reads the plain reply", async () => {
     const { command, argsFile } = stubClaude("plain answer");
     const service = serviceFor(new ClaudeCliProvider("claude-cli", { command, args: ["-p"], timeout_ms: 20000 }, runtime()));
     const identity = service.judgeIdentity();
@@ -109,7 +109,7 @@ describe("judgeIdentity and the reply's model", () => {
     expect(readFileSync(argsFile, "utf8")).not.toContain("--model");
   });
 
-  it("AC-JR-3 a claude reply that is not the JSON it was asked for is an AI provider error", async () => {
+  it("BR-1535 a claude reply that is not the JSON it was asked for is an AI provider error", async () => {
     const { command } = stubClaude("not json at all");
     const service = serviceFor(new ClaudeCliProvider("claude-cli", { command, args: ["-p"], timeout_ms: 20000 }, runtime()), "sonnet");
     const reply = await service.judgeMilestoneMeasured("a prompt", "A plan");
@@ -117,19 +117,19 @@ describe("judgeIdentity and the reply's model", () => {
     expect(!reply.ok && reply.error.code).toBe("AI_PROVIDER_ERROR");
   });
 
-  it("AC-JR-3 a custom judge command reports no answering model, even with ai.assess.model set", () => {
+  it("BR-1535 a custom judge command reports no answering model, even with ai.assess.model set", () => {
     const { command } = stubClaude("x", "my-judge.sh");
     const service = serviceFor(new ClaudeCliProvider("claude-cli", { command, args: [], timeout_ms: 20000 }, runtime()), "claude-opus-4-8");
     expect(service.judgeIdentity().reportsAnsweringModel).toBe(false);
   });
 
-  it("AC-JR-3 the HTTP provider reports the response's model field", () => {
+  it("BR-1535 the HTTP provider reports the response's model field", () => {
     const http = new HttpAIProvider("http", { url: "http://localhost:1/v1/messages", model: "own-model", max_tokens: 10, timeout_ms: 1000, headers: {} } as never);
     expect(serviceFor(http, "assess-model").judgeIdentity()).toMatchObject({ model: "assess-model", reportsAnsweringModel: true });
     expect(serviceFor(http).judgeIdentity().model).toBeUndefined();
   });
 
-  it("AC-JR-3 the HTTP reply's model field is the model that answered, and a call's model is what the request names", async () => {
+  it("BR-1535 the HTTP reply's model field is the model that answered, and a call's model is what the request names", async () => {
     let requested: unknown;
     const server = Bun.serve({
       port: 0,
@@ -148,7 +148,7 @@ describe("judgeIdentity and the reply's model", () => {
     }
   });
 
-  it("AC-JR-3 the ledger is off from the start, with a cause naming ai.assess.model, when no model is configured; and for a provider that reports none", () => {
+  it("BR-1535 the ledger is off from the start, with a cause naming ai.assess.model, when no model is configured; and for a provider that reports none", () => {
     const { command } = stubClaude("x");
     const claude = serviceFor(new ClaudeCliProvider("claude-cli", { command, args: ["-p"], timeout_ms: 20000 }, runtime())).judgeIdentity();
     const store = { getJudgeVerdict: async () => null, insertJudgeVerdictIfAbsent: async () => null, replaceJudgeVerdictIfEquals: async () => null, pruneJudgeVerdictsNotReadSince: async () => null };

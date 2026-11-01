@@ -1,5 +1,5 @@
 /**
- * @spec_ref spec-a-re-review-reuses-the-judge-s-verdict-for-every-unit (AC-JR-2, BR-1535)
+ * @spec_ref spec-a-re-review-reuses-the-judge-s-verdict-for-every-unit (BR-1535)
  *
  * The assess wiring hands an AI criterion's STATEMENT to the judgment layer, so its verdict key reads statement and rubric together
  * (before this, every AI criterion was keyed by its rubric alone). Hand-built docs; no corpus, no git, no runner.
@@ -41,20 +41,20 @@ async function aiCriteriaOf(statement: string) {
 }
 
 describe("AI criterion statement in the judgment input", () => {
-  it("AC-JR-2 the statement and the rubric both reach the AI criterion input", async () => {
+  it("BR-1535 the statement and the rubric both reach the AI criterion input", async () => {
     expect(await aiCriteriaOf("Readers can follow the plan.")).toEqual([
       { spec: "spec-one", ac: "AC-1", rubric: "The plan reads clearly.", statement: "Readers can follow the plan." },
     ]);
   });
 
-  it("AC-JR-2 a statement edit changes the AI criterion input and nothing else", async () => {
+  it("BR-1535 a statement edit changes the AI criterion input and nothing else", async () => {
     const before = await aiCriteriaOf("Readers can follow the plan.");
     const after = await aiCriteriaOf("Readers can follow the plan and its rollback.");
     expect(after[0]?.statement).not.toBe(before[0]?.statement);
     expect({ ...after[0], statement: "" }).toEqual({ ...before[0], statement: "" });
   });
 
-  it("AC-JR-2 a script criterion is never listed as an AI criterion", async () => {
+  it("BR-1535 a script criterion is never listed as an AI criterion", async () => {
     const ids = (await aiCriteriaOf("s")).map((c) => c.ac);
     expect(ids).toEqual(["AC-1"]);
   });
