@@ -68,7 +68,7 @@ describe("seed templates", () => {
   // reason: the three spec seeds that carry a refusal list moved to version 2 when a refusal entry started naming its own
   // `acs` (an AC `cites` takes rule ids only); every other seed is still its first version. A raised version is a NEW
   // template version in a corpus (`lore migrate templates` proposes it as a revision), never an overwrite.
-  const SEED_VERSIONS: Readonly<Record<string, number>> = { "spec-design.json": 2, "spec-feature.json": 2, "spec-tech.json": 2 };
+  const SEED_VERSIONS: Readonly<Record<string, number>> = { "spec-design.json": 2, "spec-feature.json": 2, "spec-tech.json": 2, "task.json": 2 };
 
   it("each file's doc_type and kind match its file name, and its version is the expected one", () => {
     const mismatched: string[] = [];

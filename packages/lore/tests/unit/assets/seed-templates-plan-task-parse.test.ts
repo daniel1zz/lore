@@ -72,9 +72,9 @@ describe("seed template task", () => {
   beforeEach(() => {
     task = load("task");
   });
-  it("HAPPY: parses as doc_type task v1 with refs-resolve", () => {
+  it("HAPPY: parses as doc_type task v2 with refs-resolve", () => {
     expect(task.doc_type).toBe("task");
-    expect(task.version).toBe(1);
+    expect(task.version).toBe(2);
     expect([...task.checks]).toEqual(["refs-resolve"]);
   });
   it("BOUNDARY: done-contract fields exist; kind is required, system-filled fields are optional", () => {
@@ -97,6 +97,23 @@ describe("seed template task", () => {
     const fields = { kind: "code", objective: "o", spec_ref: "spec-x", ac_scope: ["AC-X-1"], anchors: ["a.ts"], done_condition: "d" };
     const dims = task.dimensions.map((d) => ({ id: d.id, status: "handled" as const, answer: "a" }));
     expect(validateDocument(task, fields, dims).ok).toBe(true);
+  });
+  // spec_ref is required exactly when ac_scope names criteria: a carrier task (lore issue adopt) claims none and has no spec.
+  // A plan parent is not a document field, so "planned" is covered through its ac_scope (a planned task claims criteria).
+  it("HAPPY: a carrier task with empty ac_scope and no spec_ref validates", () => {
+    const fields = { kind: "code", objective: "o", ac_scope: [], anchors: [], done_condition: "d" };
+    const dims = task.dimensions.map((d) => ({ id: d.id, status: "handled" as const, answer: "a" }));
+    expect(validateDocument(task, fields, dims).ok).toBe(true);
+  });
+  it("NEGATIVE: an ad-hoc task with ac_scope and no spec_ref is refused, naming spec_ref", () => {
+    const dims = task.dimensions.map((d) => ({ id: d.id, status: "handled" as const, answer: "a" }));
+    const result = validateDocument(task, { kind: "code", objective: "o", ac_scope: ["AC-X-1"], anchors: [], done_condition: "d" }, dims);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(JSON.stringify(result.error)).toContain("spec_ref");
+  });
+  it("BOUNDARY: a carrier task that names a spec_ref anyway still validates", () => {
+    const dims = task.dimensions.map((d) => ({ id: d.id, status: "handled" as const, answer: "a" }));
+    expect(validateDocument(task, { kind: "code", objective: "o", spec_ref: "spec-x", ac_scope: [], anchors: [], done_condition: "d" }, dims).ok).toBe(true);
   });
   it("NEGATIVE: missing kind and an unknown kind are both refused", () => {
     expect(validateDocument(task, { objective: "o" }, []).ok).toBe(false);
