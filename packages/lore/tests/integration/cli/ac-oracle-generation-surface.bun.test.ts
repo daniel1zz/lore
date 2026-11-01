@@ -1,4 +1,3 @@
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
  * AC-DC-10 — the oracle-generation split is REACHABLE from a user-facing read

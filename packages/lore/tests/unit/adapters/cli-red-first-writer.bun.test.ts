@@ -1,4 +1,3 @@
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
  * `lore red-first <task>` — the CLI author→trip end-to-end oracle for

@@ -1,5 +1,4 @@
 // @reads assets/project/lore-config-template.yaml
-// @reads assets/governance/write-spec-rule.md
 /**
  * End-to-end tests for the `task-create` admission gate's interaction with
  * `lore verify` (spec-declaring-ac-scope-is-required-at-task-creation-so-the),

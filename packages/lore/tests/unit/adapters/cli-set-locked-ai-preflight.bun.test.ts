@@ -1,4 +1,3 @@
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
  * `lore set --refine/--regenerate` on a locked record — the gate refuses BEFORE the paid AI call.

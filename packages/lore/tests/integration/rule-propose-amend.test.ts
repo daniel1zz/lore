@@ -1,6 +1,5 @@
 // @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 // @reads assets/project/lore-config-template.yaml
-// @reads assets/governance/write-spec-rule.md
 /**
  * AC-DN5-3 oracle — `spec-design-necessity-rule-v5-separate-what-a-design-needs-from` (D3, "Amend a proposed rule").
  *

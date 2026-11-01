@@ -1,4 +1,3 @@
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
  * AC-068-10 — compiled-binary regression oracle for SPEC-068's CJK-aware

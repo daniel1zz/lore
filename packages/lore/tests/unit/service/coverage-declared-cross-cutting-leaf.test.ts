@@ -1,5 +1,4 @@
 // @reads packages/lore/src/adapters/cli/**
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
  * BL-D1 under BR-1344: the coverage census measures a cross-cutting leaf (one that declares no command of its own) by the sites

@@ -1,5 +1,4 @@
 // @reads packages/core/src/oracle-file-existence.ts
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 // @reads packages/core/src/acceptance.ts
 // @reads packages/lore/src/service/ac-service.ts

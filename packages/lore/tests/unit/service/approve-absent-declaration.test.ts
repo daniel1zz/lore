@@ -1,6 +1,5 @@
 // @reads packages/lore/src/adapters/cli/**
 // @reads scripts/check-unclaimed-oracle.ts
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
  * Task task-approving-a-baseline-leaf-refuses-while-it-declares-a: a declared command that main's tree lacks is

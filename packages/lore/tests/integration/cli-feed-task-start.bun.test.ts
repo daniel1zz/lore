@@ -1,6 +1,5 @@
 // @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 // @reads assets/project/lore-config-template.yaml
-// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref spec-070-deterministic-task-dispatch-bundle-lore-feed-task-start
  *   §Design D1, D7; §Acceptance Criteria AC-070-7, AC-070-18.
