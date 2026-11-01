@@ -70,7 +70,8 @@ import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { buildProviderRegistry } from "../../../ai/registry.js";
 import { adoptCommand } from "./baseline-adopt.js";
 import { resolveFidelityParentId, runFidelity } from "../../../service/fidelity-sample.js";
-import type { FidelityRecord } from "../../../service/fidelity-sample.js";
+import { fidelityResearchFields, withGeneratedFields } from "../../../service/generated-fields.js";
+import { readFieldsFile, type FieldsFileContent } from "../fields-file.js";
 import { printLine } from "../output.js";
 import { DECISION_FLAG_ARGS, parseDecisionFlags } from "../decision-flags.js";
 import type { DecisionDraft } from "../../../service/decision-gate.js";
@@ -422,25 +423,6 @@ function parseSeed(raw: unknown): number | string | undefined {
   return /^-?\d+$/.test(raw.trim()) ? Number(raw.trim()) : raw.trim();
 }
 
-function renderFidelityContent(record: FidelityRecord): string {
-  const headline = `${(record.faithful_share * 100).toFixed(1)}% of ${record.size} sampled citations judged faithful`;
-  const catchAll = record.catch_all.map((c) => `- ${c.rule_id}: cited by ${c.citing_criteria.length} criteria`).join("\n");
-  return [
-    `# Baseline fidelity sample (${record.mode}, seed ${String(record.seed)})`,
-    "",
-    `${headline} (pool ${record.pool}, ${record.judges} judge(s), ${record.disagreements.length} disagreement(s)).`,
-    "",
-    `not_seen: ${record.not_seen} (sampled items never judged because a cited test file could not be read; not counted as faithful or wrong)`,
-    ...(record.catch_all.length > 0 ? ["", `## Catch-all rules (> ${record.threshold_share * 100}% of citing criteria)`, catchAll] : []),
-    "",
-    "## Record",
-    "```json",
-    JSON.stringify(record, null, 2),
-    "```",
-    "",
-  ].join("\n");
-}
-
 /**
  * Fidelity failures: SPEC-157 AC-BLS2-21 fixes a refused sample (size > pool, bad flag, AI off) at exit 2,
  * whereas `exitCode()` maps VALIDATION_ERROR to 4 - so VALIDATION_ERROR is pinned to 2 here and every other
@@ -485,13 +467,18 @@ async function runFidelityCommand(args: Record<string, unknown>, inv: Invocation
     const share = `${(record.faithful_share * 100).toFixed(1)}% faithful`;
     const parentId = await resolveFidelityParentId(store, record);
     if (!parentId.ok) return reportFidelityFailure(inv, parentId.error, json);
-    const created = await app.corpusService.create({
-      type: "knowledge",
-      parent_id: parentId.value,
-      title: `Baseline fidelity (${record.mode}) seed ${String(record.seed)}: ${share}`,
-      extra: { sub_type: "research" },
-      content: renderFidelityContent(record),
-    });
+    // reason: BR-1528 — created structured through the `knowledge/research` template; the body is rendered from the fields.
+    const created = await app.corpusService.create(
+      withGeneratedFields(
+        {
+          type: "knowledge",
+          parent_id: parentId.value,
+          title: `Baseline fidelity (${record.mode}) seed ${String(record.seed)}: ${share}`,
+          extra: { sub_type: "research" },
+        },
+        fidelityResearchFields(record),
+      ),
+    );
     if (!created.ok) return reportFidelityFailure(inv, created.error, json);
     if (json) {
       printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { record, doc: { id: created.value.id, slug: created.value.slug } } }, null, 2));
@@ -527,6 +514,7 @@ export default defineLoreCommand({
         label: { type: "string", description: "Short display label for the node", required: true },
         title: { type: "string", description: "Document title", required: true },
         "content-file": { type: "string", description: "Read the node body from this file (default: empty body)" },
+        "fields-file": { type: "string", description: "YAML or JSON file with `fields:` and `dimensions:`: the node's structured content, validated against the latest approved template of its kind (`lore template show baseline --kind <root|branch|leaf|...> --blank` prints the skeleton); the body is rendered from the fields, so it excludes --content-file" },
         ...commonArgs,
       },
       async run(context) {
@@ -551,12 +539,19 @@ export default defineLoreCommand({
             }
           }
           const tree = (args.tree as BaselineTree | undefined) ?? "business";
+          let fieldsFile: FieldsFileContent | undefined;
+          if (args["fields-file"] !== undefined) {
+            const readFields = readFieldsFile(args["fields-file"] as string);
+            if (!readFields.ok) return reportFailure(inv, readFields.error, args.json === true);
+            fieldsFile = readFields.value;
+          }
           const input: AddNodeInput = {
             ...(args.tree !== undefined ? { tree } : {}),
             node: args.node as AddNodeInput["node"],
             label: args.label as string,
             title: args.title as string,
             content,
+            ...(fieldsFile !== undefined ? { fields: fieldsFile.fields ?? {}, dimensions: fieldsFile.dimensions ?? [] } : {}),
           };
           const result = await svc.addNode(args.parent as string, input, { by: resolveActor(inv) });
           if (!result.ok) return reportFailure(inv, result.error, args.json === true);

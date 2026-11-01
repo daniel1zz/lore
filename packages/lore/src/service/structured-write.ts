@@ -9,9 +9,9 @@
  * Invariants:
  *   - Called ONLY by `CorpusService` (create, set, writeDoc). Adapters never call it: that is what keeps the write
  *     path single (AC-ST-4's static check scans adapters for store writes).
- *   - A NEW document (other than a template) is always created structured: a create without `extra.fields` is refused,
- *     as is a type/kind with no approved template (BR-1528; no switch, no fallback). An EXISTING document without
- *     `extra.template_ref` is legacy: edits to it are returned untouched (`ok(null)`) until its conversion.
+ *   - A document without `extra.template_ref` is legacy: it is returned untouched (`ok(null)`) unless a create is
+ *     explicitly structured (fields supplied, or `requireStructuredCreate` armed). Nothing is refused for a legacy
+ *     document before its conversion.
  *   - A templated document is validated against its PINNED template version, except when `templateVersion: "latest"`
  *     moves the pin, in which case it is validated against the newest approved version.
  *   - Refs are never resolved here (criteria are declared after create); that is the promote-time check.
@@ -27,6 +27,13 @@ import { documentKindOf, type TemplateService } from "./template-service.js";
 /** What the write path needs to make a document structured. */
 export interface StructuredWriteDeps {
   readonly templates: TemplateService;
+  /**
+   * When true a NEW document of any type must be created structured (BR-1528); when false only a create that
+   * supplies `extra.fields` (or a `template_ref`) is structured and a plain create keeps today's free body.
+   * Source: `workflow.structured_documents.require_create` (default false until the open documents are converted;
+   * a later task deletes the switch after the test migration).
+   */
+  readonly requireStructuredCreate: boolean;
 }
 
 /** A partial update of the structured content: top-level `fields` keys replace, `dimensions` merge by id. */
@@ -102,8 +109,7 @@ async function validateAndRender(
  *
  * @param deps - template access and the create policy
  * @param input - the create request after defaulting (`extra.spec_kind` etc. already applied)
- * @returns `ok(null)` only for a `template` document; `ok({extra, content})` for a structured one; or the refusal (a
- *   create without `extra.fields`, or of a type/kind with no approved template, is always refused: BR-1528)
+ * @returns `ok(null)` for a legacy create (untouched); `ok({extra, content})` for a structured one; or the refusal
  */
 export async function prepareStructuredCreate(
   deps: StructuredWriteDeps,
@@ -112,6 +118,8 @@ export async function prepareStructuredCreate(
   // reason: a template's own substance is validated by the core meta-schema, never by a template document.
   if (input.type === "template") return ok(null);
   const suppliedFields = input.extra["fields"] !== undefined;
+  const suppliedRef = typeof input.extra["template_ref"] === "string";
+  if (!suppliedFields && !suppliedRef && !deps.requireStructuredCreate) return ok(null);
 
   const kind = documentKindOf({ type: input.type, extra: input.extra });
   const resolved = await deps.templates.resolveTemplate(input.type, kind);

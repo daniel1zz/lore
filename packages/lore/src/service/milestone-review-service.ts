@@ -27,7 +27,6 @@ import {
   extractEvidence,
   ok,
   overallMilestoneVerdict,
-  renderMilestoneReviewContent,
   type CreateDocInput,
   type DecisionFinding,
   type DocRecord,
@@ -65,6 +64,7 @@ import {
   type StaleRefreshReport,
   type SuiteRun,
 } from "./milestone-review-inputs.js";
+import { milestoneReviewFields, withGeneratedFields } from "./generated-fields.js";
 
 /** The narrow ports this service needs; `app.ts` binds the real services into them. */
 export interface MilestoneReviewDeps {
@@ -371,13 +371,19 @@ export class MilestoneReviewService {
       diff_source: opts.diffSource,
     };
 
-    const created = await this.deps.createReviewDoc({
-      type: "knowledge",
-      title: `Milestone review: ${bundle.plan.title}`,
-      parent_id: bundle.plan.id,
-      extra: { sub_type: MILESTONE_REVIEW_SUB_TYPE, milestone_review: review },
-      content: renderMilestoneReviewContent(review),
-    });
+    // reason: BR-1528 — created structured through the `knowledge/milestone-review` template (body rendered from the
+    // fields); `extra.milestone_review` stays the typed review plan close reads.
+    const created = await this.deps.createReviewDoc(
+      withGeneratedFields(
+        {
+          type: "knowledge",
+          title: `Milestone review: ${bundle.plan.title}`,
+          parent_id: bundle.plan.id,
+          extra: { sub_type: MILESTONE_REVIEW_SUB_TYPE, milestone_review: review },
+        },
+        milestoneReviewFields(bundle.plan.slug, review),
+      ),
+    );
     if (!created.ok) return created;
     const doc = created.value;
     const linked = await this.deps.link(doc.id, bundle.plan.id, "informs");

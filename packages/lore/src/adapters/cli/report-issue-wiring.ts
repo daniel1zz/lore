@@ -114,6 +114,7 @@ import { exitCli } from "./cli-exit.js";
 import {
   err,
   ok,
+  validationError,
   VENDOR_INTAKE_REPO,
   type FeedbackConfig,
   type IssueSeverity,
@@ -123,6 +124,8 @@ import {
   type Result,
 } from "@lore/core";
 import type { CorpusService } from "../../service/corpus-service.js";
+import { renderIssueReportBody } from "../../service/issue-report-body.js";
+import type { TemplateService } from "../../service/template-service.js";
 import { checkReproCommand, type ReproCheck } from "../../service/report-issue-repro.js";
 import { GhRunner, createNodeGhExecFile } from "../../service/gh-runner.js";
 import { GitHubIntakePort, type GithubListedIssue } from "../../service/github-intake-port.js";
@@ -130,6 +133,22 @@ import { joinIssueStatuses, type IssueStatusRow } from "../../service/github-iss
 import { ReceiptLogV2, type ReceiptV2Entry, type ReceiptV2ReadResult } from "../../service/receipt-log-v2.js";
 import { findLoreDbPath, type CorpusLocator } from "./corpus-resolution.js";
 import type { CliIo } from "./output.js";
+
+/**
+ * The corpus's template reader for a filing context ({@link GithubFilingContext.templates}).
+ *
+ * @param app - the composed App
+ * @param io - where the wiring error is written
+ * @returns the App's `TemplateService`
+ * @throws exitCli(1) when the App was composed without one (an internal wiring error, never a user condition)
+ */
+export function requireTemplateService(app: { readonly templateService?: TemplateService | undefined }, io: CliIo): TemplateService {
+  if (app.templateService === undefined) {
+    io.stderr.write("Internal error: TemplateService not wired on App\n");
+    return exitCli(1);
+  }
+  return app.templateService;
+}
 
 /**
  * Resolves the CALLING corpus's own root — the directory containing
@@ -464,6 +483,14 @@ export interface GithubFilingContext {
   /** The reporter's OWN corpus service — used ONLY to resolve `reporter_root_prd` (this corpus's root PRD), never the upstream's. */
   readonly corpusService: CorpusService;
   /**
+   * The reporter's corpus template reader: the report is validated against the approved `issue-report` template and its
+   * GitHub body is rendered from it ({@link renderIssueReportBody}); a corpus without that template refuses the filing.
+   * Optional in the TYPE only so a composition site not yet migrated still compiles; {@link fileGithubIssue} refuses a
+   * context without it (loud, nothing filed) — there is no hand-built-body fallback. Every composition site passes
+   * {@link requireTemplateService}.
+   */
+  readonly templates?: TemplateService;
+  /**
    * The filing actor: the name of the invocation's known party (an agent run's session name, a registered human's
    * or a key's own name). Required, mirroring `RawReporterIdentity.actor`'s own required-string shape.
    */
@@ -669,36 +696,6 @@ async function resolveLocalRootPrd(
   return ok(rootPrd ? { id: rootPrd.id, slug: rootPrd.slug } : null);
 }
 
-/**
- * Fence for a repro command: `max(3, longest backtick run in the command + 1)` backticks, so no command can
- * close its own block early (D5).
- */
-function fenceFor(command: string): string {
-  const longestRun = Math.max(0, ...(command.match(/`+/g) ?? []).map((run) => run.length));
-  return "`".repeat(Math.max(3, longestRun + 1));
-}
-
-/**
- * Joins the report's free-form fields into ONE body block — the consumer-authority content the Per-Field-Authority table assigns to the issue body (never the front-matter block).
- * Order: description, Expected, Actual, Repro command (fenced), Repro steps, Suggested fix, Refs, [Context], then the caller's `Reported by:`.
- * A field that is absent contributes no heading; each marker appears once.
- */
-function buildIssueDescriptionBlock(input: GithubReportInput): string {
-  const lines = [input.description, "", `**Expected:** ${input.expected}`, `**Actual:** ${input.actual}`];
-  if (input.repro_command !== undefined) {
-    const fence = fenceFor(input.repro_command);
-    lines.push("", "**Repro command:**", fence, input.repro_command, fence);
-  }
-  if (input.repro_steps !== undefined) lines.push("", "**Repro steps:**", input.repro_steps);
-  if (input.suggested_fix !== undefined) lines.push("", "**Suggested fix:**", input.suggested_fix);
-  if (input.refs !== undefined && input.refs.length > 0) {
-    lines.push("", "**Refs:**", ...input.refs.map((ref) => `- ${ref}`));
-  }
-  // reason: `**Context:**` (attached test-file spec refs / header, AC-RI-3/4) comes last, right before `Reported by:`.
-  if (input.context !== undefined) lines.push("", input.context);
-  return lines.join("\n");
-}
-
 /** The slice of an Invocation the repro-command check reads: its PATH (never the process default) and its cwd. */
 export interface ReproCheckEnvironment {
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -844,9 +841,16 @@ export async function fileGithubIssue(
     actor: ctx.actor,
   };
 
+  // reason: BR-1528 — the body is rendered from the approved `issue-report` template (validated, fail loud), not hand-built.
+  if (ctx.templates === undefined) {
+    return err(validationError("templates", "the filing context carries no template reader, so the report cannot be rendered from the issue-report template (internal wiring error: nothing was filed)", undefined, "BR-1528"));
+  }
+  const body = await renderIssueReportBody(ctx.templates, input);
+  if (!body.ok) return body;
+
   const fileResult = await port.fileIssue({
     title: input.title,
-    description: buildIssueDescriptionBlock(input),
+    description: body.value,
     severity: input.severity,
     category: input.category,
     tags: input.tags,

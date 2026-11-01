@@ -6,6 +6,10 @@
  *     against the corpus by title, create missing specs, report drift.
  *
  * Invariants:
+ *   - A NEW spec is created structured (BR-1528): the file's front matter carries `fields:` (and `dimensions:`, optional
+ *     `spec_kind:`), its markdown body must be empty because the body is rendered from the fields, and a file with no
+ *     `fields:` is reported as a per-file error (loud, nothing created) instead of being imported as a free body. A file
+ *     whose title already matches a corpus spec is compared as before (body vs body; fields vs fields when it has fields).
  *   - Stateless. The only dependency is CorpusService (no AI, no direct store access).
  *   - Never overwrites corpus content — drift is reported, not auto-resolved.
  *   - Idempotent — re-running on the same corpus produces 0 creates, only matches.
@@ -91,6 +95,15 @@ interface ParsedSpec {
   priority: Priority;
   /** Frontmatter tags array; falls back to [] if absent. */
   tags: string[];
+  /**
+   * Frontmatter `fields:` (BR-1528): the spec's structured content, validated by the create path against the approved
+   * template of its kind. Absent for a legacy free-body file, which is no longer created (the file is reported).
+   */
+  fields: Record<string, unknown> | undefined;
+  /** Frontmatter `dimensions:` answers; `[]` when the file declares `fields` but no dimensions. */
+  dimensions: unknown[];
+  /** Frontmatter `spec_kind:` (selects the template's kind); absent = the create path's default kind. */
+  specKind: string | undefined;
 }
 
 // ─── Valid priority values for membership check ───────────────────────────────
@@ -170,9 +183,12 @@ export class SyncDocsService {
           fileErrors.push({ file: spec.path, error: `get failed: ${getResult.error.code}` });
           continue;
         }
-        const existingContent = getResult.value.doc.content;
+        const existingDoc = getResult.value.doc;
+        // reason: a structured file's body is empty by contract (the corpus body is rendered), so the comparison is
+        // fields against fields: the stored `extra.fields` against the file's, as stable JSON.
+        const existingContent = spec.fields === undefined ? existingDoc.content : stableJson(existingDoc.extra["fields"] ?? null);
 
-        const fileNormalized = canonicaliseBody(spec.body);
+        const fileNormalized = canonicaliseBody(spec.fields === undefined ? spec.body : stableJson(spec.fields));
         const corpusNormalized = canonicaliseBody(existingContent);
 
         if (fileNormalized === corpusNormalized) {
@@ -205,12 +221,24 @@ export class SyncDocsService {
         continue;
       }
 
+      if (spec.fields === undefined || spec.body.trim() !== "") {
+        fileErrors.push({
+          file: spec.path,
+          error:
+            spec.fields === undefined
+              ? "create failed: a new spec is created structured (BR-1528) but the file has no `fields:` in its front matter — " +
+                "add `fields:` and `dimensions:` (`lore template show spec --kind <kind> --blank` prints the skeleton)"
+              : "create failed: the file declares `fields:` so its text is rendered from them; its markdown body must be empty",
+        });
+        continue;
+      }
+
       const createResult = await this.corpus.create({
         type: "spec",
         title: spec.title,
-        content: spec.body,
         priority: spec.priority,
         tags: spec.tags,
+        extra: { ...(spec.specKind !== undefined ? { spec_kind: spec.specKind } : {}), fields: spec.fields, dimensions: spec.dimensions },
       });
 
       if (!createResult.ok) {
@@ -364,6 +392,15 @@ function parseSpecFile(absPath: string): Result<ParsedSpec, LoreError> {
   const ignored_parent_hint: string | undefined =
     typeof record["parent"] === "string" ? record["parent"] : undefined;
 
+  const fieldsRaw = record["fields"];
+  if (fieldsRaw !== undefined && (fieldsRaw === null || typeof fieldsRaw !== "object" || Array.isArray(fieldsRaw))) {
+    return err({ code: "VALIDATION_ERROR", field: "fields", message: `${absPath}: frontmatter 'fields' must be a YAML mapping`, rule: "BR-791" });
+  }
+  const dimensionsRaw = record["dimensions"];
+  if (dimensionsRaw !== undefined && !Array.isArray(dimensionsRaw)) {
+    return err({ code: "VALIDATION_ERROR", field: "dimensions", message: `${absPath}: frontmatter 'dimensions' must be a YAML list`, rule: "BR-791" });
+  }
+
   return ok({
     path: absPath,
     title,
@@ -371,7 +408,21 @@ function parseSpecFile(absPath: string): Result<ParsedSpec, LoreError> {
     ignored_parent_hint,
     priority,
     tags,
+    fields: fieldsRaw as Record<string, unknown> | undefined,
+    dimensions: (dimensionsRaw as unknown[] | undefined) ?? [],
+    specKind: typeof record["spec_kind"] === "string" ? record["spec_kind"] : undefined,
   });
+}
+
+/** JSON with object keys sorted, so two equal field trees compare equal whatever their key order. */
+function stableJson(value: unknown): string {
+  const sorted = (node: unknown): unknown =>
+    Array.isArray(node)
+      ? node.map(sorted)
+      : node !== null && typeof node === "object"
+        ? Object.fromEntries(Object.entries(node as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, sorted(v)]))
+        : node;
+  return JSON.stringify(sorted(value), null, 2);
 }
 
 // ─── Corpus Lookup Helpers ───────────────────────────────────────────────────

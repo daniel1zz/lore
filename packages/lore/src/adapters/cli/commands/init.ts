@@ -12,10 +12,9 @@
  * initialised `config.yaml`. The user's decision (BR-807 as modified) is that a fresh corpus carries
  * the template; such fixtures must merge their overrides instead of appending.
  *
- * The only documents it writes are the approved template documents, one per shipped seed in `assets/templates/`
- * (BR-807 as modified; BR-1528: a type/kind with no approved template is refused at create). The rule the spec-create
- * gate feeds is the approved corpus template of the spec's kind. Seeding needs a known party (a write is refused
- * without one); an invocation with none seeds nothing, says so, and `lore migrate templates --apply` seeds later.
+ * It writes no rule document (BR-807): the rule the spec-create gate feeds is the approved corpus template of the spec's
+ * kind (the spec-rules document and the rule file shipped with the binary are retired), and the template documents
+ * themselves are seeded separately from `assets/templates/`.
  *
  * Side-effect class: IO (fs writes, SQLite, one rename).
  */
@@ -32,8 +31,6 @@ import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import { initCorpusAt } from "../../../flows/init-corpus.js";
 import { resolveAssetsRoot } from "../setup-args.js";
-import { readShippedTemplateSeeds } from "../template-seeds.js";
-import { TemplateSeedService } from "../../../service/template-seed-service.js";
 
 // packages/lore/src/adapters/cli/commands/init.ts -> repo root is 6 levels up (same as setup.ts).
 const MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
@@ -77,36 +74,6 @@ async function registerInvokingMainRun(app: App, inv: Invocation): Promise<void>
 type ArmOutcome =
   | { readonly kind: "not_armed"; readonly reason: "not_a_git_repo" | "no_known_party" }
   | { readonly kind: "armed"; readonly arming_rev: number; readonly status: string; readonly would_become_unbound_rows: number };
-
-/** How the template seeding ended: written (how many), or not attempted because the invocation is no known party. */
-type SeedingOutcome =
-  | { readonly kind: "seeded"; readonly count: number }
-  | { readonly kind: "not_seeded"; readonly reason: "no_known_party" };
-
-/**
- * Seed one approved template per shipped seed into the corpus `init` is building (BR-807 as modified: the only
- * documents a fresh corpus carries are its template documents; BR-1528: a type/kind with no approved template is
- * refused at create, so a corpus without them could create nothing).
- *
- * @param app - the App over the staging corpus
- * @param assetsRoot - the resolved `assets/` root
- * @param by - the writing actor
- * @returns the number of templates seeded, or the first failure (it aborts the scaffold: nothing is left behind)
- */
-async function seedShippedTemplates(app: App, assetsRoot: string, by: string): Promise<Result<number, LoreError>> {
-  const seeds = readShippedTemplateSeeds(assetsRoot);
-  if (!seeds.ok) return seeds;
-  if (app.templateService === undefined) {
-    return err({ code: "STORE_ERROR", message: "lore init: templateService is not wired on this App (internal wiring error)" });
-  }
-  const seeded = await new TemplateSeedService(app.templateService, app.corpusService).apply(seeds.value, { by });
-  if (!seeded.ok) return seeded;
-  const blocked = seeded.value.find((outcome) => outcome.action === "blocked");
-  if (blocked !== undefined) {
-    return err({ code: "STORE_ERROR", message: `lore init: seeding ${blocked.slot} was blocked: ${blocked.reason}` });
-  }
-  return ok(seeded.value.filter((outcome) => outcome.action === "seeded").length);
-}
 
 export default defineLoreCommand({
   meta: {
@@ -173,34 +140,6 @@ export default defineLoreCommand({
     // `lore run register`.
     const insideGit = isInsideGitRepository(cwd);
     const armedBox: { outcome?: ArmOutcome } = {};
-    const seedingBox: { outcome?: SeedingOutcome } = {};
-
-    const armStateBinding = async (app: App, knownParty: boolean): Promise<Result<void, LoreError>> => {
-      if (!insideGit) {
-        armedBox.outcome = { kind: "not_armed", reason: "not_a_git_repo" };
-        return ok(undefined);
-      }
-      if (!knownParty) {
-        armedBox.outcome = { kind: "not_armed", reason: "no_known_party" };
-        return ok(undefined);
-      }
-      const stateBinding = app.stateBindingService;
-      if (stateBinding === undefined) {
-        return err({
-          code: "STORE_ERROR",
-          message: "stateBindingService is not wired on this App (internal wiring error)",
-        });
-      }
-      const armed = await stateBinding.arm({ actor: resolveActor(inv), nowIso: new Date().toISOString() });
-      if (!armed.ok) return armed;
-      armedBox.outcome = {
-        kind: "armed",
-        arming_rev: armed.value.arming_rev,
-        status: armed.value.status,
-        would_become_unbound_rows: armed.value.status === "armed" ? armed.value.report.would_become_unbound_rows : 0,
-      };
-      return ok(undefined);
-    };
 
     const scaffold = await initCorpusAt(cwd, ambientOfInvocation(inv), {
       name: projectName,
@@ -209,20 +148,31 @@ export default defineLoreCommand({
       writeContext: { identity: inv.identity },
       onDatabaseReady: async (app) => {
         await registerInvokingMainRun(app, inv);
-        const verifiedParty = inv.identity.claimed === null ? undefined : await app.verifiedInvocationIdentity?.();
-        const knownParty = inv.identity.claimed !== null && (verifiedParty === undefined || verifiedParty.ok);
-        const armed = await armStateBinding(app, knownParty);
-        if (!armed.ok) return armed;
-        // reason: seeding runs AFTER the arm so the template documents are stamped with the state binding like any
-        // later write, and are not counted as pre-arming rows. A write needs a known party (BR-1351), so an
-        // invocation with none seeds nothing and says so (`lore migrate templates --apply` seeds later).
-        if (!knownParty) {
-          seedingBox.outcome = { kind: "not_seeded", reason: "no_known_party" };
+        if (!insideGit) {
+          armedBox.outcome = { kind: "not_armed", reason: "not_a_git_repo" };
           return ok(undefined);
         }
-        const seeded = await seedShippedTemplates(app, assetsRoot, resolveActor(inv));
-        if (!seeded.ok) return seeded;
-        seedingBox.outcome = { kind: "seeded", count: seeded.value };
+        const verifiedParty = inv.identity.claimed === null ? undefined : await app.verifiedInvocationIdentity?.();
+        const knownParty = inv.identity.claimed !== null && (verifiedParty === undefined || verifiedParty.ok);
+        if (!knownParty) {
+          armedBox.outcome = { kind: "not_armed", reason: "no_known_party" };
+          return ok(undefined);
+        }
+        const stateBinding = app.stateBindingService;
+        if (stateBinding === undefined) {
+          return err({
+            code: "STORE_ERROR",
+            message: "stateBindingService is not wired on this App (internal wiring error)",
+          });
+        }
+        const armed = await stateBinding.arm({ actor: resolveActor(inv), nowIso: new Date().toISOString() });
+        if (!armed.ok) return armed;
+        armedBox.outcome = {
+          kind: "armed",
+          arming_rev: armed.value.arming_rev,
+          status: armed.value.status,
+          would_become_unbound_rows: armed.value.status === "armed" ? armed.value.report.would_become_unbound_rows : 0,
+        };
         return ok(undefined);
       },
     });
@@ -238,17 +188,6 @@ export default defineLoreCommand({
 
     const outcome = armedBox.outcome;
     if (outcome === undefined) return fail("internal wiring error: the arm step did not report an outcome");
-    const seeding = seedingBox.outcome;
-    if (seeding === undefined) return fail("internal wiring error: the template seeding step did not report an outcome");
-    const templatesJson = seeding.kind === "seeded" ? { seeded: seeding.count } : { seeded: 0, reason: seeding.reason };
-    const seedingLine = (): void => {
-      printLine(
-        inv.io.stdout,
-        seeding.kind === "seeded"
-          ? `Seeded ${String(seeding.count)} approved templates (one per shipped seed).`
-          : "templates not seeded: no known party yet; run `lore migrate templates --apply` once a session is open (a create is refused until its type has an approved template)",
-      );
-    };
     if (outcome.kind === "not_armed") {
       if (args.json) {
         printLine(
@@ -260,7 +199,6 @@ export default defineLoreCommand({
               project: projectName,
               author: args.author,
               state_binding: { armed: false, reason: outcome.reason },
-              templates: templatesJson,
             },
           }),
         );
@@ -272,7 +210,6 @@ export default defineLoreCommand({
             : "state binding not armed: no known party yet (a write needs an attested agent run registered in this corpus, or a human session); " +
                 "run `lore session start --human <name>` (or `lore run register`), then `lore audit arm --confirm`",
         );
-        seedingLine();
         footer();
       }
       return 0;
@@ -293,7 +230,6 @@ export default defineLoreCommand({
               arming_rev: outcome.arming_rev,
               would_become_unbound_rows: outcome.would_become_unbound_rows,
             },
-            templates: templatesJson,
           },
         }),
       );
@@ -302,7 +238,6 @@ export default defineLoreCommand({
         inv.io.stdout,
         `State binding armed (audit row id ${outcome.arming_rev}); ${outcome.would_become_unbound_rows} existing rows affected.`,
       );
-      seedingLine();
       footer();
     }
     return 0;

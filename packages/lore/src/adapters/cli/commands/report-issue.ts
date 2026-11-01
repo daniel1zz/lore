@@ -102,6 +102,7 @@ import {
   fileGithubIssue,
   formatRepeatCheckWarning,
   formatReproRefusal,
+  requireTemplateService,
   resolveConsumerCorpusRoot,
 } from "../report-issue-wiring.js";
 import { invocationOf } from "../command-invocation.js";
@@ -427,6 +428,7 @@ export default defineLoreCommand({
         {
           consumerCorpusRoot: corpusRoot,
           corpusService: app.corpusService,
+          templates: requireTemplateService(app, inv.io),
           actor,
           home: inv.paths.home,
           env: inv.env,
