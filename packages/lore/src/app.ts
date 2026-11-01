@@ -550,7 +550,7 @@ export interface App {
    */
   retiredAcService?: RetiredAcService;
   /** The store's lease verbs, for the post-landing review batch lease (BR-1379); optional like the other late additions. */
-  reviewLeaseStore?: Pick<StoreInterface, "acquireLease" | "takeOverLease" | "renewLease" | "releaseLease" | "readLease" | "appendAuditEntry">;
+  reviewLeaseStore?: Pick<StoreInterface, "acquireLease" | "takeOverLease" | "renewLease" | "releaseLease" | "readLease">;
   /**
    * SeatService — thin `GitPort` orchestration for the `lore seat` verb family
    * (`enter`/`list`/`resume`/`remove`, SPEC-057). Wired here with the REAL `GitPort`
@@ -1186,7 +1186,7 @@ function buildAppFromSqlite(
     // envPassthroughAll (resolved config) + processEnv (a `process.env` snapshot
     // captured HERE at composition time, mirroring how `repoRoot` is captured from
     // `process.cwd()` — VerifyRunnerService itself never reads `process.env`).
-    suiteResultService: buildSuiteResultService(store),
+    suiteResultService: buildSuiteResultService(store, corpusService),
     verifyRunnerService: new VerifyRunnerService(
       corpusService.getPlanBundle.bind(corpusService),
       taskWorkflowService.recordVerifiedEvidence.bind(taskWorkflowService),
@@ -1635,7 +1635,7 @@ function buildAppFromTurso(
     // CorpusService/TaskWorkflowService/the bun-only executor module directly
     // (SPEC-039 §2 D3). SPEC-039 §M2 additions — see `buildAppFromSqlite`'s
     // identical comment.
-    suiteResultService: buildSuiteResultService(store),
+    suiteResultService: buildSuiteResultService(store, corpusService),
     verifyRunnerService: new VerifyRunnerService(
       corpusService.getPlanBundle.bind(corpusService),
       taskWorkflowService.recordVerifiedEvidence.bind(taskWorkflowService),
@@ -1776,10 +1776,11 @@ function buildDecisionRechecker(store: StoreInterface, ambient: AppAmbient): (bu
  * store) single-flight per commit. Each acquisition adds a random suffix to the holder, so two lookups in this process
  * still exclude each other.
  */
-function buildSuiteResultService(store: StoreInterface): SuiteResultService {
+function buildSuiteResultService(store: StoreInterface, corpusService: CorpusService): SuiteResultService {
   return new SuiteResultService({
     store,
-    leases: new ReviewLeases(store, `app:${String(process.pid)}`),
+    // reason: the takeover audit row goes through the one audit write path (CorpusService.appendAudit), never the store.
+    leases: new ReviewLeases(store, `app:${String(process.pid)}`, Date.now, undefined, undefined, undefined, (request) => corpusService.appendAudit(request)),
     now: () => new Date().toISOString(),
     newId: () => `suite-${randomUUID()}`,
     clockMs: () => performance.now(),

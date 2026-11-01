@@ -1439,7 +1439,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       listRows: async () => this.store.listAuditRowsByAction(KNOWN_DEFECT_ISSUE_WRITES_AUDIT_ACTION),
       writer: this.knownDefectIssueWriter,
       // reason: BR-1511 — each issue's pending writes are retried under `issue-write:<n>` (the store carries the lease rows).
-      leases: new ReviewLeases(this.store, by ?? "known-defect-retry"),
+      leases: new ReviewLeases(this.store, by ?? "known-defect-retry", Date.now, undefined, undefined, undefined, (request) => this.appendAudit(request)),
       appendRow: (details) =>
         this.appendAudit({
           action: KNOWN_DEFECT_ISSUE_WRITES_AUDIT_ACTION,

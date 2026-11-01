@@ -29,6 +29,9 @@ import type { LocalProcessIdentity, ProcessProbe } from "../../src/service/revie
 import type { ReviewTestSlots } from "../../src/service/review-test-slots.js";
 import { coverFailedDimensions } from "../../src/service/milestone-review-inputs.js";
 import type { CommitSuiteRunnerPort } from "../../src/service/suite-result-service.js";
+import { CorpusService } from "../../src/service/corpus-service.js";
+import { RecordLockService } from "../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../src/service/gate-enforcer.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { noDecisionLog } from "../helpers/gate-acceptance-log.js";
 
@@ -53,6 +56,7 @@ const identityOf = (pid: number, startIso = START_A, machineId = MACHINE): Local
 class World {
   readonly dir = mkdtempSync(join(tmpdir(), "lore-machine-cap-"));
   readonly store = new SQLiteStore(join(this.dir, "corpus.db"));
+  readonly corpus = new CorpusService(this.store, new RecordLockService(this.store, new GateEnforcer(undefined)));
   /** pid -> alive process with its start time; a pid absent is "no such process" (dead). */
   readonly processes = new Map<number, { startTime: string }>();
   readonly probe: ProcessProbe = async (pid) => {
@@ -63,7 +67,7 @@ class World {
   /** One process's leases; a live process is registered so the probe sees it. `null` identity = no machine identity. */
   leasesFor(identity: LocalProcessIdentity | null, base = "proc"): ReviewLeases {
     if (identity !== null) this.processes.set(identity.pid, { startTime: identity.startIso });
-    return new ReviewLeases(this.store, base, () => T0, () => () => undefined, async () => undefined, { identity: async () => identity, probe: this.probe });
+    return new ReviewLeases(this.store, base, () => T0, () => () => undefined, async () => undefined, { identity: async () => identity, probe: this.probe }, (request) => this.corpus.appendAudit(request));
   }
 
   close(): void {

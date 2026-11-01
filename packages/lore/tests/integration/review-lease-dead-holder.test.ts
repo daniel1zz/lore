@@ -22,6 +22,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { err, ok } from "@lore/core";
 import { ReviewLeases, REVIEW_LEASE_EXPIRY_MS, type LeaseOutcome } from "../../src/service/review-batch-lease.js";
 import { formatHolder, isHolderProvablyDead, parseHolder, probeLocalProcess, resolveLocalIdentity, type LocalProcessIdentity, type ProcessProbe } from "../../src/service/review-lease-liveness.js";
+import { CorpusService } from "../../src/service/corpus-service.js";
+import { RecordLockService } from "../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../src/service/gate-enforcer.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 
 const T0 = Date.parse("2026-10-31T12:00:00.000Z");
@@ -35,6 +38,7 @@ class World {
   readonly dir = mkdtempSync(join(tmpdir(), "lore-dead-holder-"));
   readonly dbPath = join(this.dir, "corpus.db");
   readonly store = new SQLiteStore(this.dbPath);
+  readonly corpus = new CorpusService(this.store, new RecordLockService(this.store, new GateEnforcer(undefined)));
   /** pid -> what the probe answers; a pid absent from the map is "no such process". */
   readonly processes = new Map<number, { startTime: string } | "probe-error">();
   readonly probe: ProcessProbe = async (pid) => {
@@ -46,7 +50,7 @@ class World {
 
   /** A `ReviewLeases` for one process identity (`null` = old form: this process carries no machine id). */
   leasesFor(identity: LocalProcessIdentity | null, base = "app"): ReviewLeases {
-    return new ReviewLeases(this.store, base, () => T0, () => () => undefined, async () => undefined, { identity: async () => identity, probe: this.probe });
+    return new ReviewLeases(this.store, base, () => T0, () => () => undefined, async () => undefined, { identity: async () => identity, probe: this.probe }, (request) => this.corpus.appendAudit(request));
   }
 
   auditRows(): { action: string; details: Record<string, unknown> }[] {
@@ -177,7 +181,7 @@ describe("AC-DL-1: every other holder stays busy until expiry", () => {
   it("an expired lease is still taken over by the plain path with no takeover audit row", async () => {
     const w = world();
     await acquired(w.leasesFor(identityOf("other-machine", 111, START_A)));
-    const later = new ReviewLeases(w.store, "app", () => T0 + REVIEW_LEASE_EXPIRY_MS + 1, () => () => undefined, async () => undefined, { identity: async () => identityOf("m1", 222, START_B), probe: w.probe });
+    const later = new ReviewLeases(w.store, "app", () => T0 + REVIEW_LEASE_EXPIRY_MS + 1, () => () => undefined, async () => undefined, { identity: async () => identityOf("m1", 222, START_B), probe: w.probe }, (request) => w.corpus.appendAudit(request));
     const outcome = await outcomeOf(later);
     expect(outcome.state).toBe("held");
     expect(w.auditRows()).toHaveLength(0);
