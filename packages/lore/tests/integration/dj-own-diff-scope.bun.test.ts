@@ -77,9 +77,12 @@ describe("AC-DJ-1 — the own diff is judged against the other live claims", () 
     expect(refused.stderr).toContain(taskU);
     expect(f.observableState()).toBe(before);
 
-    // U's own branch lands, and the landing archives U (its contract oracles ran at the landing, AC-DCS2-1): nothing is held any more
+    // U's own branch lands; the integrating session is not U's holder, so the done walk leaves U to its fresh claim
+    // (floor foreign-claim) and the holder archives it, as before: nothing is held any more
     const yLanded = f.integrate("branch-y");
     expect(yLanded.exitCode, yLanded.text).toBe(0);
+    expect(yLanded.text).toContain("[floor: foreign-claim]");
+    f.archive(taskU);
     expect(statusOf(f, taskU)).toBe("archived");
 
     const landed = f.integrate("branch-x2");
