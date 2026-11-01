@@ -212,28 +212,6 @@ export function specKindValid(kind: string | undefined): PredicateResult {
   return { ok: true };
 }
 
-/** Matches a markdown level-2 heading line (`## ...`) anywhere in the content. */
-const SKELETON_HEADING_PATTERN = /^##\s/m;
-
-/**
- * Checks whether `content` contains the minimal document skeleton the gate requires:
- * at least one level-2 markdown heading line (`## `).
- *
- * @param content - The candidate spec body (markdown).
- * @returns `{ok: true}` when a `## ` heading line is present anywhere in `content`;
- *   `{ok: false, reason: "MISSING_SKELETON"}` otherwise (including empty content).
- * @example
- * hasSkeleton("## Overview\nx");  // => { ok: true }
- * hasSkeleton("no heading here"); // => { ok: false, reason: "MISSING_SKELETON" }
- * hasSkeleton("");                // => { ok: false, reason: "MISSING_SKELETON" }
- */
-export function hasSkeleton(content: string): PredicateResult {
-  if (SKELETON_HEADING_PATTERN.test(content)) {
-    return { ok: true };
-  }
-  return { ok: false, reason: "MISSING_SKELETON" };
-}
-
 /**
  * Checks whether `upstream` is a legal, sufficiently-approved upstream document for
  * a gated write (e.g. a plan/task being promoted against its parent spec).

@@ -348,7 +348,7 @@ describe("config-escape", () => {
     }
   });
 
-  it("disabling ONLY ac_quantifiable leaves the rest of spec-create's checks (e.g. skeleton) enforced", async () => {
+  it("disabling ONLY ac_quantifiable leaves the rest of spec-create's checks (e.g. a spec takes no parent) enforced", async () => {
     const config = {
       project: { name: "t", author: "t" },
       workflow: { gates: { "spec-create": { ac_quantifiable: { enabled: false } } } },
@@ -357,14 +357,15 @@ describe("config-escape", () => {
     const prd = await createPrd(corpusService);
     const result = await corpusService.create({
       type: "spec",
-      title: "No Skeleton",
+      title: "Has A Parent",
       content: "no heading at all",
+      parent_id: prd.id,
       extra: { acceptance_criteria: [BAD_AC] },
     } as CreateDocInput);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       const message = (result.error as { message?: string }).message ?? "";
-      expect(message).toContain("MISSING_SKELETON");
+      expect(message).toContain("a spec takes no parent");
       expect(message).not.toContain("AC_NOT_QUANTIFIABLE");
     }
   });

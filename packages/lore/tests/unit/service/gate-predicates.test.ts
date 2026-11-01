@@ -25,7 +25,6 @@ import {
 import {
   parentLegal,
   specKindValid,
-  hasSkeleton,
   upstreamApproved,
   upstreamHasAcceptanceCriteria,
   acCountMeetsFloor,
@@ -121,31 +120,12 @@ describe("gate-predicates", () => {
     });
   });
 
-  describe("hasSkeleton", () => {
-    // HAPPY
-    it("passes when content contains a level-2 markdown heading", () => {
-      expect(hasSkeleton("## Overview\nx")).toEqual({ ok: true });
-    });
-
-    // NEGATIVE
-    it("fails with MISSING_SKELETON when content has no heading at all", () => {
-      expect(hasSkeleton("no heading here")).toEqual({
-        ok: false,
-        reason: "MISSING_SKELETON",
-      });
-    });
-
-    // BOUNDARY
-    it("fails with MISSING_SKELETON for empty content", () => {
-      expect(hasSkeleton("")).toEqual({ ok: false, reason: "MISSING_SKELETON" });
-    });
-
-    it("fails with MISSING_SKELETON when only a level-1 heading is present (not '## ')", () => {
-      expect(hasSkeleton("# Title\nx")).toEqual({ ok: false, reason: "MISSING_SKELETON" });
-    });
-
-    it("passes when the '## ' heading is not on the first line", () => {
-      expect(hasSkeleton("intro text\n## Overview\nx")).toEqual({ ok: true });
+  // REGRESSION — BR-4's `hasSkeleton` is retired (a heading count is no longer the structure check; the template is,
+  // spec-every-document-is-stored-as-structured-fields-validated-by). The predicate must not come back.
+  describe("hasSkeleton retired", () => {
+    it("the module exports no hasSkeleton predicate", async () => {
+      const mod = (await import("../../../src/service/gate-predicates.js")) as Record<string, unknown>;
+      expect(mod["hasSkeleton"]).toBeUndefined();
     });
   });
 
@@ -359,7 +339,7 @@ describe("gate-predicates", () => {
     });
   });
 
-  // STATE dimension (parentLegal / specKindValid / hasSkeleton): N/A. Those three
+  // STATE dimension (parentLegal / specKindValid): N/A. Those two
   // predicates are pure functions of their arguments with no persisted or mutable
   // state to transition. Exempt per ~/.claude/skills/test/ (pure-function modules
   // carry no STATE dimension). upstreamApproved / upstreamHasAcceptanceCriteria DO
