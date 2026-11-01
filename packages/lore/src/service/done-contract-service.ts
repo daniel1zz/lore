@@ -220,7 +220,7 @@ export function deriveWriteSetAdditions(input: WriteSetAdditionsInput): DoneCont
  * @param creates - the files declared with `--creates` (`extra.creates_anchors`)
  * @param existsAtBase - whether a path exists at the compile commit
  * @example
- * anchorAbsentCauses(["tests/missing.test.ts"], [], () => false).map((cause) => cause.code) // => ["anchor-absent"]
+ * // a test file absent at the base tip and not declared with --creates yields one cause, code "anchor-absent"
  */
 export function anchorAbsentCauses(testFiles: readonly string[], creates: readonly string[], existsAtBase: (path: string) => boolean): UncompilableCause[] {
   const causes: UncompilableCause[] = [];
