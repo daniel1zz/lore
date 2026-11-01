@@ -357,6 +357,12 @@ describe("lore gate spec-create: no approved template", () => {
   beforeEach(() => {
     tmpDir = makeTempDir("no-rule-doc");
     initCorpus(tmpDir);
+    // reason: `lore init` seeds one approved template per shipped seed (BR-807 as modified), so the corpus whose spec has
+    // no approved template is made by removing the four spec templates (a soft delete: the slot then resolves nothing).
+    for (const kind of ["design", "domain-overview", "feature", "tech"]) {
+      const removed = runLore(["delete", `spec-${kind}-template`, "--confirm"], tmpDir);
+      if (removed.exitCode !== 0) throw new Error(`removing spec-${kind}-template failed: ${removed.stderr}${removed.stdout}`);
+    }
   });
 
   afterEach(() => cleanupDir(tmpDir));

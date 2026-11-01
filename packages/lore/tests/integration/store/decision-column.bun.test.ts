@@ -338,7 +338,8 @@ describe("AC-DR-1 lore log prints the decision under its version", () => {
     const slug = (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
 
     const raw = new Database(join(dir, ".lore", "lore.db"));
-    const row = raw.query("SELECT doc_id FROM versions ORDER BY version DESC LIMIT 1").get() as { doc_id: string };
+    // reason: `lore init` seeds template documents, so "the latest version row" is no longer the spec's: pick it by slug.
+    const row = raw.query("SELECT d.id AS doc_id FROM docs d WHERE d.slug = ?").get(slug) as { doc_id: string };
     raw.prepare("UPDATE versions SET decision = ? WHERE doc_id = ? AND version = 1").run(JSON.stringify(DECISION), row.doc_id);
     raw.close();
 

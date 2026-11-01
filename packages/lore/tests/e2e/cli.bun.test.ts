@@ -29,6 +29,14 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
+import { readShippedTemplateSeeds } from "../../src/adapters/cli/template-seeds.js";
+
+/** The approved template documents `lore init` seeds (BR-807 as modified): one per shipped seed. */
+const SEED_COUNT = (() => {
+  const seeds = readShippedTemplateSeeds();
+  if (!seeds.ok) throw new Error(JSON.stringify(seeds.error));
+  return seeds.value.length;
+})();
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface RunResult {
@@ -416,8 +424,8 @@ describe("Scenario 4: discovery (list + search)", () => {
     const result = runLore(["list", "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
     const json = parseJson<{ docs: unknown[]; total: number }>(result);
-    // prd + spec + plan = 3 (knowledge/adr require extra fields, plan does not)
-    expect(json.data!.total).toBe(3);
+    // prd + spec + plan = 3 (knowledge/adr require extra fields, plan does not), plus the seeded templates
+    expect(json.data!.total).toBe(3 + SEED_COUNT);
   });
 
   it("HAPPY: list --type spec returns only spec documents (AC-E2E-001.05)", () => {
@@ -467,12 +475,15 @@ describe("Scenario 4: discovery (list + search)", () => {
     expect(result.stdout).toContain("No results");
   });
 
-  it("BOUNDARY: list on empty corpus shows 'No documents found'", () => {
+  it("BOUNDARY: list of a type a fresh corpus holds none of shows 'No documents found'; unfiltered it shows only the seeded templates", () => {
     const emptyDir = makeTempDir("empty-list");
     runLore(["init"], emptyDir);
-    const result = runLore(["list"], emptyDir);
+    const result = runLore(["list", "--type", "prd"], emptyDir);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("No documents found");
+    const all = parseJson<{ docs: Array<{ type: string }>; total: number }>(runLore(["list", "--json"], emptyDir));
+    expect(all.data!.total).toBe(SEED_COUNT);
+    expect(all.data!.docs.every((doc) => doc.type === "template")).toBe(true);
     cleanupDir(emptyDir);
   });
 
@@ -695,7 +706,8 @@ describe("Scenario 8: JSON output composability", () => {
       last_updated: string;
     }>(result);
     expect(json.ok).toBe(true);
-    expect(json.data!.total_docs).toBe(2);
+    expect(json.data!.total_docs).toBe(2 + SEED_COUNT);
+    expect(json.data!.by_type["template"]).toBe(SEED_COUNT);
     expect(json.data!.by_type["prd"]).toBe(1);
     // plan is the second type (knowledge/adr require extra fields)
     expect(json.data!.by_type["plan"]).toBe(1);
@@ -757,11 +769,12 @@ describe("Scenario 9: status command", () => {
     cleanupDir(tmpDir);
   });
 
-  it("HAPPY: status on fresh project shows 0 documents", () => {
+  it("HAPPY: status on fresh project shows only the seeded templates", () => {
     const result = runLore(["status", "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
-    const json = parseJson<{ total_docs: number }>(result);
-    expect(json.data!.total_docs).toBe(0);
+    const json = parseJson<{ total_docs: number; by_type: Record<string, number> }>(result);
+    expect(json.data!.total_docs).toBe(SEED_COUNT);
+    expect(json.data!.by_type["template"]).toBe(SEED_COUNT);
   });
 
   it("HAPPY: status after creating docs reflects count by type (AC-E2E-001.10)", () => {
@@ -772,7 +785,7 @@ describe("Scenario 9: status command", () => {
     const result = runLore(["status", "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
     const json = parseJson<{ total_docs: number; by_type: Record<string, number> }>(result);
-    expect(json.data!.total_docs).toBe(2);
+    expect(json.data!.total_docs).toBe(2 + SEED_COUNT);
     expect(json.data!.by_type["prd"]).toBe(1);
     expect(json.data!.by_type["plan"]).toBe(1);
   });

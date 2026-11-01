@@ -65,7 +65,7 @@ function title(label: string): string {
 const INVALID_FIELDS = { fields: { risks: ["no summary"] }, dimensions: [] as unknown[] };
 
 beforeAll(async () => {
-  rig = await createStructuredRig("lore-revalidated");
+  rig = await createStructuredRig("lore-revalidated", { templates: "none" });
   // reason: approving a task compiles its done contract, which needs the base branch (main) to exist; the task is a corpus task (it changes no files)
   makeCleanTreeRepo(rig.dir);
   await installTemplate(rig, "Spec tech template", specTechTemplate(1));

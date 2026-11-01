@@ -75,7 +75,7 @@ async function stored(slug: string): Promise<StoredDoc> {
 }
 
 beforeAll(async () => {
-  rig = await createStructuredRig("lore-text-rendered");
+  rig = await createStructuredRig("lore-text-rendered", { templates: "none" });
   await installTemplate(rig, "Spec tech template", specTechTemplate(1));
   httpApp = createLiveApp(rig.dbPath);
   machineDir = mkdtempSync(join(tmpdir(), "lore-text-rendered-machine-"));

@@ -290,8 +290,14 @@ describe("AC-BLS1-8 — baseline rollback leaves the corpus indistinguishable fr
     expect(Object.keys((status.data.by_type ?? {}) as object)).not.toContain("baseline");
     for (const [name, r] of Object.entries(capB)) {
       const all = `${r.stdout}\n${r.stderr}`;
-      expect({ name, hit: /baseline/i.test(all) }).toEqual({ name, hit: false });
-      expect({ name, hit: /\bBR-\d+\b/.test(all) }).toEqual({ name, hit: false });
+      // reason: `lore init` seeds the shipped templates (BR-807 as modified), among them `baseline-*-template`; those rows
+      // are in the never-adopted control too (the treatment == control case above), so they are not an adoption trace.
+      const adoptionText = all
+        .split("\n")
+        .filter((line) => !/\btemplate\b/i.test(line))
+        .join("\n");
+      expect({ name, hit: /baseline/i.test(adoptionText) }).toEqual({ name, hit: false });
+      expect({ name, hit: /\bBR-\d+\b/.test(adoptionText) }).toEqual({ name, hit: false });
       // Case-sensitive on purpose: status JSON legitimately carries the lowercase key
       // `invalidated_feeding_source_warnings` in the control too; a human "Warning" line is the trace.
       expect({ name, hit: /\bWarning\b/.test(all) }).toEqual({ name, hit: false });

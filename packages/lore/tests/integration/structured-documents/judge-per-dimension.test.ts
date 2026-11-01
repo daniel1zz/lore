@@ -128,7 +128,7 @@ async function templateState(slug: string): Promise<{ status: string; dimensions
 }
 
 beforeAll(async () => {
-  rig = await createStructuredRig("lore-judge-per-dimension");
+  rig = await createStructuredRig("lore-judge-per-dimension", { templates: "none" });
   saveConfig(rig.dir, {
     project: { name: "judge-per-dimension", author: "tester" },
     ai: {

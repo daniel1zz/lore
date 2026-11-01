@@ -151,9 +151,12 @@ describe("AC-RV-9: the trust boundary is the session", () => {
 
   it("a value naming a SIBLING run of the same session (cc:A:y, used from cc:A:x's call) is accepted, exit 0, recorded as cc:A:y", async () => {
     await seedRun("cc:B", "main", null, harnessB.pid as number);
+    // reason: `lore init` already wrote the seeded template documents (BR-807 as modified) under its own party; only the rows
+    // this create adds are attributed to the sibling run.
+    const beforeCreate = auditRows().length;
     const r = await runUnderHarnessA("cc:A:y", ["create", "plan", "--parent", parentId, "--title", "Sibling plan"]);
     expect(r.exit, r.out).toBe(0);
-    const creates = auditRows().filter((row) => row["action"] === "create");
+    const creates = auditRows().slice(beforeCreate).filter((row) => row["action"] === "create");
     expect(creates.length).toBeGreaterThan(0);
     expect(creates.every((row) => row["harness_run"] === "cc:A:y")).toBe(true);
   }, 120_000);
