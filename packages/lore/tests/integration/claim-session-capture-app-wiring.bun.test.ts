@@ -39,7 +39,8 @@ import type { CreateDocInput, DocRecord, RunId, TaskClaim } from "@lore/core";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 import { runOfName } from "../helpers/test-run-identity.js";
 
-import { ensureRequirementsDocId } from "../helpers/parented-create.js";const ORCHESTRATOR = "agent:main-orchestrator";
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";
+const ORCHESTRATOR = "agent:main-orchestrator";
 /** The runs of the two orchestrators: the anchor mutex compares these, never the shared display name. */
 const RUN_FIRST = "cc:3de02220-first" as RunId;
 const RUN_SECOND = "cc:7ab19c04-second" as RunId;
