@@ -193,9 +193,6 @@ afterEach(() => {
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
-const COMPLIANT_CONTENT =
-  "## Overview\n\nSome text.\n\n## Scope\n\nIn scope.\n\n## Acceptance Criteria\n\n- AC1\n";
-
 /** Create a PRD (legal spec parent), returning its slug. */
 async function createPrd(title: string): Promise<string> {
   const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
@@ -218,7 +215,6 @@ function parentedPayload(parentSlug: string): Record<string, unknown> {
     type: "spec",
     title: "A well-formed spec",
     parent_id: parentSlug,
-    content: COMPLIANT_CONTENT,
     extra: { spec_kind: "tech" },
   };
 }
@@ -228,7 +224,6 @@ function compliantPayload(_parentSlug: string): Record<string, unknown> {
   return {
     type: "spec",
     title: "A well-formed spec",
-    content: COMPLIANT_CONTENT,
     extra: { spec_kind: "tech" },
   };
 }
