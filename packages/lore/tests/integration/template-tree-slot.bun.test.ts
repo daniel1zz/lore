@@ -42,10 +42,15 @@ function runLore(args: string[]): { stdout: string; stderr: string; exitCode: nu
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
 }
 
-function treeDrifts(): { exitCode: number; drifts: { kind: string }[] } {
+/**
+ * Drifts other than `missing`. The fixture holds only a PRD and a template, so the blueprint's own `spec min:1`
+ * slot reports a `missing` drift (and the exit code follows it); that is not under test. Orphan / misplaced
+ * drifts are what a template slot gap would produce.
+ */
+function placementDrifts(): { kind: string }[] {
   const r = runLore(["status", "--check-tree", "--json"]);
   const parsed = JSON.parse(r.stdout) as { data: { drifts: { kind: string }[] } };
-  return { exitCode: r.exitCode, drifts: parsed.data.drifts };
+  return parsed.data.drifts.filter((d) => d.kind !== "missing");
 }
 
 function treePositionOf(blueprintYaml: string, parent?: DocRecord) {
@@ -90,6 +95,8 @@ beforeAll(async () => {
     const created = await app.corpusService.create({ type: "template", title: "Tree slot fixture template", extra: { template: body } } as CreateDocInput);
     if (!created.ok) throw new Error(`template create failed: ${JSON.stringify(created.error)}`);
     templateDoc = created.value;
+    const prd = await app.corpusService.create({ type: "prd", title: "Tree slot fixture PRD" } as CreateDocInput);
+    if (!prd.ok) throw new Error(`prd create failed: ${JSON.stringify(prd.error)}`);
   } finally {
     app.close();
   }
@@ -113,18 +120,15 @@ describe("the tree blueprint models the parentless template type", () => {
     expect(treePositionOf(readFileSync(REPO_BLUEPRINT, "utf8"))).toEqual({ check: "tree_position", outcome: "pass" });
   });
 
-  it("HAPPY: lore status --check-tree reports the template neither orphan nor misplaced, exit 0, on the seed", () => {
-    const { exitCode, drifts } = treeDrifts();
-    expect(drifts).toEqual([]);
-    expect(exitCode).toBe(0);
+  it("HAPPY: lore status --check-tree reports the template neither orphan nor misplaced on the seed", () => {
+    expect(placementDrifts()).toEqual([]);
   });
 
   it("HAPPY: lore status --check-tree stays clean on the repo's own blueprint", () => {
     copyFileSync(REPO_BLUEPRINT, join(dir, "lore.tree.yaml"));
-    const { exitCode, drifts } = treeDrifts();
+    const drifts = placementDrifts();
     copyFileSync(SEED, join(dir, "lore.tree.yaml"));
     expect(drifts).toEqual([]);
-    expect(exitCode).toBe(0);
   });
 
   it("NEGATIVE control: a blueprint with no template slot still fails tree_position", () => {
