@@ -46,7 +46,11 @@ export const UNIT_INSTRUCTION_TEMPLATE = [
   "  concurrency_safety: can two sessions, writers or processes doing this at once corrupt state or lose a write? A fail cites the file path or a symbol in it.",
   "- A criterion unit: add one entry to `criteria`: {\"spec\": \"<spec slug>\", \"ac\": \"<AC id>\", \"verdict\": \"pass|fail\", \"reason\": \"...\"}, judged against its rubric and the files it covers.",
   "A unit marked ALREADY JUDGED has a stored verdict, shown with it. Do not answer it again. Its diff is still shown so that you can reason across files.",
-  "In the dimensions `security` and `concurrency_safety` report only what no single unit covers: a flow that crosses files (including flows through an already judged file), and code no unit entry covers.",
+  "The dimensions `security` and `concurrency_safety` stay the verdict on EVERYTHING this call shows, exactly as the dimension guide above asks:",
+  "fail them for any defect, in one file or across files, including a flow that starts in one file and ends in another and a flow through an already judged file,",
+  "and name the files and symbols of the whole flow in `cites`. The per-file entries only add each unit's own verdict; they never replace or soften the dimension verdict.",
+  "Decide the dimensions by tracing across files, not file by file: for each input, identity or shared state, who produces it, who checks it and who relies on it.",
+  "A file that relies on a value no file in this diff verifies is a finding for the dimension even when each file passes on its own.",
 ].join("\n");
 
 /** One unit of a call as the prompt lists it: asked, or already judged with its stored answer (the stored raw JSON). */
@@ -319,19 +323,25 @@ export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): s
       ? "None."
       : input.decisions.map((d) => `- ${d.class} on ${d.document}: ${d.summary}`).join("\n");
   const spec = input.spec === undefined ? "The plan has no spec." : `# Spec ${input.spec.slug}: ${input.spec.title}\n${input.spec.content}`;
-  const shape =
-    '{"dimensions": {' +
-    asked.map((d) => `"${d}": {"verdict": "pass|fail|na", "reason": "...", "reference": "...", "cites": ["..."]}`).join(", ") +
-    "}" +
-    (asksFiles
-      ? ', "files": [{"path": "<file>", "security": {"verdict": "pass|fail|na", "reason": "...", "reference": "...", "cites": ["..."]}, "concurrency_safety": {"verdict": "pass|fail|na", "reason": "...", "reference": "...", "cites": ["..."]}}]'
-      : "") +
-    (asksCriteria ? ', "criteria": [{"spec": "<spec slug>", "ac": "<AC id>", "verdict": "pass|fail", "reason": "..."}]' : "") +
-    (asksDecisions
-      ? ', "decisions": [{"decision": "<slug@version>", "premises_supported": [true|false per premise, in order], ' +
-        '"meaning_unchanged": true|false (rule rewordings only), "better_option": "<option>" (only when one was clearly better), "reason": "..."}]'
-      : "") +
-    "}";
+  // reason: BR-1535 — the shape is laid out one member per line with its nesting visible; on one line a long per-file answer was measured to
+  // drop the closing brace of `dimensions` before `files` (invalid JSON twice in a row, a failed review).
+  const verdictShape = '{"verdict": "pass|fail|na", "reason": "...", "reference": "...", "cites": ["..."]}';
+  const members: string[] = [
+    `  "dimensions": {\n${asked.map((d) => `    "${d}": ${verdictShape}`).join(",\n")}\n  }`,
+  ];
+  if (asksFiles) members.push(`  "files": [\n    {"path": "<file>",\n     "security": ${verdictShape},\n     "concurrency_safety": ${verdictShape}}\n  ]`);
+  if (asksCriteria) members.push('  "criteria": [{"spec": "<spec slug>", "ac": "<AC id>", "verdict": "pass|fail", "reason": "..."}]');
+  if (asksDecisions) {
+    members.push(
+      '  "decisions": [{"decision": "<slug@version>", "premises_supported": [true|false per premise, in order], ' +
+        '"meaning_unchanged": true|false (rule rewordings only), "better_option": "<option>" (only when one was clearly better), "reason": "..."}]',
+    );
+  }
+  const shape = `{\n${members.join(",\n")}\n}`;
+  // reason: BR-1535 — the unit sections come LAST, after the diff, so the dimension framing and the diff read as they did before per-unit
+  // answers. A/B on the #560/#564 plan with the `sonnet` judge: the old shape failed the cross-file flow in 5 of 5 runs, the unit sections in
+  // front of the plan in 2 of 6, the sections last in 3 of 5 completed runs, sections last plus the cross-file tracing instruction in 5 of 5.
+  const unitSection = ["", "# Unit instructions", input.unitInstructions ?? UNIT_INSTRUCTION_TEMPLATE, "", "# Units", renderUnits(input.units)];
   const head = [
     `You are the milestone reviewer for a finished plan. Judge ONLY the dimensions listed below, each separately: ${asked.join(", ")}.`,
     "Everything else (criteria attestation, regression, cited-rule state) was measured by tools and appears in the facts table; do not judge it.",
@@ -346,12 +356,6 @@ export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): s
     "# Output",
     `Reply with ONE JSON object and nothing else: ${shape}`,
     "",
-    "# Unit instructions",
-    input.unitInstructions ?? UNIT_INSTRUCTION_TEMPLATE,
-    "",
-    "# Units",
-    renderUnits(input.units),
-    "",
     `# Plan ${input.plan.slug}: ${input.plan.title}`,
     input.plan.content,
     "",
@@ -359,7 +363,7 @@ export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): s
     "",
   ];
   if (input.mode === "chunk") {
-    return [...head, "# Facts table", renderFacts(input), "", "# Diff chunk", renderDiffSection(input)].join("\n");
+    return [...head, "# Facts table", renderFacts(input), "", "# Diff chunk", renderDiffSection(input), ...unitSection].join("\n");
   }
   return [
     ...head,
@@ -380,5 +384,6 @@ export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): s
     "",
     "# Final state of each changed file (net diff across the plan's landings)",
     renderDiffSection(input),
+    ...unitSection,
   ].join("\n");
 }
