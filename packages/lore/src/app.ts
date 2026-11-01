@@ -1166,6 +1166,9 @@ function buildAppFromSqlite(
       link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
       recheckDecisions: buildDecisionRechecker(store, ambient),
       judgedDecisionInputs: (bundle) => buildJudgedDecisionInputs({ store }, bundle),
+      // reason: BR-1535 — the judge's per-unit answers are kept in the corpus store and reused under their input keys.
+      judgeVerdicts: store,
+      judgeIdentity: () => aiProviderService.judgeIdentity(),
     }),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the
@@ -1617,6 +1620,9 @@ function buildAppFromTurso(
       link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
       recheckDecisions: buildDecisionRechecker(store, ambient),
       judgedDecisionInputs: (bundle) => buildJudgedDecisionInputs({ store }, bundle),
+      // reason: BR-1535 — the judge's per-unit answers are kept in the corpus store and reused under their input keys.
+      judgeVerdicts: store,
+      judgeIdentity: () => aiProviderService.judgeIdentity(),
     }),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the

@@ -31,7 +31,7 @@
 import { ok, err } from "@lore/core";
 import type { AIProvider, AiProviderConfig, GenerateInput, GenerateOutput, LoreError } from "@lore/core";
 import type { Result } from "@lore/core";
-import { buildHermeticSpawnSpec } from "./hermetic-spawn.js";
+import { buildHermeticSpawnSpec, fixedProviderArgs, isClaudeCliCommand, parseClaudeJsonReply } from "./hermetic-spawn.js";
 
 // ─── ClaudeCliProvider ────────────────────────────────────────────────────────
 
@@ -96,6 +96,15 @@ export function writePromptToStdin(
 }
 
 export class ClaudeCliProvider implements AIProvider {
+  /**
+   * Whether a call can name the answering model: true only for the `claude` binary, which takes `--model <id>`. A custom command
+   * owns its own argument contract, so it is never given the flag and the model that answers is unknowable (BR-1535).
+   */
+  public readonly acceptsModelOverride: boolean;
+
+  /** The configured arguments that are the same for every call (effort and sampling flags): the model-behaviour settings of a verdict key. */
+  public readonly fixedArgs: readonly string[];
+
   constructor(
     /** Registry key for this provider — returned in GenerateOutput.provider_name */
     public readonly name: string,
@@ -103,7 +112,10 @@ export class ClaudeCliProvider implements AIProvider {
     private readonly cfg: AiProviderConfig,
     /** The invocation's environment and temp directory the hermetic spawn spec is built from. */
     private readonly runtime: { readonly env: Readonly<Record<string, string | undefined>>; readonly tmpDir: string },
-  ) {}
+  ) {
+    this.acceptsModelOverride = isClaudeCliCommand(cfg.command);
+    this.fixedArgs = fixedProviderArgs(cfg.args);
+  }
 
   /**
    * Spawn the configured command, pipe the prompt to stdin, and capture stdout.
@@ -122,7 +134,11 @@ export class ClaudeCliProvider implements AIProvider {
 
     // SPEC-030 AC-HJ-1: spawn params (command/args/cwd/env) come from the pure builder —
     // this callsite never inlines cwd/env logic so that logic stays vitest-testable.
-    const spawnSpec = buildHermeticSpawnSpec(this.cfg, { sourceEnv: this.runtime.env, tmpDir: this.runtime.tmpDir });
+    const spawnSpec = buildHermeticSpawnSpec(this.cfg, {
+      sourceEnv: this.runtime.env,
+      tmpDir: this.runtime.tmpDir,
+      ...(input.model !== undefined ? { model: input.model } : {}),
+    });
 
     // Attempt to spawn — catches ENOENT (binary not on PATH)
     let proc: ReturnType<typeof Bun.spawn>;
@@ -215,6 +231,25 @@ export class ClaudeCliProvider implements AIProvider {
         provider: this.name,
         exit_code,
         message: `provider "${this.name}" produced empty output`,
+      });
+    }
+
+    // reason: BR-1535 — a call with an explicit model is run with `--output-format json` (hermetic-spawn.ts); the model that answered is
+    // read from that reply, never assumed to be the requested one (an alias names no model id).
+    if (input.model !== undefined && this.acceptsModelOverride) {
+      const reply = parseClaudeJsonReply(stdout);
+      if (!reply.ok) {
+        return err({ code: "AI_PROVIDER_ERROR", provider: this.name, exit_code, message: `provider "${this.name}" did not return the JSON reply it was asked for: ${reply.reason}` });
+      }
+      if (reply.value.text.trim() === "") {
+        return err({ code: "AI_PROVIDER_ERROR", provider: this.name, exit_code, message: `provider "${this.name}" produced empty output` });
+      }
+      return ok({
+        content: reply.value.text,
+        duration_ms,
+        exit_code,
+        provider_name: this.name,
+        ...(reply.value.model !== undefined ? { model: reply.value.model } : {}),
       });
     }
 

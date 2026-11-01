@@ -26,6 +26,25 @@ export function answerJson(dims: Record<string, Dim>, extra: Record<string, unkn
   return JSON.stringify({ dimensions, ...extra });
 }
 
+/**
+ * Adds the per-file verdicts every call must now return (BR-1535) to a scripted answer that predates them: one passing
+ * `security` / `concurrency_safety` entry per file the prompt's `# Units` list marks ASK. An answer that already has `files`
+ * (or is not JSON, so a test can feed the judge garbage) is returned unchanged.
+ */
+export function withFileAnswers(prompt: string, text: string): string {
+  const asked = [...prompt.matchAll(/^- file (\S+): ASK/gm)].map((m) => m[1] as string);
+  if (asked.length === 0) return text;
+  let json: Record<string, unknown>;
+  try {
+    json = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return text;
+  }
+  if (json["files"] !== undefined) return text;
+  const pass = { verdict: "pass", reason: "no finding in this file", reference: "Google engineering code review guide", cites: [] as string[] };
+  return JSON.stringify({ ...json, files: asked.map((path) => ({ path, security: pass, concurrency_safety: pass })) });
+}
+
 /** The service plus what the judge saw. */
 export interface JudgmentFixture {
   readonly review: (opts: Partial<MilestoneReviewOptions> & { diffText?: string }) => ReturnType<MilestoneReviewService["review"]>;
@@ -58,7 +77,8 @@ export function buildJudgmentFixture(
     judgeMeasured: async (prompt) => {
       prompts.push(prompt);
       const reply = judge(prompt);
-      return ok(typeof reply === "string" ? { text: reply, duration_ms: 5 } : reply);
+      const measured = typeof reply === "string" ? { text: reply, duration_ms: 5 } : reply;
+      return ok({ ...measured, text: withFileAnswers(prompt, measured.text) });
     },
     createReviewDoc: async (input) => {
       stored = (input.extra as { milestone_review: MilestoneReview }).milestone_review;
