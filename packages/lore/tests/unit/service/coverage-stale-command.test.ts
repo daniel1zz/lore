@@ -1,5 +1,4 @@
 // @reads packages/lore/src/adapters/cli/**
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
  * Task task-root-coverage-reports-a-declared-command-that-no-longer: a leaf-declared command the analysed tree does not

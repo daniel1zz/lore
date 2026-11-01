@@ -1,4 +1,3 @@
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
  * RED compiled-binary e2e for the declaration-time pipe refusal (AC-EH-7, BR-1078, issue #19) —

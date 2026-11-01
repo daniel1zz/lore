@@ -1,4 +1,3 @@
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
  * AC-ES-2 — `runCli(invocation)` RETURNS the exit code and never calls `process.exit`

@@ -244,6 +244,21 @@ export class AIProviderService {
   }
 
   /**
+   * Sends one drafting prompt (`lore convert`) to the active provider and returns its raw text. The prompt, the parse
+   * and the validation belong to `ConversionService`; this is only the provider call, through the same registry and
+   * hermetic spawn as every other judge.
+   *
+   * @param prompt - the rendered drafting prompt
+   * @param docType - the converted document's type (the provider input's required `doc_type`)
+   * @param title - the document's title
+   * @returns `ok(text)` or the provider's own `AI_PROVIDER_ERROR`; never throws
+   */
+  async draftText(prompt: string, docType: GenerateInput["doc_type"], title: string): Promise<Result<string, LoreError>> {
+    const { result } = await this._invokeProvider({ prompt, doc_type: docType, title });
+    return result.ok ? ok(result.value.content) : result;
+  }
+
+  /**
    * Sends one milestone-review prompt (BR-1372) to the active provider and returns its raw text. The prompt, the
    * parse and the retry belong to `MilestoneReviewService`; this is only the provider call, so the review judge runs
    * through the same provider registry and hermetic spawn as every other judge.

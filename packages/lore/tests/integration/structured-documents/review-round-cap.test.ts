@@ -1,7 +1,6 @@
 // @reads packages/lore/src/service/review-round-cap-service.ts
 // @reads packages/lore/src/service/review-service.ts
 // @reads assets/project/lore-config-template.yaml
-// @reads assets/governance/write-spec-rule.md
 // @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * spec-every-document-is-stored-as-structured-fields-validated-by#AC-ST-6 (BR-1531): TWO ROUNDS, THEN A HUMAN.

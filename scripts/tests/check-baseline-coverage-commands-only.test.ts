@@ -1,5 +1,4 @@
 // @spawns scripts/check-baseline-coverage.ts
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 // @spawns packages/lore/src/index.ts
 /**

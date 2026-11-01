@@ -127,6 +127,8 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     diff: () => import("./commands/diff.js"),
     restore: () => import("./commands/restore.js"),
     migrate: () => import("./commands/migrate.js"),
+    // convert — turn an open legacy document into a structured one, or `--list` the open ones (AC-ST-7); see commands/convert.ts.
+    convert: () => import("./commands/convert.js"),
     status: () => import("./commands/status.js"),
     serve: () => import("./commands/serve.js"),
     agent: () => import("./commands/agent.js"),

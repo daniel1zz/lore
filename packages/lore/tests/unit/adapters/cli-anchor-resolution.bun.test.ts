@@ -1,5 +1,4 @@
 // @reads assets/project/lore-config-template.yaml
-// @reads assets/governance/write-spec-rule.md
 /**
  * `lore create task --anchor` / `lore anchor add` / `lore ready --json` — the
  * author→trip end-to-end oracle for
