@@ -42,6 +42,16 @@ const VALID_EXTRA: Record<DocType, Record<string, unknown>> = {
   // assertions implied).
   phase: { plan_id: "01ARZ3PLAN0000000000001" },
   baseline: { node: "root" },
+  template: {
+    template: {
+      doc_type: "spec",
+      version: 1,
+      fields: { type: "object", properties: { summary: { type: "string" } } },
+      dimensions: [{ id: "scope", question: "What is in scope?" }],
+      checks: [],
+      render: [{ heading: "Summary", fields: ["summary"] }],
+    },
+  },
 };
 
 function makeDoc(type: DocType, overrides: Partial<DocRecord> = {}): DocRecord {
@@ -297,7 +307,7 @@ describe("check: tree_position", () => {
     expect(findCheck(results, "tree_position")?.outcome).toBe("pass");
   });
 
-  it("HAPPY (AC-FIP-1, BR-2/BR-400): a PARENTLESS spec passes — its slot is 'no parent'", () => {
+  it("HAPPY (spec-fresh-install-probe-fixes-a-fresh-consumer-can-run-the#AC-FIP-1, BR-2/BR-400): a PARENTLESS spec passes — its slot is 'no parent'", () => {
     const doc = makeDoc("spec", { parent_id: null });
     const results = runDeterministicChecks(makeBundle(doc, { blueprint: SIMPLE_BLUEPRINT }));
     expect(findCheck(results, "tree_position")?.outcome).toBe("pass");

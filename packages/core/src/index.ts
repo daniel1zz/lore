@@ -98,3 +98,6 @@ export * from "./run-identity.js";
 export * from "./invocation.js";
 export * from "./context-variables.js";
 export * from "./working-state.js";
+export * from "./template-json-schema.js";
+export * from "./template.js";
+export * from "./template-document.js";

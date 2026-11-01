@@ -1,0 +1,59 @@
+{
+  "doc_type": "knowledge",
+  "kind": "uat",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["subject_ref", "verdict", "tier_results", "requirement_coverage"],
+    "properties": {
+      "subject_ref": { "type": "string", "minLength": 1, "title": "Accepted subject", "x-ref": true, "description": "Slug of the plan or spec this run accepted." },
+      "verdict": { "type": "string", "title": "Verdict", "enum": ["accept", "reject", "accept_with_conditions"] },
+      "tier_results": {
+        "type": "array",
+        "title": "Journey results per tier",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["tier", "accepted", "rejected", "unverified"],
+          "properties": {
+            "tier": { "type": "string", "enum": ["P0", "P1", "P2"] },
+            "accepted": { "type": "integer", "minimum": 0 },
+            "rejected": { "type": "integer", "minimum": 0 },
+            "unverified": { "type": "integer", "minimum": 0 }
+          }
+        }
+      },
+      "requirement_coverage": {
+        "type": "object",
+        "title": "Requirement coverage",
+        "required": ["total", "covered", "uncovered_p0"],
+        "properties": {
+          "total": { "type": "integer", "minimum": 0 },
+          "covered": { "type": "integer", "minimum": 0 },
+          "uncovered_p0": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "P0 requirement ids with no accepting journey; any entry fails the P0 gate." }
+        }
+      },
+      "uiux": {
+        "type": "object",
+        "title": "UI and UX production bar",
+        "required": ["blocker_count", "min_dimension_score"],
+        "properties": {
+          "blocker_count": { "type": "integer", "minimum": 0 },
+          "min_dimension_score": { "type": "number" }
+        }
+      },
+      "conditions": { "type": "array", "title": "Conditions of acceptance", "items": { "type": "string", "minLength": 1 }, "description": "Required when the verdict is accept_with_conditions." }
+    }
+  },
+  "dimensions": [
+    { "id": "p0-coverage", "question": "Is every P0 requirement covered by a journey that was accepted, and which are not?" },
+    { "id": "unverified", "question": "Which journeys were not verified, and why does leaving them unverified not hide a defect?" }
+  ],
+  "checks": ["refs-resolve"],
+  "render": [
+    { "heading": "Verdict", "fields": ["subject_ref", "verdict", "conditions"] },
+    { "heading": "Journeys", "fields": ["tier_results"] },
+    { "heading": "Requirement coverage", "fields": ["requirement_coverage"] },
+    { "heading": "UI and UX", "fields": ["uiux"] }
+  ]
+}

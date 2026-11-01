@@ -4,11 +4,13 @@
  *
  * Purpose: (1) {@link ReviewTriggerService.computeTriggerSet}: from stored plan progress, the complete plans that need a
  *   review, a retry of their issue filing, a close, or an owner-resolved settle; (2) {@link ReviewTriggerService.start}:
- *   the landing's one cheap question "is there work" answered by starting ONE detached batch, whatever other batches run;
+ *   the landing's one cheap question "is there work" answered by starting ONE detached batch for the whole machine: it takes
+ *   `batch:<machine>` atomically or starts nothing (BR-1532);
  *   (3) {@link ReviewBatchRunner.runBatch}: the batch itself; each plan's review runs under its own lease `plan:<id>` (BR-1511),
- *   so reviews of different plans run concurrently and a plan another batch holds is skipped and named.
+ *   so a plan another batch holds is skipped and named; {@link ReviewBatchRunner.runMachineBatch} wraps it in the machine's batch
+ *   lease and the re-read loop that picks up plans landed during the run.
  * Public surface: {@link classifyPlan}, {@link PlanReviewNeed}, {@link ReviewTriggerDeps}, {@link ReviewRunDeps}, {@link ReviewTriggerService}, {@link ReviewBatchRunner},
- *   {@link BatchPlanRow}, {@link BATCH_ERROR_AUDIT_ACTION}.
+ *   {@link BatchPlanRow}, {@link BATCH_ERROR_AUDIT_ACTION}, {@link MachineBatchPorts}, {@link MachineBatchRun}, {@link BatchLeasePort}.
  * Invariants:
  *   - Level-triggered: a plan is in the trigger set because of its CURRENT state (complete, not archived, and its
  *     latest valid review does not match the current fingerprint / its filing or close is unfinished / its owner
@@ -34,6 +36,7 @@
  *     complete); a task with no landing record or an unmappable landing waits for the plan's own landing, a landing touching its
  *     failing facts, or a manual `lore assess`.
  *   - The landing never waits for a review: {@link ReviewTriggerService.start} only reads state and spawns.
+ *   - One batch per machine (BR-1532): `start` spawns only while holding `batch:<machine>`; a batch loop revisits a plan only at a changed fingerprint.
  * Side-effect class: IO through injected ports (services never import each other; the CLI adapter binds the real ones).
  *
  * Reference: GitHub merge queue (one batched check run for many queued items).
@@ -50,7 +53,7 @@ import { retirementSubjectId } from "./retired-ac-service.js";
 import type { IssueFilingService } from "./issue-filing-service.js";
 import type { DimensionCoverage } from "./milestone-review-inputs.js";
 import { failingCausesOf, type FailedFinding } from "./root-cause-fingerprint.js";
-import { leaseLostError, type LeaseHandle, type LeaseOutcome } from "./review-batch-lease.js";
+import { UNKNOWN_MACHINE_ID, batchLeaseKey, leaseLostError, type LeaseHandle, type LeaseOutcome } from "./review-batch-lease.js";
 
 // reason: the constant lives in the pure acceptance view (bootstrap and checks stats read the same rows); re-exported so existing importers keep one name.
 export { BATCH_ERROR_AUDIT_ACTION } from "./plan-acceptance-view.js";
@@ -118,8 +121,27 @@ export interface ReviewTriggerDeps {
   readonly hasStaleOwnerDecision?: (bundle: PlanBundle) => Promise<Result<boolean, LoreError>>;
   /** The plan-close coverage predicate (`CorpusService.coverageOfFailedDimensions`): which failed dimensions an open linked issue's record covers. */
   readonly issueCoverage: (planId: string, failed: readonly string[]) => Promise<Result<DimensionCoverage, LoreError>>;
-  /** Starts the detached batch process; returns once it is spawned (never waits for it). */
-  readonly spawnBatch: () => Result<{ readonly pid: number | undefined }, LoreError> | Promise<Result<{ readonly pid: number | undefined }, LoreError>>;
+  /**
+   * Starts the detached batch process; returns once it is spawned (never waits for it). `handoff` names the batch lease the
+   * starter holds on the child's behalf: the child takes it over by compare-and-set on `handoff.holder` before it works.
+   */
+  readonly spawnBatch: (handoff: BatchHandoff | undefined) => Result<{ readonly pid: number | undefined }, LoreError> | Promise<Result<{ readonly pid: number | undefined }, LoreError>>;
+  /** The machine's batch lease (BR-1532). Absent only in a bare construction (and the read-only ones, which never start a batch): `start` then spawns with no handoff. */
+  readonly batchLease?: BatchLeasePort;
+}
+
+/** The batch lease a landing took for the batch it spawns: the key and the starter's exact holder name. */
+export interface BatchHandoff {
+  readonly key: string;
+  readonly holder: string;
+}
+
+/** The slice of `ReviewLeases` the trigger and the batch loop use for `batch:<machine>`. */
+export interface BatchLeasePort {
+  /** The machine id of the key (`unknown` when this process has no identity). */
+  readonly machineId: () => Promise<string>;
+  /** Atomic take of `key`. */
+  readonly acquire: (key: string) => Promise<Result<LeaseOutcome, LoreError>>;
 }
 
 /** The trigger set: the plans that need work, with what they need. */
@@ -139,10 +161,15 @@ export interface CompletePlanEntry {
   readonly reviewProblem?: string;
 }
 
-/** What the landing's start did. */
+/**
+ * What the landing's start did. `started`: this landing took `batch:<machine>` and spawned the batch (`key` names it;
+ * `machineUnknown` = the key is the shared `batch:unknown`). `covered`: another live holder has the key, nothing was
+ * spawned, and that batch re-reads the trigger set after it releases.
+ */
 export type StartOutcome =
   | { readonly state: "empty" }
-  | { readonly state: "started"; readonly triggered: number; readonly pid: number | undefined };
+  | { readonly state: "started"; readonly triggered: number; readonly pid: number | undefined; readonly key?: string; readonly machineUnknown?: boolean }
+  | { readonly state: "covered"; readonly triggered: number; readonly key: string; readonly machineUnknown: boolean; readonly holder: string; readonly expires_at: string };
 
 /** The ports `runBatch` drives. */
 export interface BatchRunPorts {
@@ -273,20 +300,76 @@ export class ReviewTriggerService {
   }
 
   /**
-   * The landing's step: compute the trigger set; when non-empty start ONE detached batch and return, whatever other
-   * batches are running (plans another batch holds are skipped by the per-plan lease, BR-1511). An empty set starts
+   * The landing's step: compute the trigger set; when non-empty take `batch:<machine>` with the store's atomic acquire and
+   * start ONE detached batch holding it on the child's behalf (BR-1532). When another live holder has the key nothing is
+   * started: that batch re-reads the trigger set after it releases, so it covers this landing. An empty set starts
    * nothing. No review runs here.
+   *
+   * Two landings at once: both acquire atomically, exactly one holds the key and spawns; the other is `covered`. The child
+   * takes the lease over from the starter by compare-and-set (`ReviewLeases.acquireHandedOff`), so no instant exists where
+   * the key is free between the starter and the child; a child that never starts leaves a lease whose holder is dead,
+   * which the next landing takes at once (BR-1514) or at expiry.
    */
   async start(): Promise<Result<StartOutcome, LoreError>> {
     const set = await this.computeTriggerSet();
     if (!set.ok) return set;
     if (set.value.length === 0) return ok({ state: "empty" });
-    // reason: the spawn registers the batch's child run before it returns (#501), so it is awaited
-    const spawned = await this.deps.spawnBatch();
-    if (!spawned.ok) return spawned;
-    return ok({ state: "started", triggered: set.value.length, pid: spawned.value.pid });
+    const port = this.deps.batchLease;
+    if (port === undefined) {
+      // reason: an optional DI port, absent only in bare constructions (the repo's pattern: `app.ts` wires, a bare `new X(deps)` stays
+      // unleased). The spawn receives `undefined` as its handoff and the production spawn (`spawnDetachedReviewBatch`) refuses it, so
+      // a composition that forgot the port cannot start a batch; `lore integrate`'s wiring is asserted by review-machine-cap.test.ts.
+      const spawned = await this.deps.spawnBatch(undefined);
+      if (!spawned.ok) return spawned;
+      return ok({ state: "started", triggered: set.value.length, pid: spawned.value.pid });
+    }
+    const machine = await port.machineId();
+    const key = batchLeaseKey(machine);
+    const machineUnknown = machine === UNKNOWN_MACHINE_ID;
+    const taken = await port.acquire(key);
+    if (!taken.ok) return taken;
+    if (taken.value.state === "busy") {
+      return ok({ state: "covered", triggered: set.value.length, key, machineUnknown, holder: taken.value.holder, expires_at: taken.value.expires_at });
+    }
+    const handle = taken.value.handle;
+    let handedOff = false;
+    try {
+      // reason: the spawn registers the batch's child run before it returns (#501), so it is awaited
+      const spawned = await this.deps.spawnBatch({ key, holder: handle.holder });
+      if (!spawned.ok) return spawned;
+      handle.handOff();
+      handedOff = true;
+      return ok({ state: "started", triggered: set.value.length, pid: spawned.value.pid, key, machineUnknown });
+    } finally {
+      // reason: a spawn that failed (or threw) started no batch, so the key must not stay held for 10 minutes.
+      if (!handedOff) await handle.release();
+    }
   }
 }
+
+/** The ports of a machine batch: the per-plan ports plus the batch lease and the trigger-set re-read. */
+export interface MachineBatchPorts {
+  readonly batch: BatchRunPorts;
+  /** The batch lease this process holds on entry (taken by the starter's handoff or by a hand run). */
+  readonly lease: LeaseHandle;
+  /** Atomic re-take of the batch lease after a release; `busy` = another batch started and will see the plans. */
+  readonly retakeLease: () => Promise<Result<LeaseOutcome, LoreError>>;
+  /** The trigger set now, as plan slugs. */
+  readonly readTriggerSet: () => Promise<Result<readonly string[], LoreError>>;
+}
+
+/** What {@link ReviewBatchRunner.runMachineBatch} did over all its passes. */
+export interface MachineBatchRun extends BatchRun {
+  readonly passes: number;
+  /** Plans selected over all passes (the denominator of {@link skippedEveryPlan}). */
+  readonly selected: number;
+  /** `drained`: no plan was left to visit; `covered`: the re-take found another batch, which will see what is left. */
+  readonly ended: "drained" | "covered";
+  readonly coveredBy?: { readonly holder: string; readonly expires_at: string };
+}
+
+/** Stands for a plan whose bundle could not be read when its fingerprint was recorded; equal reads of it never loop. */
+const UNREADABLE_FINGERPRINT = "unreadable";
 
 /** The batch side: runs under the store lease (see the module header). */
 export class ReviewBatchRunner {
@@ -301,6 +384,64 @@ export class ReviewBatchRunner {
    */
   async runBatch(planRefs: readonly string[], ports: BatchRunPorts): Promise<Result<BatchRun, LoreError>> {
     return ok(await this.runPlans(planRefs, ports));
+  }
+
+  /**
+   * The batch of a machine (BR-1532): runs `planRefs` under the batch lease the caller already holds, then releases the lease,
+   * re-reads the trigger set and continues (re-taking the lease atomically) only for a plan not handled in this run or whose
+   * plan-state fingerprint differs from the one recorded when it was handled.
+   *
+   * Termination: each plan's fingerprint is recorded BEFORE its pass; a plan held by another holder, or kept open with a
+   * not-measured gate, stays in the trigger set but its fingerprint is unchanged, so it is not visited again; a further pass
+   * therefore needs a landing (a changed fingerprint or a new plan) that happened during the run. A failed re-take means
+   * another batch started and will see what is left. The lease is released on every exit path.
+   *
+   * @returns the rows of every pass; an error only when the trigger set cannot be read
+   */
+  async runMachineBatch(planRefs: readonly string[], ports: MachineBatchPorts): Promise<Result<MachineBatchRun, LoreError>> {
+    const visited = new Map<string, string>();
+    const rows: BatchPlanRow[] = [];
+    let suiteRuns = 0;
+    let passes = 0;
+    let selected = 0;
+    let lease = ports.lease;
+    let refs: readonly string[] = planRefs;
+    try {
+      for (;;) {
+        for (const ref of refs) visited.set(ref, await this.fingerprintOf(ref));
+        const pass = await this.runPlans(refs, ports.batch);
+        passes += 1;
+        selected += refs.length;
+        suiteRuns += pass.suiteRuns;
+        rows.push(...pass.rows);
+        // reason: the lease is released BEFORE the re-read, so a landing whose start attempt saw it live is always covered:
+        // its plan state was stored before that attempt, hence is visible to the re-read below (BR-1532).
+        await lease.release();
+        const set = await ports.readTriggerSet();
+        if (!set.ok) return set;
+        const next: string[] = [];
+        for (const slug of set.value) {
+          const seen = visited.get(slug);
+          if (seen === undefined || seen !== (await this.fingerprintOf(slug))) next.push(slug);
+        }
+        if (next.length === 0) return ok({ state: "ran", suiteRuns, rows, passes, selected, ended: "drained" });
+        const retaken = await ports.retakeLease();
+        if (!retaken.ok) return retaken;
+        if (retaken.value.state === "busy") {
+          return ok({ state: "ran", suiteRuns, rows, passes, selected, ended: "covered", coveredBy: { holder: retaken.value.holder, expires_at: retaken.value.expires_at } });
+        }
+        lease = retaken.value.handle;
+        refs = next;
+      }
+    } finally {
+      await lease.release();
+    }
+  }
+
+  /** The plan-state fingerprint of `ref` now ({@link UNREADABLE_FINGERPRINT} when its bundle cannot be read). */
+  private async fingerprintOf(ref: string): Promise<string> {
+    const bundle = await this.deps.getPlanBundle(ref);
+    return bundle.ok ? planStateFingerprint(bundle.value.plan, bundle.value.tasks, bundle.value.spec) : UNREADABLE_FINGERPRINT;
   }
 
   private async runPlans(planRefs: readonly string[], ports: BatchRunPorts): Promise<BatchRun> {

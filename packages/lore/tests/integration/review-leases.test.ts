@@ -7,7 +7,7 @@
 // @reads assets/skills/lore/SKILL.md
 // @reads assets/skills/lore-autopilot/SKILL.md
 /**
- * @spec_ref spec-review-work-is-leased-per-plan-per-commit-and-per-root (AC-RL-1, AC-RL-2, AC-RL-3, AC-RL-4, BR-1511, BR-1379, BR-1510)
+ * @spec_ref spec-review-work-is-leased-per-plan-per-commit-and-per-root (AC-RL-1, spec-review-work-is-leased-per-plan-per-commit-and-per-root#AC-RL-2, AC-RL-3, AC-RL-4, BR-1511, BR-1379, BR-1510)
  *
  * Review work is leased per key, not by one corpus-wide batch lease. Every concurrency test drives two holders against ONE
  * real SQLite store (a throwaway file, never the repo's `.lore/`) with real lease rows and an injected clock; the judge, the
@@ -495,7 +495,7 @@ describe("AC-RL-4 exit codes documented", () => {
     for (const [code, meaning] of Object.entries(ASSESS_EXIT_CODES)) {
       expect(text, `help lacks exit ${code}`).toContain(`${code.padStart(2)}  ${meaning}`);
     }
-    expect(text).toContain("another holder leases the plan; nothing ran; re-run later");
+    expect(text).toContain(`${ASSESS_EXIT_LEASE_HELD}  ${ASSESS_EXIT_CODES[ASSESS_EXIT_LEASE_HELD]}`);
   });
 
   it("exit codes documented: the help text is rendered from the table, not written by hand", () => {
@@ -554,7 +554,7 @@ function suiteService(lw: LeaseWorld, holder: string | undefined): SuiteResultSe
 
 // RETIRED with spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach (AC-RL-2's full-suite cases: no review runs the full
 // suite, so `suite:<sha>` is no lease key any more). The same single-flight guarantees now hold per (commit, file): `suite:<sha>:<file>`.
-describe("AC-RL-2 suite single-flight", () => {
+describe("spec-review-work-is-leased-per-plan-per-commit-and-per-root#AC-RL-2 suite single-flight", () => {
   it("suite single-flight: two concurrent runs of one file at one commit invoke the runner once, share one stored row and the second really waited", async () => {
     const lw = newWorld();
     const runner = new StubRunner();

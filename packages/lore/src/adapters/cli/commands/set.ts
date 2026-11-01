@@ -107,6 +107,7 @@ import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
+import { readFieldsFile, type FieldsFileContent } from "../fields-file.js";
 import type { PlanCloseCascadeResult } from "../../../service/corpus-service.js";
 import type { IssueCloseItem } from "../../../service/issue-close-on-archive.js";
 import { emitIssueCloseItems } from "../issue-close-output.js";
@@ -166,6 +167,16 @@ export default defineLoreCommand({
       type: "string",
       description:
         "Path to file whose full contents become the new content. Mutually exclusive with --content.",
+    },
+    "fields-file": {
+      type: "string",
+      description:
+        "YAML or JSON file with `fields:` and/or `dimensions:` to merge into a templated document (top-level fields replace, dimensions merge by id). It is revalidated against the PINNED template and the body is re-rendered. A templated document refuses --content and --content-file.",
+    },
+    "template-version": {
+      type: "string",
+      description:
+        "`latest`: move a templated document's pin to the newest approved template version and revalidate against it (a newly required dimension must be answered, in the same call via --fields-file, or the write is refused).",
     },
     priority: {
       type: "string",
@@ -665,7 +676,24 @@ export default defineLoreCommand({
       // doc it already fetches on every code path that can touch content/title.
       let priorStatusForDemotionAdvisory: DocStatus | undefined;
 
-      if (Object.keys(patch).length === 0) {
+      // BR-1529 — structured edits: `--fields-file` (partial merge) and `--template-version latest` (move the pin)
+      // carry no patch field, so they are read here and handed to the service as options.
+      let fieldsPatch: FieldsFileContent | undefined;
+      if (args["fields-file"] !== undefined) {
+        const readFields = readFieldsFile(args["fields-file"]);
+        if (!readFields.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, readFields.error) + "\n");
+          return exitCode(readFields.error);
+        }
+        fieldsPatch = readFields.value;
+      }
+      if (args["template-version"] !== undefined && args["template-version"] !== "latest") {
+        inv.io.stderr.write(`Error: --template-version accepts only 'latest' (got '${args["template-version"]}').\n`);
+        exitCli(2);
+      }
+      const moveToLatestTemplate = args["template-version"] === "latest";
+
+      if (Object.keys(patch).length === 0 && fieldsPatch === undefined && !moveToLatestTemplate) {
         // No flags provided — open editor pre-populated with current content (AC-SET-1)
         const resolvedId = await app.corpusService.resolve(args.id);
         if (!resolvedId.ok) {
@@ -731,6 +759,10 @@ export default defineLoreCommand({
         ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}),
         ...(typeof args.plan === "string" ? { plan: args.plan } : {}),
         ...(decisionOpt !== undefined ? { decision: decisionOpt } : {}),
+        ...(fieldsPatch !== undefined
+          ? { fieldsPatch: { ...(fieldsPatch.fields !== undefined ? { fields: fieldsPatch.fields } : {}), ...(fieldsPatch.dimensions !== undefined ? { dimensions: fieldsPatch.dimensions } : {}) } }
+          : {}),
+        ...(moveToLatestTemplate ? { templateVersion: "latest" as const } : {}),
       });
 
       if (!result.ok) {

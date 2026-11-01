@@ -50,4 +50,6 @@ export const TYPE_ACCENT: Record<DocType, string> = {
   phase: "border-l-teal-600 dark:border-l-teal-500",
   // baseline (spec-baseline-slice-1 C1) — compile-forced entry; distinct hue.
   baseline: "border-l-indigo-600 dark:border-l-indigo-500",
+  // template (structured documents T2) — compile-forced entry; distinct hue.
+  template: "border-l-rose-600 dark:border-l-rose-500",
 };

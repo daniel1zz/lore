@@ -1,0 +1,40 @@
+{
+  "doc_type": "knowledge",
+  "kind": "ideation",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["problem", "ideas", "next_step"],
+    "properties": {
+      "problem": { "type": "string", "minLength": 1, "title": "Problem", "description": "The problem or opportunity, and who has it." },
+      "ideas": {
+        "type": "array",
+        "title": "Ideas",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["idea", "upside", "downside"],
+          "properties": {
+            "idea": { "type": "string", "minLength": 1 },
+            "upside": { "type": "string", "minLength": 1 },
+            "downside": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "assumptions": { "type": "array", "title": "Assumptions", "items": { "type": "string", "minLength": 1 }, "description": "What must hold for these ideas to be worth building; each is unvalidated until tested." },
+      "open_questions": { "type": "array", "title": "Open questions", "items": { "type": "string", "minLength": 1 } },
+      "next_step": { "type": "string", "minLength": 1, "title": "Next step", "description": "The cheapest action that would validate or kill the leading idea." }
+    }
+  },
+  "dimensions": [
+    { "id": "assumptions", "question": "Which assumption, if wrong, makes the leading idea pointless?" },
+    { "id": "who-benefits", "question": "Who benefits from this, and how would you know they do?" }
+  ],
+  "checks": [],
+  "render": [
+    { "heading": "Problem", "fields": ["problem"] },
+    { "heading": "Ideas", "fields": ["ideas"] },
+    { "heading": "Assumptions and open questions", "fields": ["assumptions", "open_questions"] },
+    { "heading": "Next step", "fields": ["next_step"] }
+  ]
+}

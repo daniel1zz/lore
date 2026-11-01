@@ -54,6 +54,23 @@ export function answerOfLabel(chosen: string | undefined): "accept" | "reject" |
   return REJECT_LABELS.includes(bare) ? "reject" : null;
 }
 
+/** The option label of the third answer of a review-round-cap question (BR-1531); its direction text is the free-text Other answer. */
+export const ASK_DIRECT_LABEL = "Direct";
+const DIRECT_LABELS: readonly string[] = [ASK_DIRECT_LABEL, "指示"];
+
+/**
+ * The direction a human typed as the free-text (Other) answer of a review-round-cap question, or null when the answer is
+ * empty or is one of the option labels (picking "Direct" without typing records no direction).
+ */
+export function directionOfAnswer(chosen: string | undefined): string | null {
+  if (chosen === undefined) return null;
+  const text = chosen.trim();
+  if (text === "") return null;
+  const bare = text.replace(RECOMMENDED_MARKER, "");
+  if (ACCEPT_LABELS.includes(bare) || REJECT_LABELS.includes(bare) || DIRECT_LABELS.includes(bare)) return null;
+  return text;
+}
+
 /** Text that opens every lore-written question; the decision id follows. Its absence means "not a lore question". */
 export const ASK_DECISION_MARKER = "Lore decision #";
 
@@ -118,7 +135,7 @@ export type QuestionOutcome =
   | { readonly kind: "ignored"; readonly line: string }
   | { readonly kind: "refused"; readonly line: string }
   | { readonly kind: "pending"; readonly line: string }
-  | { readonly kind: "recorded"; readonly line: string; readonly decision_id: number; readonly answer: "accept" | "reject" };
+  | { readonly kind: "recorded"; readonly line: string; readonly decision_id: number; readonly answer: "accept" | "reject" | "direct" };
 
 export interface HarnessAnswerReport {
   /** 0, or HARNESS_ANSWER_REFUSAL_EXIT when anything was refused or the payload was not an AskUserQuestion PostToolUse. */
@@ -207,18 +224,22 @@ async function recordOneQuestion(
   if (pending.value.subject_version !== issued.subject_version) return refuse(`decision ${decisionId}: the subject changed since the question was issued`);
 
   const chosen = answers[question.question];
-  const answer = answerOfLabel(chosen);
-  if (answer === null) return ok({ kind: "pending", line: `${label}: decision ${decisionId} still pending (no Accept or Reject chosen)` });
+  const labelAnswer = answerOfLabel(chosen);
+  // reason: BR-1531 — only a review-round-cap question has a third answer; its direction is the free-text Other answer.
+  // Every other class still records nothing for free text, and "Direct" picked without text records nothing either.
+  const direction = labelAnswer === null && pending.value.class === "review-round-cap" ? directionOfAnswer(chosen) : null;
+  const answer: "accept" | "reject" | "direct" | null = labelAnswer ?? (direction === null ? null : "direct");
+  if (answer === null) return ok({ kind: "pending", line: `${label}: decision ${decisionId} still pending (no Accept or Reject chosen${pending.value.class === "review-round-cap" ? "; a Direct answer needs the direction typed as the Other answer" : ""})` });
 
   const consumed = await deps.store.consumePendingAsk(nonce, deps.now());
   if (!consumed.ok) return consumed;
   if (!consumed.value) return refuse(`decision ${decisionId}: the nonce was already used`);
-  const resolved = await service.resolvePending(decisionId, answer, "answered in the agent session through the interactive question", issueHarnessAskProof(deps.now()));
+  const resolved = await service.resolvePending(decisionId, answer, direction ?? "answered in the agent session through the interactive question", issueHarnessAskProof(deps.now()));
   if (!resolved.ok) return err(resolved.error);
   return ok({
     kind: "recorded",
     decision_id: decisionId,
     answer,
-    line: `${label}: decision ${decisionId} ${answer === "accept" ? "accepted" : "rejected"} (record ${resolved.value.id}); carry out the answer: ${answer === "accept" ? "re-run the operation now" : "do not re-run the operation"}`,
+    line: `${label}: decision ${decisionId} ${answer === "accept" ? "accepted" : answer === "direct" ? "directed" : "rejected"} (record ${resolved.value.id}); carry out the answer: ${answer === "accept" ? "re-run the operation now" : answer === "direct" ? "follow the direction and run the next review round" : "do not re-run the operation"}`,
   });
 }

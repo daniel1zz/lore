@@ -646,6 +646,27 @@ const WorkflowConfigSchema = z
          * judgments (BR-1369). `[]` disables the gate entirely. Default: ["spec","adr"].
          */
         judgment_required_types: z.array(z.string()).default(["spec", "adr"]),
+        /**
+         * How many review test runs (selection chunks, head rechecks, bisection runs, criteria runs) may run at once on one
+         * machine (BR-1532, #574). A positive integer; 0, a negative number or a non-number is a config load error naming
+         * `workflow.review.machine_test_slots`. Default: 1.
+         */
+        machine_test_slots: z.number().int().positive().default(1),
+      })
+      .strict()
+      .default({}),
+    /**
+     * Structured documents (spec-every-document-is-stored-as-structured-fields-validated-by, BR-1528).
+     *
+     * @invariant `require_create: true` makes every NEW document be created structured (`--fields-file`, validated
+     *   against the latest approved template of its type and kind); a type with no approved template is refused.
+     *   `false` (default) leaves a plain create as it was: a create that supplies `extra.fields` is structured either
+     *   way, and a document that already has a `template_ref` is always validated on every write. The default flips
+     *   when the open documents are converted and every generator fills fields, not before.
+     */
+    structured_documents: z
+      .object({
+        require_create: z.boolean().default(false),
       })
       .strict()
       .default({}),
@@ -1488,6 +1509,18 @@ export function resolveJudgmentRequiredTypes(config: LoreConfig | undefined): st
     config?.workflow?.review?.judgment_required_types ??
     WorkflowConfigSchema.parse({}).review.judgment_required_types
   );
+}
+
+/**
+ * Resolve the effective `workflow.review.machine_test_slots` (BR-1532): how many review test runs run at once per machine.
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns A positive integer; 1 when the key is absent
+ * @example
+ *   resolveMachineTestSlots(undefined) // => 1
+ */
+export function resolveMachineTestSlots(config: LoreConfig | undefined): number {
+  return config?.workflow?.review?.machine_test_slots ?? WorkflowConfigSchema.parse({}).review.machine_test_slots;
 }
 
 /**

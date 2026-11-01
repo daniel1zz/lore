@@ -1,0 +1,28 @@
+{
+  "doc_type": "knowledge",
+  "kind": "skill",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["purpose", "trigger", "steps"],
+    "properties": {
+      "purpose": { "type": "string", "minLength": 1, "title": "Purpose", "description": "What the skill gets done, in one sentence." },
+      "applies_to": { "type": "string", "title": "Applies to", "description": "The scope this skill applies to, for example spec or task." },
+      "trigger": { "type": "string", "minLength": 1, "title": "Trigger", "description": "When the skill should be invoked." },
+      "not_for": { "type": "array", "title": "Not for", "items": { "type": "string", "minLength": 1 }, "description": "Situations that look like a match but belong to another skill." },
+      "steps": { "type": "array", "title": "Steps", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+      "references": { "type": "array", "title": "References", "x-ref-list": true, "items": { "type": "string", "minLength": 1 } }
+    }
+  },
+  "dimensions": [
+    { "id": "trigger-precision", "question": "Which request would wrongly fire this skill, and what in the trigger keeps it out?" },
+    { "id": "failure-modes", "question": "Which step does an agent most often skip or do wrong, and what makes that visible?" }
+  ],
+  "checks": ["refs-resolve"],
+  "render": [
+    { "heading": "Purpose", "fields": ["purpose", "applies_to"] },
+    { "heading": "Trigger", "fields": ["trigger", "not_for"] },
+    { "heading": "Steps", "fields": ["steps"] },
+    { "heading": "References", "fields": ["references"] }
+  ]
+}

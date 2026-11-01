@@ -1,0 +1,39 @@
+{
+  "doc_type": "knowledge",
+  "kind": "prompt",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["purpose", "body"],
+    "properties": {
+      "purpose": { "type": "string", "minLength": 1, "title": "Purpose", "description": "What this prompt makes the model do, in one sentence." },
+      "target_surface": { "type": "string", "title": "Target surface", "description": "Where the prompt is consumed, for example a slash command or a subagent dispatch." },
+      "variables": {
+        "type": "array",
+        "title": "Variables",
+        "items": {
+          "type": "object",
+          "required": ["name", "description"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1, "description": "The placeholder name as it appears in the body." },
+            "description": { "type": "string", "minLength": 1 },
+            "required": { "type": "boolean" }
+          }
+        }
+      },
+      "body": { "type": "string", "minLength": 1, "title": "Prompt body", "description": "The prompt text, with variables as named placeholders." },
+      "example_output": { "type": "string", "title": "Example output", "description": "One output that meets the intent." }
+    }
+  },
+  "dimensions": [
+    { "id": "failure-modes", "question": "What does the model do wrong when a variable is missing or the input is hostile, and does the body guard against it?" },
+    { "id": "evaluation", "question": "How would you tell that a change to this prompt made it better or worse?" }
+  ],
+  "checks": [],
+  "render": [
+    { "heading": "Purpose", "fields": ["purpose", "target_surface"] },
+    { "heading": "Variables", "fields": ["variables"] },
+    { "heading": "Prompt", "fields": ["body"] },
+    { "heading": "Example output", "fields": ["example_output"] }
+  ]
+}

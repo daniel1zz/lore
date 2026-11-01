@@ -57,6 +57,7 @@ import type {
   PendingAskInput,
   PendingAskRecord,
   LeaseAcquisition,
+  LeaseTakeover,
   LeaseRecord,
   ReadDayCount,
   TraceEventInput,
@@ -1851,6 +1852,13 @@ export class InMemoryStore implements StoreInterface {
     return ok({ acquired: true, tookOver: prior !== undefined && prior.holder !== holder });
   }
 
+  async takeOverLease(name: string, expectedHolder: string, newHolder: string, expiresAtIso: string): Promise<Result<LeaseTakeover, LoreError>> {
+    const prior = this.leases.get(name);
+    if (prior === undefined || prior.holder !== expectedHolder) return ok({ acquired: false, current: prior ?? null });
+    this.leases.set(name, { name, holder: newHolder, expires_at: expiresAtIso });
+    return ok({ acquired: true });
+  }
+
   async renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>> {
     const prior = this.leases.get(name);
     if (prior === undefined || prior.holder !== holder) return ok(false);
@@ -1903,8 +1911,11 @@ export class InMemoryStore implements StoreInterface {
 
   async insertSuiteFileRuns(rows: readonly SuiteFileRunRecord[]): Promise<Result<void, LoreError>> {
     for (const row of rows) {
-      // reason: a single-file key stores one row per file, first wins (migration-045's partial unique index, #528).
-      const taken = isSingleFileRunKey(row.suite_result_id) && this.suiteFileRuns.some((r) => r.suite_result_id === row.suite_result_id && r.file === row.file);
+      // reason: a single-file key stores one CONCLUSIVE row per file, first wins (migration-045's partial unique index narrowed by 047, #528); inconclusive rows never conflict.
+      const taken =
+        isSingleFileRunKey(row.suite_result_id) &&
+        row.classification !== "inconclusive" &&
+        this.suiteFileRuns.some((r) => r.suite_result_id === row.suite_result_id && r.file === row.file && r.classification !== "inconclusive");
       if (!taken) this.suiteFileRuns.push({ ...row });
     }
     return ok(undefined);

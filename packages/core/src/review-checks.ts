@@ -41,6 +41,7 @@ import {
 } from "./schemas.js";
 import { phaseExtraSchema } from "./phase.js";
 import { baselineExtraSchema } from "./baseline.js";
+import { templateDocumentExtraSchema } from "./template-document.js";
 
 // ─── Review Bundle ──────────────────────────────────────────────────────────
 
@@ -112,6 +113,10 @@ function safeParseExtraForType(doc: DocRecord): { success: boolean; issues: { pa
     }
     case "baseline": {
       const r = baselineExtraSchema.safeParse(doc.extra);
+      return { success: r.success, issues: r.success ? [] : r.error.issues };
+    }
+    case "template": {
+      const r = templateDocumentExtraSchema.safeParse(doc.extra);
       return { success: r.success, issues: r.success ? [] : r.error.issues };
     }
   }

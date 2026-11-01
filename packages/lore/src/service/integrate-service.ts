@@ -204,12 +204,41 @@ export interface LandingCompleter {
 }
 
 /**
- * Starts the post-landing review batch (BR-1379, AC-PCR-3). Wired by the CLI to `ReviewTriggerService.start`: it computes
- * the trigger set from stored plan progress and, when non-empty, spawns ONE detached batch and returns at once, whatever
- * other batches run (the per-plan lease skips the plans another batch holds, BR-1511). A failure is a WARNING line, never a failed landing; the landing carries no review time.
+ * Starts the post-landing review batch (BR-1379, AC-PCR-3, BR-1532). Wired by the CLI to `ReviewTriggerService.start`: it computes
+ * the trigger set from stored plan progress and, when non-empty, takes the machine's `batch:<machine>` lease atomically and
+ * spawns ONE detached batch holding it on the child's behalf, returning at once (`started`); when another live holder has
+ * the lease it starts nothing (`covered`: that batch re-reads the trigger set after it releases, so it picks the landing's
+ * plans up). A failure is a WARNING line, never a failed landing; the landing carries no review time.
  */
 export interface ReviewBatchStarter {
-  readonly start: () => Promise<Result<{ readonly state: "empty" | "started"; readonly triggered?: number; readonly pid?: number | undefined }, LoreError>>;
+  readonly start: () => Promise<Result<ReviewBatchStartOutcome, LoreError>>;
+}
+
+/** What {@link ReviewBatchStarter.start} did. */
+export interface ReviewBatchStartOutcome {
+  readonly state: "empty" | "started" | "covered";
+  readonly triggered?: number;
+  readonly pid?: number | undefined;
+  /** The batch lease key (`batch:<machine>`), on `started` and `covered`. */
+  readonly key?: string;
+  /** True when the key is the shared `batch:unknown` (this process has no machine identity, BR-1514). */
+  readonly machineUnknown?: boolean;
+  /** Who holds the key, on `covered`. */
+  readonly holder?: string;
+}
+
+/**
+ * The one line `lore integrate` prints for the post-landing review batch: `started` names the plan count and pid, `covered`
+ * says the running batch (and its lease key and holder) will pick the landing's plans up, an unknown machine identity names the
+ * shared `batch:unknown` key (BR-1514, BR-1532).
+ */
+export function describeBatchStart(outcome: ReviewBatchStartOutcome): string {
+  if (outcome.state === "empty") return "integrate: review batch: no plan needs review";
+  const unknown = outcome.machineUnknown === true ? `; machine identity unreadable, so the lease key is the shared ${outcome.key ?? "batch:unknown"}` : "";
+  if (outcome.state === "covered") {
+    return `integrate: review batch: the running batch (${outcome.key ?? "batch"} held by ${outcome.holder ?? "another process"}) covers this landing; it re-reads the trigger set when it finishes and will review ${String(outcome.triggered)} plan(s)${unknown}`;
+  }
+  return `integrate: review batch started for ${String(outcome.triggered)} plan(s)${outcome.pid !== undefined ? ` (pid ${String(outcome.pid)})` : ""}; the landing does not wait for it${unknown}`;
 }
 
 /** Judges a branch's own change before it lands (BR-1346, BR-1347, BR-1348, BR-1355); `OwnDiffJudgment` implements it. Reads, never writes. */
@@ -662,8 +691,8 @@ export class IntegrateService {
   }
 
   /**
-   * After a landing: computes the review trigger set and starts one detached batch when it is non-empty, whatever other
-   * batches are running (BR-1379, BR-1511). Never fails the integration and never waits: the outcome is one line.
+   * After a landing: computes the review trigger set and starts one detached batch when it is non-empty and no batch holds
+   * this machine's batch lease; otherwise says the running batch covers it (BR-1379, BR-1532). Never fails the integration and never waits: the outcome is one line.
    */
   private async startReviewBatch(): Promise<void> {
     const starter = this.deps.reviewBatch;
@@ -673,9 +702,7 @@ export class IntegrateService {
       this.deps.log(`integrate: WARNING: the review batch was not started: ${started.error.code}${"message" in started.error ? ` ${started.error.message}` : ""}`);
       return;
     }
-    const outcome = started.value;
-    if (outcome.state === "empty") this.deps.log("integrate: review batch: no plan needs review");
-    else this.deps.log(`integrate: review batch started for ${String(outcome.triggered)} plan(s)${outcome.pid !== undefined ? ` (pid ${String(outcome.pid)})` : ""}; the landing does not wait for it`);
+    this.deps.log(describeBatchStart(started.value));
   }
 
   /**

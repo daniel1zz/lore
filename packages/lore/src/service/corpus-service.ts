@@ -18,6 +18,8 @@ import type { LoreError } from "@lore/core";
 import { containsCjk, getTransliterateCjk } from "@lore/core/node";
 import {
   adrExtraSchema,
+  templateDocumentExtraSchema,
+  templatesEqual,
   canonicaliseBody,
   createDocInputSchema,
   deriveTypeMeta,
@@ -143,6 +145,13 @@ import { type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-r
 import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-archive.js";
 import { isPlanMember } from "./plan-membership.js";
 import { bodyDiffers, RecordLockService, type RecordEditOp } from "./record-lock-service.js";
+import {
+  guardStructuredRowWrite,
+  prepareStructuredCreate,
+  prepareStructuredUpdate,
+  type FieldsPatch,
+  type StructuredWriteDeps,
+} from "./structured-write.js";
 import { ANCHOR_SCANNED_DOC_TYPES } from "./drift-check-service.js";
 import { findPlanClaimedByWriter } from "./run-claimed-plan.js";
 // reason: NOT a cross-service import — `service/CLAUDE.md`'s "no cross-service imports"
@@ -339,6 +348,17 @@ export interface SetOptions extends WriteActorOpts {
    * retirement; required to be a plan the writing run claims a task in. Ignored by every other write.
    */
   readonly plan?: string;
+  /**
+   * `lore set --fields-file`: a PARTIAL update of a templated document's structured content. Top-level `fields` keys
+   * replace, `dimensions` merge by id; the result is revalidated against the pinned template and the body re-rendered.
+   * Refused for a document with no `extra.template_ref`.
+   */
+  readonly fieldsPatch?: FieldsPatch;
+  /**
+   * `lore set --template-version latest`: move the document's pin to the newest approved template version and
+   * revalidate against it (a newly required dimension must then be answered, or the write is refused).
+   */
+  readonly templateVersion?: "latest";
 }
 
 /**
@@ -1192,6 +1212,19 @@ export class CorpusService {
   }
 
   /**
+   * Arms template validation and body rendering on the write path (BR-1528/BR-1529). Called once by `app.ts`; absent
+   * (every bare `new CorpusService(store)`) ⇒ create and set behave as before the structured-documents change.
+   *
+   * @param deps - the template reader and the create policy (see {@link StructuredWriteDeps})
+   */
+  setStructuredWrite(deps: StructuredWriteDeps): void {
+    this.structuredWrite = deps;
+  }
+
+  /** Template validation/rendering for the write path; absent (bare construction) ⇒ every write is legacy-shaped. */
+  private structuredWrite: StructuredWriteDeps | undefined;
+
+  /**
    * Arms the citation gate for `create`'s inline acceptance criteria (spec-baseline-slice-2 §C3/§C4,
    * AC-BLS2-2): create is a SANCTIONED AC write path, so it must not bypass the gate `AcService` applies
    * to `ac add|set|cite`. Called once by `app.ts` with the raw `workflow.gates."ac-cite"` entry; absent
@@ -1652,6 +1685,16 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     if (refusal !== undefined) return refusal;
     const { doc, patch } = request;
     if (patchedFieldsUnchanged(doc, patch)) return ok({ doc, written: false });
+
+    // BR-1528/BR-1529 — the row route carries lifecycle, link and anchor writes; it must not become a way to store a
+    // body or invalid fields on a templated document.
+    if (this.structuredWrite !== undefined) {
+      const guarded = await guardStructuredRowWrite(this.structuredWrite, doc, {
+        content: patch.content,
+        extra: patch.extra,
+      });
+      if (!guarded.ok) return guarded;
+    }
 
     if (request.lock !== "none") {
       const gate = await this.recordLock.assertEditable(doc, request.lock, {
@@ -2725,8 +2768,26 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
         : specKindDefaultedExtra;
     // reason: BR-1339 — a baseline node is born with its own part awaiting a first approval (`pending.node.initial`), so it
     // is `draft` by derivation, not by a status nobody may set; the first approval removes the marker.
-    const resolvedExtra: Record<string, unknown> =
+    const unstructuredExtra: Record<string, unknown> =
       data.type === "baseline" && anchoredExtra["pending"] === undefined ? { ...anchoredExtra, pending: initialPending() } : anchoredExtra;
+
+    // BR-1528 — a templated create is validated against its pinned template and its body is rendered from the fields,
+    // BEFORE any gate or write below runs, so a refusal leaves nothing behind and the gates see the rendered text.
+    // A create that is not structured (no fields, policy not armed) is returned untouched: legacy free body.
+    let resolvedExtra: Record<string, unknown> = unstructuredExtra;
+    if (this.structuredWrite !== undefined) {
+      const structured = await prepareStructuredCreate(this.structuredWrite, {
+        type: data.type,
+        slug,
+        extra: unstructuredExtra,
+        content: data.content,
+      });
+      if (!structured.ok) return structured;
+      if (structured.value !== null) {
+        resolvedExtra = structured.value.extra;
+        data = { ...data, content: structured.value.content };
+      }
+    }
 
     // SPEC-103 §Mechanisms M1 — ledger fast-track (D1: knowledge sub_types
     // assessment/retro/handoff/uat ONLY; `task` is deliberately excluded, see
@@ -3308,9 +3369,9 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       if (refusal !== undefined) return refusal;
     }
 
-    const parsedPatch = docPatchSchema.safeParse(patch);
-    if (!parsedPatch.success) {
-      const issue = parsedPatch.error.issues[0];
+    const parsedPatchInput = docPatchSchema.safeParse(patch);
+    if (!parsedPatchInput.success) {
+      const issue = parsedPatchInput.error.issues[0];
       return err({
         code: "VALIDATION_ERROR",
         field: issue ? String(issue.path.join(".")) : "patch",
@@ -3330,6 +3391,24 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
 
     const existing = findResult.value;
     const now = new Date().toISOString();
+
+    // BR-1529 — a templated document's body is rendered from its fields: a supplied body is refused, a fields change
+    // is revalidated against the PINNED template and re-rendered. From here on the patch carries the rendered text, so
+    // every gate below (record lock, demotion, spec-promote) judges what will actually be stored. A legacy document
+    // (no template_ref) passes through untouched.
+    let parsedPatch = parsedPatchInput;
+    if (this.structuredWrite !== undefined) {
+      const structured = await prepareStructuredUpdate(
+        this.structuredWrite,
+        existing,
+        { content: parsedPatchInput.data.content, extra: parsedPatchInput.data.extra },
+        { fieldsPatch: opts?.fieldsPatch, templateVersion: opts?.templateVersion },
+      );
+      if (!structured.ok) return structured;
+      if (structured.value !== null) {
+        parsedPatch = { ...parsedPatchInput, data: { ...parsedPatchInput.data, content: structured.value.content, extra: structured.value.extra } };
+      }
+    }
 
     const carrierRefusal = judgeIssueCarrierExtra(existing.type, parsedPatch.data.extra) ?? judgeKnownDefectsExtra(existing.type, parsedPatch.data.extra);
     if (carrierRefusal !== undefined) return err(carrierRefusal);
@@ -3446,9 +3525,16 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // reason: spec D14 — the demotion trigger is a DIFFERENCE too. A resend of the stored text (a tag save
     // from the dashboard) is not an edit, and demoting a locked record on it would reopen it by the back
     // door. `bodyDiffers` compares canonicalised text, so a re-save of the same body reads as unchanged.
+    // reason: a template's substance is `extra.template`, not its body — editing it is a contract edit, so an approved
+    // template returns to draft and the approved version stays what it was (T2: `slug@N` must keep resolving).
+    const templateChanged =
+      existing.type === "template" &&
+      parsedPatch.data.extra !== undefined &&
+      !templatesEqual(existing.extra["template"], parsedPatch.data.extra["template"]);
     const contentOrTitleChanged =
       (parsedPatch.data.content !== undefined && bodyDiffers(existing.content, parsedPatch.data.content)) ||
-      (parsedPatch.data.title !== undefined && parsedPatch.data.title !== existing.title);
+      (parsedPatch.data.title !== undefined && parsedPatch.data.title !== existing.title) ||
+      templateChanged;
     // reason: this is an INTERNAL lifecycle invariant (SPEC-002 §3), not a
     // user-requested transition — approved→draft is deliberately absent from
     // VALID_TRANSITIONS (only active/archived/deprecated follow "approved"),
@@ -3810,6 +3896,19 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
           message: "extra.validity cannot be changed via `lore set` — use `lore invalidate` instead",
           value: parsedPatch.data.extra["validity"],
           rule: "BR-730",
+        });
+      }
+    }
+
+    // template: extra.template is re-validated by the core meta-schema on every set (all issues, one refusal).
+    if (existing.type === "template" && parsedPatch.data.extra !== undefined) {
+      const templateResult = templateDocumentExtraSchema.safeParse(parsedPatch.data.extra);
+      if (!templateResult.success) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "extra.template",
+          message: templateResult.error.issues.map((issue) => issue.message).join("; "),
+          value: parsedPatch.data.extra["template"],
         });
       }
     }

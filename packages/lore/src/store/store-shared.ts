@@ -430,6 +430,18 @@ export interface SuiteResultRecord {
   readonly measured_at: string;
 }
 
+/**
+ * What a stored file run says about the file (BR-1533): `red` = a test failed for a reason other than a timeout, `green` = it
+ * passed, `inconclusive` = every failure was a test or hook timeout (or the run's own time limit ended): it says nothing.
+ */
+export type FileRunClassification = "red" | "green" | "inconclusive";
+
+/**
+ * Why a run is inconclusive: its tests timed out, the run wrote no readable outcome report (its console says nothing reliable),
+ * or it is an old failing run classified once by migration 047.
+ */
+export type InconclusiveCause = "timeout" | "no-report" | "unclassified";
+
 /** One named test file re-run at a commit, attached to a suite result (`suite_file_runs`). */
 export interface SuiteFileRunRecord {
   readonly suite_result_id: string;
@@ -439,6 +451,10 @@ export interface SuiteFileRunRecord {
   readonly output_tail: string;
   readonly duration_ms: number;
   readonly measured_at: string;
+  /** Always present: migration 047 classified every earlier row, every writer classifies. */
+  readonly classification: FileRunClassification;
+  /** Set exactly when `classification` is `inconclusive`. */
+  readonly inconclusive_cause: InconclusiveCause | null;
 }
 
 /** Raw `suite_results` row. */
@@ -465,6 +481,8 @@ export interface SuiteFileRunRow {
   output_tail: string;
   duration_ms: number | bigint;
   measured_at: string;
+  classification: string;
+  inconclusive_cause: string | null;
 }
 
 /** The JSON texts a store writes for a suite result's three JSON columns. */
@@ -500,15 +518,23 @@ export function rowToSuiteResult(row: SuiteResultRow): SuiteResultRecord {
 /**
  * Whether a `suite_file_runs.suite_result_id` is a single-file key (`file-<kind>@<commit>`, `singleFileRunKey`), whose
  * (key, file) pair is stored once and first-wins (migration-045, #528). Any other id is a real suite result id, under which
- * `rerunFiles` appends every re-run. Must match migration-045's `LIKE 'file-%@%'` predicate.
+ * (the legacy re-runs of the removed `rerunFiles`) every re-run is appended. Must match migration-045's `LIKE 'file-%@%'` predicate.
  */
 export function isSingleFileRunKey(suiteResultId: string): boolean {
   return suiteResultId.startsWith("file-") && suiteResultId.includes("@", "file-".length);
 }
 
-/** Maps a raw `suite_file_runs` row to a record (`Number()` for libsql bigint). */
+/** Maps a raw `suite_file_runs` row to a record (`Number()` for libsql bigint). A classification outside the three values throws (a corrupt row is never read as a result). */
 export function rowToSuiteFileRun(row: SuiteFileRunRow): SuiteFileRunRecord {
+  if (row.classification !== "red" && row.classification !== "green" && row.classification !== "inconclusive") {
+    throw new Error(`suite_file_runs ${row.suite_result_id} ${row.file}: unknown classification "${row.classification}"`);
+  }
+  if (row.inconclusive_cause !== null && row.inconclusive_cause !== "timeout" && row.inconclusive_cause !== "no-report" && row.inconclusive_cause !== "unclassified") {
+    throw new Error(`suite_file_runs ${row.suite_result_id} ${row.file}: unknown inconclusive cause "${row.inconclusive_cause}"`);
+  }
   return {
+    classification: row.classification,
+    inconclusive_cause: row.inconclusive_cause,
     suite_result_id: row.suite_result_id,
     commit_sha: row.commit_sha,
     file: row.file,
@@ -561,6 +587,11 @@ export interface LeaseRecord {
 export type LeaseAcquisition =
   | { readonly acquired: true; readonly tookOver: boolean }
   | { readonly acquired: false; readonly holder: string; readonly expires_at: string };
+
+/** Outcome of `takeOverLease`: taken, or not because the row is no longer the expected holder's (`current` is the row now, `null` when it is gone). */
+export type LeaseTakeover =
+  | { readonly acquired: true }
+  | { readonly acquired: false; readonly current: LeaseRecord | null };
 
 /** One UTC day's read count (`trace_read_counts`, migration-031, BR-1373). */
 export interface ReadDayCount {

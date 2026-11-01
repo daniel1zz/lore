@@ -96,6 +96,7 @@ import type {
   PendingAskInput,
   PendingAskRecord,
   LeaseAcquisition,
+  LeaseTakeover,
   LeaseRecord,
   ReadDayCount,
   TraceEventInput,
@@ -199,6 +200,8 @@ import { MIGRATION_042_ADD_COLUMNS, MIGRATION_042_SQL } from "./migrations/migra
 import { MIGRATION_043_SQL } from "./migrations/migration-043.js";
 import { MIGRATION_044_SQL } from "./migrations/migration-044.js";
 import { MIGRATION_045_SQL } from "./migrations/migration-045.js";
+import { MIGRATION_046_SQL } from "./migrations/migration-046.js";
+import { MIGRATION_047_SQL } from "./migrations/migration-047.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey, DecisionVersionQuery } from "./store-interface.js";
@@ -1095,6 +1098,40 @@ export class SQLiteStore implements StoreInterface {
       // reason: migration-045 adds the partial unique index over single-file run keys (#528) in ONE BEGIN/COMMIT; a failure rolls back and leaves schema 44.
       try {
         this.db.exec(MIGRATION_045_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-044 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 46 && 46 <= ceiling) {
+      // reason: migration-046 widens docs.type to accept 'template' with the migration-013 table-recreate recipe (FK pragma outside the transaction).
+      try {
+        this.db.exec(MIGRATION_046_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-013 — safe to ignore, the failure below is what to report.
+        }
+        // reason: BUG-010 — `PRAGMA foreign_keys = OFF` is connection-level and survives ROLLBACK; restore it (as migration-013's branch does).
+        try {
+          this.db.exec("PRAGMA foreign_keys = ON");
+        } catch {
+          // reason: only throws on a closed/broken connection, where `error` below is what the caller needs.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 47 && 47 <= ceiling) {
+      // reason: migration-047 classifies every stored file run (BR-1533) and narrows the single-file unique index to conclusive rows, in ONE BEGIN/COMMIT; a failure rolls back and leaves schema 46.
+      try {
+        this.db.exec(MIGRATION_047_SQL);
       } catch (error) {
         try {
           this.db.exec("ROLLBACK;");
@@ -3878,6 +3915,21 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
+  async takeOverLease(name: string, expectedHolder: string, newHolder: string, expiresAtIso: string): Promise<Result<LeaseTakeover, LoreError>> {
+    try {
+      // reason: ONE conditional UPDATE (BR-1514) — the WHERE on the expected holder is the compare-and-set that gives
+      // exactly one of two takers of a dead holder's lease the row; outcome from RETURNING rows, never the change count.
+      const rows = this.db
+        .query("UPDATE review_leases SET holder = ?, expires_at = ? WHERE name = ? AND holder = ? RETURNING name")
+        .all(newHolder, expiresAtIso, name, expectedHolder);
+      if (rows.length > 0) return ok({ acquired: true });
+      const current = this.db.query("SELECT name, holder, expires_at FROM review_leases WHERE name = ?").get(name) as LeaseRecord | null;
+      return ok({ acquired: false, current: current ?? null });
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   async renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>> {
     try {
       const rows = this.db.query("UPDATE review_leases SET expires_at = ? WHERE name = ? AND holder = ? RETURNING name").all(expiresAtIso, name, holder);
@@ -3979,9 +4031,9 @@ export class SQLiteStore implements StoreInterface {
       this.db.transaction(() => {
         for (const row of rows) {
           this.db.run(
-            // reason: OR IGNORE honours migration-045's partial unique index: a second single-file run of one (key, file) is dropped, first wins (#528); re-run rows under a suite id never conflict.
-            "INSERT OR IGNORE INTO suite_file_runs (suite_result_id, commit_sha, file, exit_code, output_tail, duration_ms, measured_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [row.suite_result_id, row.commit_sha, row.file, row.exit_code, row.output_tail, row.duration_ms, row.measured_at],
+            // reason: OR IGNORE honours the partial unique index (migration-045, narrowed by 047 to conclusive rows): a second CONCLUSIVE single-file run of one (key, file) is dropped, first wins (#528); inconclusive runs and re-run rows under a suite id never conflict.
+            "INSERT OR IGNORE INTO suite_file_runs (suite_result_id, commit_sha, file, exit_code, output_tail, duration_ms, measured_at, classification, inconclusive_cause) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [row.suite_result_id, row.commit_sha, row.file, row.exit_code, row.output_tail, row.duration_ms, row.measured_at, row.classification, row.inconclusive_cause],
           );
         }
       })();
