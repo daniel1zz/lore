@@ -109,12 +109,14 @@ function makeBundle(doc: DocRecord, parent?: DocRecord): ReviewBundle {
 describe("HAPPY — lore feed <checkpoint> renders the D4 banner for an invalidated feeding skill", () => {
   it("buildFeed's feed text carries the INVALIDATED banner when the discovered skill doc is invalidated", async () => {
     const { corpusService, validityService, outlineService } = makeCorpusServices();
-    const skill = await createApprovedSkill(corpusService, "Write-spec rules");
+    // reason: spec-create's feed quotes the approved template now; a registered checkpoint with no template rule still
+    // discovers a skill doc by its own name, which is what carries the D4 banner.
+    const skill = await createApprovedSkill(corpusService, "Promote rules", "spec-promote");
     const invalidateResult = await validityService.invalidate(skill.id, { by: "alice", reason: "outdated" });
     expect(invalidateResult.ok).toBe(true);
 
     const app = makeApp(corpusService, outlineService);
-    const outcome = await buildFeed(app, "spec-create");
+    const outcome = await buildFeed(app, "spec-promote");
     expect(outcome.skill).not.toBeNull();
     expect(outcome.feed).toContain("⚠ INVALIDATED");
     expect(outcome.feed).toContain("outdated");
@@ -122,10 +124,10 @@ describe("HAPPY — lore feed <checkpoint> renders the D4 banner for an invalida
 
   it("REGRESSION: a VALID feeding skill produces feed text with NO invalidation banner", async () => {
     const { corpusService, outlineService } = makeCorpusServices();
-    await createApprovedSkill(corpusService, "Write-spec rules");
+    await createApprovedSkill(corpusService, "Promote rules", "spec-promote");
 
     const app = makeApp(corpusService, outlineService);
-    const outcome = await buildFeed(app, "spec-create");
+    const outcome = await buildFeed(app, "spec-promote");
     expect(outcome.skill).not.toBeNull();
     expect(outcome.feed).not.toContain("INVALIDATED");
   });
