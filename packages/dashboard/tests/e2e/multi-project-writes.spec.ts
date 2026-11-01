@@ -61,9 +61,10 @@ test.describe("SPEC-078 multi-project write-surface equivalence", () => {
       data: {
         type: "spec",
         title: `E2E Gate-Denied Spec ${fixture.runId}`,
-        // No "## " heading anywhere — the spec-create gate's hasSkeleton predicate
-        // must reject this (MISSING_SKELETON).
         content: "no heading here, just plain prose",
+        // reason: BR-4's heading count (hasSkeleton) is retired; the spec-create predicate a schema-valid write can
+        // still trip is the AC-quantifiability one: an abstract-quality criterion with no threshold.
+        extra: { acceptance_criteria: [{ id: "AC-VAGUE-1", statement: "the dashboard loads fast", verify: { mode: "human" } }] },
       },
     });
 
@@ -71,10 +72,10 @@ test.describe("SPEC-078 multi-project write-surface equivalence", () => {
     const body = (await res.json()) as { ok: boolean; error?: { code: string; field?: string; message?: string } };
     expect(body.ok).toBe(false);
     expect(body.error?.code).toBe("VALIDATION_ERROR");
-    expect(body.error?.field).toBe("gate:spec-create");
+    expect(body.error?.field).toBe("gate:spec-create:ac-quantifiable");
     // The feeding pack (GateEnforcer D1/SPEC-049) is embedded in the message.
     expect(body.error?.message).toContain('Gate "spec-create" blocked');
-    expect(body.error?.message).toContain("MISSING_SKELETON");
+    expect(body.error?.message).toContain("AC_NOT_QUANTIFIABLE");
   });
 
   test("the same write succeeds in B, and both corpora's audit trails show a real http_cookie write", async () => {

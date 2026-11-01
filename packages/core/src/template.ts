@@ -27,7 +27,9 @@
  *   x-ref                   refs-resolve               a single string ref (e.g. `spec_ref`), resolved like a list entry.
  *                                                      TOP-LEVEL string fields only; a string property inside a list
  *                                                      item is not read (that generalisation is not one line)
- *   x-refusal-list          refusal-has-ac            array of entries; each key must be cited by >= 1 AC
+ *   x-refusal-list          refusal-has-ac            array of objects; each carries its OWN `acs: string[]` (AC ids) and
+ *                                                      >= 1 of them must exist on the document (an AC `cites` only takes
+ *                                                      rule ids, so a refusal is never "cited"; it names its ACs itself)
  *   x-rule-change-list      rule-change-has-ac         array of entries; each key must be cited by >= 1 AC
  *   x-decision-list         decision-has-rejected      array of objects `{decision|id, chosen?, rejected, why}`;
  *                                                      `rejected` = non-empty string or non-empty array of
@@ -359,6 +361,29 @@ function citedBySomeCriterion(key: string, ports: CrossFieldCheckPorts): boolean
   return ports.criteria.some((criterion) => criterion.cites.includes(key));
 }
 
+/** The AC ids a refusal entry names in its own `acs` list (non-strings and non-array shapes yield none). */
+function namedAcIds(entry: unknown): string[] {
+  if (!isRecord(entry) || !Array.isArray(entry["acs"])) return [];
+  return (entry["acs"] as unknown[]).filter((id): id is string => typeof id === "string" && id !== "");
+}
+
+/**
+ * refusal-has-ac: every refusal entry names, in its own `acs`, at least one acceptance criterion that exists on the
+ * document. reason: an AC's `cites` accepts rule ids only (BR-n/AS-n), so "cited by an AC" could never hold for a refusal
+ * entry; the reference runs the other way (entry -> AC id) and is checked against the declared criteria here.
+ */
+const refusalHasAc: CrossFieldCheck = (view, ports) =>
+  markedFields(view, "x-refusal-list").flatMap((name) =>
+    entryList(view, name).flatMap((entry, index) => {
+      const key = entryKey(entry, index);
+      const named = namedAcIds(entry);
+      if (named.length === 0) return [{ check: "refusal-has-ac" as const, entry: `${name}: ${key}`, problem: "names no acceptance criterion (list its AC ids in acs)" }];
+      const declared = new Set(ports.criteria.map((criterion) => criterion.id));
+      if (named.some((id) => declared.has(id))) return [];
+      return [{ check: "refusal-has-ac" as const, entry: `${name}: ${key}`, problem: `names acceptance criteria that do not exist on this document: ${named.join(", ")}` }];
+    }),
+  );
+
 function everyEntryCited(check: CrossFieldCheckId, marker: string, noun: string): CrossFieldCheck {
   return (view, ports) =>
     markedFields(view, marker).flatMap((name) =>
@@ -446,7 +471,7 @@ const goalHasMeasure: CrossFieldCheck = (view) =>
 /** The library: pure functions keyed by id. */
 export const CROSS_FIELD_CHECKS: Readonly<Record<CrossFieldCheckId, CrossFieldCheck>> = {
   "refs-resolve": refsResolve,
-  "refusal-has-ac": everyEntryCited("refusal-has-ac", "x-refusal-list", "refusal"),
+  "refusal-has-ac": refusalHasAc,
   "rule-change-has-ac": everyEntryCited("rule-change-has-ac", "x-rule-change-list", "rule change"),
   "decision-has-rejected": decisionHasRejected,
   "out-of-scope-not-in-scope": outOfScopeNotInScope,

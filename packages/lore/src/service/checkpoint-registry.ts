@@ -99,7 +99,6 @@ import {
 import {
   parentLegal,
   specKindValid,
-  hasSkeleton,
   upstreamApproved,
   upstreamHasAcceptanceCriteria,
   noAnchorOverlap,
@@ -660,14 +659,17 @@ export function describeCheckpointVacuity(
 }
 
 /**
- * spec-create's three predicates (`parentLegal` / `specKindValid` / `hasSkeleton`,
- * `gate-predicates.ts`), lifted unchanged (same order, same inputs) from `gate.ts`'s
- * former inline `runSpecCreateGate` checks array.
+ * spec-create's two structural predicates (`parentLegal` / `specKindValid`,
+ * `gate-predicates.ts`), then `acQuantifiable` when enabled.
+ *
+ * reason: BR-4's `hasSkeleton` (at least one `## ` heading) is retired — a heading count is no longer the structure
+ * check. A templated spec is validated against its approved template at write (fields and dimension answers) and its
+ * cross-field checks run at promote (spec-every-document-is-stored-as-structured-fields-validated-by, AC-ST-1/3).
  */
 function checkSpecCreate(ctx: GateContext): PredicateResult[] {
   const parent =
     ctx.parentType !== undefined && ctx.parentType !== null ? { type: ctx.parentType } : null;
-  const results = [parentLegal(parent), specKindValid(ctx.specKind), hasSkeleton(ctx.content ?? "")];
+  const results = [parentLegal(parent), specKindValid(ctx.specKind)];
   if (ctx.acQuantifiableEnabled !== false) {
     results.push(acQuantifiable(ctx.acceptanceCriteria));
   }

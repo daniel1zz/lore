@@ -1,5 +1,5 @@
 // @spawns packages/lore/src/index.ts
-// @spawns scripts/seed-write-spec-rule.ts
+// @reads assets/templates/**
 /**
  * @spec_ref IoC vertical-slice tech-spec §4.1/§11 — `lore gate spec-create` (deterministic
  * zone + active feeding)
@@ -43,7 +43,6 @@ interface RunResult {
 
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PROJECT_ROOT, "src", "index.ts");
-const SEED_SCRIPT = join(PROJECT_ROOT, "..", "..", "scripts", "seed-write-spec-rule.ts");
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -84,14 +83,11 @@ function initCorpus(tmpDir: string): void {
   }
 }
 
-/** Seed the approved "Write-spec rules" reference doc via the real seed script. */
+/** Seed the shipped templates as approved corpus templates (`lore migrate templates --apply`): the one rule source. */
 function seedRuleDoc(tmpDir: string): void {
-  const proc = Bun.spawnSync(["bun", "run", SEED_SCRIPT], {
-    cwd: tmpDir,
-    env: { ...process.env, HOME: tmpDir },
-  });
-  if (proc.exitCode !== 0) {
-    throw new Error(`seed-write-spec-rule failed: ${proc.stderr.toString()}`);
+  const result = runLore(["migrate", "templates", "--apply"], tmpDir);
+  if (result.exitCode !== 0) {
+    throw new Error(`lore migrate templates failed: ${result.stderr}${result.stdout}`);
   }
 }
 
@@ -159,6 +155,9 @@ describe("lore gate spec-create", () => {
     expect(result.stdout).toContain("a spec takes no parent");
     expect(result.stdout).toContain("lore ac cite");
     expect(result.stdout).toContain("## Rule");
+    // the rule slice is the approved spec/tech template (the one rule source), not a rules document
+    expect(result.stdout).toContain("[source: template spec-tech-template@2, trust: team-authored]");
+    expect(result.stdout).toContain("lore template show spec --kind tech");
   });
 
   // NEGATIVE — bad spec_kind fails specKindValid → INVALID_SPEC_KIND.
@@ -180,17 +179,18 @@ describe("lore gate spec-create", () => {
     expect(result.stdout).toContain("a spec takes no parent");
   });
 
-  // BOUNDARY — content present but carries no `## ` heading → MISSING_SKELETON.
-  it("BOUNDARY: exits 4 with MISSING_SKELETON when content has no level-2 heading", () => {
+  // REGRESSION — BR-4 retired: a body with no `## ` heading is no longer a spec-create violation (the template is the check).
+  it("REGRESSION: a content with no level-2 heading passes (hasSkeleton is retired)", () => {
     const payload = compliantPayload(prdSlug);
     payload["content"] = "just some prose, no headings at all";
     const result = runGate(tmpDir, payload);
-    expect(result.exitCode).toBe(4);
-    expect(result.stdout).toContain("MISSING_SKELETON");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("gate: pass");
+    expect(result.stdout).not.toContain("MISSING_SKELETON");
   });
 
-  // BOUNDARY — every predicate fails simultaneously → all three reasons present.
-  it("BOUNDARY: reports all three violations together when every predicate fails", () => {
+  // BOUNDARY — every remaining structural predicate fails simultaneously → both reasons present.
+  it("BOUNDARY: reports both violations together when every predicate fails", () => {
     const result = runGate(tmpDir, {
       type: "spec",
       title: "Broken spec",
@@ -201,7 +201,7 @@ describe("lore gate spec-create", () => {
     expect(result.exitCode).toBe(4);
     expect(result.stdout).toContain("a spec takes no parent");
     expect(result.stdout).toContain("INVALID_SPEC_KIND");
-    expect(result.stdout).toContain("MISSING_SKELETON");
+    expect(result.stdout).not.toContain("MISSING_SKELETON");
   });
 
   // ERROR — malformed JSON syntax.
@@ -343,9 +343,9 @@ describe("lore gate spec-create — AC-Quantifiability Gate CLI parity", () => {
   });
 });
 
-// ─── Suite: no project rule doc — feeding pack falls back to the rule shipped with the binary (BR-1359) ────
+// ─── Suite: no approved template — the pack NAMES the missing template, it never quotes an invented rule ────
 
-describe("lore gate spec-create: no project rule doc", () => {
+describe("lore gate spec-create: no approved template", () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -355,12 +355,14 @@ describe("lore gate spec-create: no project rule doc", () => {
 
   afterEach(() => cleanupDir(tmpDir));
 
-  it("BOUNDARY: still exits 4 with missing reasons, and the pack names the shipped rule as its source", () => {
+  it("BOUNDARY: still exits 4 with the missing reason, and the pack says no template could be read", () => {
     const result = runGate(tmpDir, { type: "spec", title: "x", parent_id: "some-parent", content: "no headings" });
     expect(result.exitCode).toBe(4);
     expect(result.stdout).toContain("a spec takes no parent");
-    expect(result.stdout).toContain("MISSING_SKELETON");
-    expect(result.stdout).toContain("[source: shipped asset assets/governance/write-spec-rule.md, trust: team-authored]");
+    expect(result.stdout).not.toContain("MISSING_SKELETON");
+    expect(result.stdout).toContain("[source: template lookup, trust: team-authored]");
+    expect(result.stdout).toContain("No rule could be read from an approved template");
+    expect(result.stdout).not.toContain("shipped asset");
     expect(result.stdout).not.toContain("bun scripts/");
   });
 });

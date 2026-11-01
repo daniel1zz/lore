@@ -190,6 +190,26 @@ async function createDraftSkillDoc(opts: {
   });
 }
 
+/** Creates and approves a minimal spec/feature template: the one rule source a spec-create pack quotes. */
+async function installSpecFeatureTemplate(): Promise<{ slug: string; ref: string }> {
+  return withApp(async (app) => {
+    const body = {
+      doc_type: "spec",
+      kind: "feature",
+      version: 1,
+      fields: { type: "object", required: ["summary"], properties: { summary: { type: "string", minLength: 1 } } },
+      dimensions: [{ id: "edge-cases", question: "Which edge cases does it handle?" }],
+      checks: ["refs-resolve"],
+      render: [{ heading: "Summary", fields: ["summary"] }],
+    };
+    const created = await app.corpusService.create({ type: "template", title: "Feed fixture spec feature template", extra: { template: body } } as CreateDocInput);
+    if (!created.ok) throw new Error(`template create failed: ${JSON.stringify(created.error)}`);
+    const approved = await app.corpusService.set(created.value.id, { status: "approved" });
+    if (!approved.ok) throw new Error(`template approve failed: ${JSON.stringify(approved.error)}`);
+    return { slug: created.value.slug, ref: `${created.value.slug}@1` };
+  });
+}
+
 async function createPrd(title: string): Promise<{ id: string; slug: string }> {
   return withApp(async (app) => {
     const createResult = await app.corpusService.create({
@@ -240,61 +260,75 @@ async function runGateSpecCreate(payload: Record<string, unknown>) {
 
 describe("lore feed <checkpoint> — feed-before-produce PULL (P4)", () => {
   // HAPPY — AC-P4-1, incl. SSOT-equality against `lore gate spec-create`'s violation output.
-  it("prints the skill's rule slice + parent summary + provenance header, exit 0 — SSOT-equal to gate's violation pack", async () => {
-    const skill = await createApprovedSkillDoc({
-      title: "Custom write-spec rules",
-      appliesTo: "spec",
-      content: "## Rule\n\nSSOT marker content shared by feed and gate.",
-    });
+  it("prints the approved template's rule slice + parent summary + provenance header, exit 0 — SSOT-equal to gate's violation pack", async () => {
+    const template = await installSpecFeatureTemplate();
     const prd = await createPrd("SSOT Parent PRD");
 
     const feedResult = await runFeed({ checkpoint: "spec-create", parent: prd.id });
 
     expect(feedResult.exitCode).toBe(0);
-    expect(feedResult.stdout).toContain(`[source: ${skill.slug}, trust: team-authored]`);
-    expect(feedResult.stdout).toContain("SSOT marker content shared by feed and gate.");
+    expect(feedResult.stdout).toContain(`[source: template ${template.ref}, trust: team-authored]`);
+    expect(feedResult.stdout).toContain("What a spec feature must satisfy");
     expect(feedResult.stdout).toContain("Some PRD content for the SSOT check.");
     expect(feedResult.stdout).toContain("## Parent");
 
-    // Gate payload: names the same parent (BR-2 refuses ANY spec parent, so `parentLegal` fails) and
-    // its content lacks a `## ` heading (MISSING_SKELETON). Same skill doc, same parent doc => same
-    // rule/parent slices via the shared flows/feed-flow.ts helpers; the only textual delta is the
-    // inserted "Missing:" block, which lists both reasons.
+    // Gate payload: names the same parent (BR-2 refuses ANY spec parent, so `parentLegal` fails). Same template, same
+    // parent doc => same rule/parent slices via the shared helpers; the only textual delta is the inserted
+    // "Missing:" block listing the violation.
     const violatingPayload = {
       type: "spec",
-      title: "A spec missing its skeleton",
+      title: "A spec that names a parent",
       parent_id: prd.id,
       content: "just some prose, no headings at all",
     };
     const gateResult = await runGateSpecCreate(violatingPayload);
 
     expect(gateResult.exitCode).toBe(4);
-    expect(gateResult.stdout).toContain("MISSING_SKELETON");
+    expect(gateResult.stdout).toContain("a spec takes no parent");
 
     const gateStrippedOfMissing = stripMissingBlock(gateResult.stdout);
     expect(gateStrippedOfMissing).toBe(feedResult.stdout);
   });
 
   it("omitting --parent produces a feed with no '## Parent' section", async () => {
-    await createApprovedSkillDoc({
-      title: "Custom write-spec rules",
-      appliesTo: "spec",
-      content: "## Rule\n\nNo-parent marker content.",
-    });
+    await installSpecFeatureTemplate();
 
     const result = await runFeed({ checkpoint: "spec-create" });
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("No-parent marker content.");
+    expect(result.stdout).toContain("What a spec feature must satisfy");
     expect(result.stdout).not.toContain("## Parent");
   });
 
-  // NEGATIVE — AC-P4-2.
-  it("no approved governing skill → clear one-line note, exit 0 (never an error)", async () => {
+  // NEGATIVE — AC-P4-2: no approved template → the pack NAMES the missing template, exit 0 (never an error, never an invented rule).
+  it("no approved template → the pack says no rule could be read, exit 0", async () => {
     const result = await runFeed({ checkpoint: "spec-create" });
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("no approved governing skill for spec");
+    expect(result.stdout).toContain("[source: template lookup, trust: team-authored]");
+    expect(result.stdout).toContain("No rule could be read from an approved template");
+  });
+
+  // HAPPY — a registered checkpoint WITHOUT a template rule still discovers an approved skill doc by its own name.
+  it("a registered checkpoint with no curated type discovers an approved skill doc scoped by its own name", async () => {
+    const skill = await createApprovedSkillDoc({
+      title: "Promote rules",
+      appliesTo: "spec-promote",
+      content: "## Rule\n\nPromote marker content.",
+    });
+
+    const result = await runFeed({ checkpoint: "spec-promote" });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(`[source: ${skill.slug}, trust: team-authored]`);
+    expect(result.stdout).toContain("Promote marker content.");
+  });
+
+  it("a registered checkpoint with no approved skill → clear one-line note, exit 0 (never an error)", async () => {
+    const result = await runFeed({ checkpoint: "spec-promote" });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("no approved governing skill for spec-promote");
   });
 
   // BOUNDARY — AC-FR-1 (task-derive-lore-feed-s-checkpoint-set-from-the-
@@ -314,14 +348,14 @@ describe("lore feed <checkpoint> — feed-before-produce PULL (P4)", () => {
   it("does not discover a DRAFT skill doc even when its applies_to matches", async () => {
     await createDraftSkillDoc({
       title: "Not yet approved rules",
-      appliesTo: "spec",
+      appliesTo: "spec-promote",
       content: "## Rule\n\nDraft marker content — must never surface.",
     });
 
-    const result = await runFeed({ checkpoint: "spec-create" });
+    const result = await runFeed({ checkpoint: "spec-promote" });
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("no approved governing skill for spec");
+    expect(result.stdout).toBe("no approved governing skill for spec-promote");
     expect(result.stdout).not.toContain("Draft marker content");
   });
 
@@ -329,11 +363,11 @@ describe("lore feed <checkpoint> — feed-before-produce PULL (P4)", () => {
   it("--json prints { checkpoint, type, skill, feed } matching FeedOutcome", async () => {
     const skill = await createApprovedSkillDoc({
       title: "JSON-shape rules",
-      appliesTo: "spec",
+      appliesTo: "spec-promote",
       content: "## Rule\n\nJSON marker content.",
     });
 
-    const result = await runFeed({ checkpoint: "spec-create", json: true });
+    const result = await runFeed({ checkpoint: "spec-promote", json: true });
 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as {
@@ -342,18 +376,27 @@ describe("lore feed <checkpoint> — feed-before-produce PULL (P4)", () => {
       skill: { slug: string; title: string } | null;
       feed: string;
     };
-    expect(parsed.checkpoint).toBe("spec-create");
-    expect(parsed.type).toBe("spec");
+    expect(parsed.checkpoint).toBe("spec-promote");
+    expect(parsed.type).toBe("spec-promote");
     expect(parsed.skill).toEqual({ slug: skill.slug, title: "JSON-shape rules" });
     expect(parsed.feed).toContain("JSON marker content.");
   });
 
+  it("the spec-create feed's --json carries the template pack and no skill pointer", async () => {
+    const template = await installSpecFeatureTemplate();
+
+    const result = await runFeed({ checkpoint: "spec-create", json: true });
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout) as { checkpoint: string; type: string | null; skill: unknown; feed: string };
+    expect(parsed.checkpoint).toBe("spec-create");
+    expect(parsed.type).toBe("spec");
+    expect(parsed.skill).toBeNull();
+    expect(parsed.feed).toContain(`template ${template.ref}`);
+  });
+
   it("does not create or mutate any corpus documents while feeding", async () => {
-    await createApprovedSkillDoc({
-      title: "Read-only check rules",
-      appliesTo: "spec",
-      content: "## Rule\n\nRead-only marker content.",
-    });
+    await installSpecFeatureTemplate();
     const before = await countDocs();
 
     await runFeed({ checkpoint: "spec-create" });

@@ -152,8 +152,7 @@ export interface AcRefCheckReport {
 
 /**
  * Runs the full check against an already-constructed `App` and an already-loaded
- * ledger — the seam tests inject a fixture `App` + ledger through (mirrors
- * `seed-write-spec-rule.ts`'s `seedWriteSpecRule(app)` testability pattern).
+ * ledger — the seam tests inject a fixture `App` + ledger through.
  */
 export async function runCheck(app: App, ledger: AcRefLedgerFile): Promise<AcRefCheckReport> {
   const { tasks, docsById } = await collectCorpusData(app);

@@ -139,9 +139,9 @@ export function buildFeedingPack(input: {
  * @example
  * renderFeedingPack({
  *   source: "knowledge-write-spec-rules", trust: "team-authored",
- *   ruleSlice: "## Rule\n...", missing: ["MISSING_SKELETON"],
+ *   ruleSlice: "## Rule\n...", missing: ["INVALID_SPEC_KIND"],
  * });
- * // => "[source: knowledge-write-spec-rules, trust: team-authored]\n\nMissing:\n- MISSING_SKELETON\n\n## Rule\n..."
+ * // => "[source: knowledge-write-spec-rules, trust: team-authored]\n\nMissing:\n- INVALID_SPEC_KIND\n\n## Rule\n..."
  */
 export function renderFeedingPack(pack: FeedingPack): string {
   const lines: string[] = [`[source: ${pack.source}, trust: ${pack.trust}]`];

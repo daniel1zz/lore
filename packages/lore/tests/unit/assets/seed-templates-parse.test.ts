@@ -65,14 +65,28 @@ describe("seed templates", () => {
     expect(invalid).toEqual([]);
   });
 
-  it("each file's doc_type and kind match its file name, and version is 1", () => {
+  // reason: the three spec seeds that carry a refusal list moved to version 2 when a refusal entry started naming its own
+  // `acs` (an AC `cites` takes rule ids only); every other seed is still its first version. A raised version is a NEW
+  // template version in a corpus (`lore migrate templates` proposes it as a revision), never an overwrite.
+  const SEED_VERSIONS: Readonly<Record<string, number>> = { "spec-design.json": 2, "spec-feature.json": 2, "spec-tech.json": 2 };
+
+  it("each file's doc_type and kind match its file name, and its version is the expected one", () => {
     const mismatched: string[] = [];
     for (const name of EXPECTED_FILES) {
       const raw = JSON.parse(readFileSync(join(TEMPLATES_DIR, name), "utf8")) as { doc_type: string; kind?: string; version: number };
       const stem = raw.kind === undefined ? raw.doc_type : `${raw.doc_type}-${raw.kind}`;
-      if (`${stem}.json` !== name || raw.version !== 1) mismatched.push(name);
+      if (`${stem}.json` !== name || raw.version !== (SEED_VERSIONS[name] ?? 1)) mismatched.push(name);
     }
     expect(mismatched).toEqual([]);
+  });
+
+  it("every seed's refusal item schema carries the refusal's own `acs` list", () => {
+    for (const name of ["spec-feature.json", "spec-tech.json", "spec-design.json"]) {
+      const raw = JSON.parse(readFileSync(join(TEMPLATES_DIR, name), "utf8")) as {
+        fields: { properties: { refusals: { items: { properties: Record<string, { type?: string }> } } } };
+      };
+      expect(raw.fields.properties.refusals.items.properties["acs"]?.type, name).toBe("array");
+    }
   });
 
   it("spec kinds carry the review-derived dimensions and all six checks (feature, tech, design)", () => {

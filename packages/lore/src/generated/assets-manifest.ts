@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "6270c8d4adad2afb58dee6a50a8c5e84538bcee0f9e4f508ef3e4557aa9c0269",
+  tree_digest: "49cba66b2ef3e3dc3d87e5cded9e7b7d76eaffcc3e0c9a7838b014a00d56059d",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "be7b99d5d1f72cf4ff8579ab09c2e42454c03ec0e0f9ba4e8fdb303b4a6cb73f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -63,7 +63,6 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "context/worktree-dispatch.md", kind: "context", ownership: "managed", sha256: "4916cddccb5a6204c8cab4d01f6b58d2e32250637898428316969ee1e94eb534" },
   { path: "governance/claude-md-contract.md", kind: "governance", ownership: "managed", sha256: "015ea383571af5c5588c593c99055025645297162a935c0620036ca38fbc02b3" },
   { path: "governance/seat-briefing.md", kind: "governance", ownership: "managed", sha256: "62d33fe1d7f5124e74247fb0491ef65600e11ff8179ba77efc29bbb130ad1894" },
-  { path: "governance/write-spec-rule.md", kind: "governance", ownership: "managed", sha256: "f462760ebe190352453fdc0b4a29ef3e02f0d57878a4477a2ac26f13230965b7" },
   { path: "hooks/lib/check-outcome.mjs", kind: "hook", ownership: "managed", sha256: "ddf7c1f266d5c11ed0329db215351bfa391544debe2f68228171a9e97cbe5503" },
   { path: "hooks/lib/run-id.mjs", kind: "hook", ownership: "managed", sha256: "d19c976ed1819180c4654587f4c839d02ad2a1f87f49517928a780602024a773" },
   { path: "hooks/lib/session-trail.mjs", kind: "hook", ownership: "managed", sha256: "2968bf7d714e5bd3b975c8e63f1180a4a393d4de986abc721584d184b7f8a881" },
@@ -397,10 +396,10 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "templates/phase.json", kind: "template", ownership: "managed", sha256: "e64e081f145724642094e8a3b5cc8ffc6cb251007007a5604d46e78da7cc909c" },
   { path: "templates/plan.json", kind: "template", ownership: "managed", sha256: "1a1de9b6a4382616068a11f37e048f68d99832aec2aa585d880e4383b407b7fe" },
   { path: "templates/prd.json", kind: "template", ownership: "managed", sha256: "b8c275323ae8cf3bb66c8efb18dd4a8d46870d48f295e8dc7eb02f6d24289c9e" },
-  { path: "templates/spec-design.json", kind: "template", ownership: "managed", sha256: "06489c5cc7bed66ce19bce608cbbd0061c471adffb1885b25d321048ee52d153" },
+  { path: "templates/spec-design.json", kind: "template", ownership: "managed", sha256: "a0f5730fa43cb289a05863bcf11dc7c71f1169d683c6218ae4a6fca2bf4ba9b0" },
   { path: "templates/spec-domain-overview.json", kind: "template", ownership: "managed", sha256: "374fa9dc8e12a6d9105ba022d12f592a35de9d0e81a2b827ef0811493fc22717" },
-  { path: "templates/spec-feature.json", kind: "template", ownership: "managed", sha256: "eaab3b33370359ec56154ada47c420353f1673ea629a2319fd16cd11cbd948fd" },
-  { path: "templates/spec-tech.json", kind: "template", ownership: "managed", sha256: "29b6ff23c0cdd7f1b12eda77ac32578cbf06c0d6f772d0a9099c3fc80c26354e" },
+  { path: "templates/spec-feature.json", kind: "template", ownership: "managed", sha256: "681fcdeea903283e02bc185af65b0ae850f18f88c10fd28cd19118a64a55c2ef" },
+  { path: "templates/spec-tech.json", kind: "template", ownership: "managed", sha256: "f07076a101f66313c16c1b2ab28c0fde486fc27de5573726959214fb4bb5faed" },
   { path: "templates/task.json", kind: "template", ownership: "managed", sha256: "cbf701acaf78d2b97a3f6e0503f82ba50c0d92de952f7f99cbbeef5af7597245" },
   ],
 };

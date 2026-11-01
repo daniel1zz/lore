@@ -1,7 +1,7 @@
 {
   "doc_type": "spec",
   "kind": "tech",
-  "version": 1,
+  "version": 2,
   "fields": {
     "type": "object",
     "required": ["goal", "problem_evidence", "scope", "out_of_scope", "architecture", "design_decisions"],
@@ -103,7 +103,12 @@
             "id": { "type": "string", "minLength": 1 },
             "input_or_state": { "type": "string", "minLength": 1 },
             "exit_code": { "type": "integer" },
-            "message": { "type": "string", "minLength": 1 }
+            "message": { "type": "string", "minLength": 1 },
+            "acs": {
+              "type": "array",
+              "description": "Ids of the acceptance criteria that trigger this refusal (at least one must exist on the spec at promote).",
+              "items": { "type": "string", "minLength": 1 }
+            }
           }
         }
       },

@@ -36,7 +36,7 @@ describe("GateEnforcer", () => {
       const enforcer = new GateEnforcer(undefined);
       const result = enforcer.enforce("spec-create", {
         parentType: null,
-        specKind: "feature",
+        specKind: "bogus",
         content: "no heading here",
       });
       expect(result.ok).toBe(false);
@@ -49,8 +49,8 @@ describe("GateEnforcer", () => {
         // "embeds the feeding pack" describe block below for full pack-content
         // coverage) — so this stays a `toContain` on the prefix, not a `toBe`.
         const message = (result.error as { message?: string }).message ?? "";
-        expect(message.startsWith('Gate "spec-create" blocked: MISSING_SKELETON')).toBe(true);
-        expect((result.error as { value?: unknown }).value).toEqual(["MISSING_SKELETON"]);
+        expect(message.startsWith('Gate "spec-create" blocked: INVALID_SPEC_KIND')).toBe(true);
+        expect((result.error as { value?: unknown }).value).toEqual(["INVALID_SPEC_KIND"]);
       }
     });
 
@@ -67,7 +67,7 @@ describe("GateEnforcer", () => {
         const message = (result.error as { message?: string }).message ?? "";
         expect(message).toContain("a spec takes no parent");
         expect(message).toContain("INVALID_SPEC_KIND");
-        expect(message).toContain("MISSING_SKELETON");
+        expect(message).not.toContain("MISSING_SKELETON");
       }
     });
 
@@ -185,7 +185,7 @@ describe("GateEnforcer", () => {
       const enforcer = new GateEnforcer(undefined);
       const result = enforcer.enforce("spec-create", {
         parentType: null,
-        specKind: "feature",
+        specKind: "bogus",
         content: "no heading here",
         ruleSource: "knowledge-write-spec-rules",
         ruleMarkdown: "## Rule\n\nEvery spec needs a heading.",
@@ -193,12 +193,12 @@ describe("GateEnforcer", () => {
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect((result.error as { field?: string }).field).toBe("gate:spec-create");
-      expect((result.error as { value?: unknown }).value).toEqual(["MISSING_SKELETON"]);
+      expect((result.error as { value?: unknown }).value).toEqual(["INVALID_SPEC_KIND"]);
       const message = (result.error as { message?: string }).message ?? "";
-      expect(message).toContain('Gate "spec-create" blocked: MISSING_SKELETON');
+      expect(message).toContain('Gate "spec-create" blocked: INVALID_SPEC_KIND');
       expect(message).toContain("[source: knowledge-write-spec-rules, trust: team-authored]");
       expect(message).toContain("Missing:");
-      expect(message).toContain("MISSING_SKELETON");
+      expect(message).toContain("INVALID_SPEC_KIND");
       expect(message).toContain("Every spec needs a heading.");
       // No trailing newline left over from the feed callback's own text.
       expect(message.endsWith("\n")).toBe(false);
@@ -371,13 +371,13 @@ describe("GateEnforcer", () => {
       const enforcer = new GateEnforcer(undefined);
       const result = enforcer.enforce("spec-create", {
         parentType: null,
-        specKind: "feature",
+        specKind: "bogus",
         content: "no heading here",
       });
       expect(result.ok).toBe(false);
       if (result.ok) return;
       const message = (result.error as { message?: string }).message ?? "";
-      expect(message.startsWith('Gate "spec-create" blocked: MISSING_SKELETON')).toBe(true);
+      expect(message.startsWith('Gate "spec-create" blocked: INVALID_SPEC_KIND')).toBe(true);
       expect(message).not.toContain("LORE_GATE_BYPASS");
     });
 
@@ -389,16 +389,16 @@ describe("GateEnforcer", () => {
       const enforcer = new GateEnforcer(undefined, undefined, undefined, undefined, process.env);
       const result = enforcer.enforce("spec-create", {
         parentType: null,
-        specKind: "feature",
+        specKind: "bogus",
         content: "no heading here",
       });
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect((result.error as { code?: string }).code).toBe("VALIDATION_ERROR");
       expect((result.error as { field?: string }).field).toBe("gate:spec-create");
-      expect((result.error as { value?: unknown }).value).toEqual(["MISSING_SKELETON"]);
+      expect((result.error as { value?: unknown }).value).toEqual(["INVALID_SPEC_KIND"]);
       const message = (result.error as { message?: string }).message ?? "";
-      expect(message).toContain("MISSING_SKELETON");
+      expect(message).toContain("INVALID_SPEC_KIND");
       expect(message).toContain("LORE_GATE_BYPASS");
       expect(message).toContain("workflow.gates.spec-create.enabled: false");
     });

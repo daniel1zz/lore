@@ -83,11 +83,12 @@ describe("checkpointRegistry", () => {
       expect(selectFailures(results).some((f) => f.reason === "INVALID_SPEC_KIND")).toBe(true);
     });
 
-    // NEGATIVE
-    it("check() reports a failure when content has no skeleton heading", () => {
+    // REGRESSION — BR-4 retired: a body with no `## ` heading is not a spec-create failure (the template is the structure check)
+    it("check() does not fail a body with no heading (hasSkeleton is retired)", () => {
       const ctx: GateContext = { parentType: null, specKind: "tech", content: "no heading" };
       const results = checkpoint.check(ctx);
-      expect(selectFailures(results).some((f) => f.reason === "MISSING_SKELETON")).toBe(true);
+      expect(isCheckpointBlocked(results)).toBe(false);
+      expect(selectFailures(results)).toEqual([]);
     });
 
     // BOUNDARY — specKind undefined must not block (defaults to "feature" at create time)
@@ -97,11 +98,11 @@ describe("checkpointRegistry", () => {
       expect(isCheckpointBlocked(results)).toBe(false);
     });
 
-    // ERROR / BOUNDARY — content omitted entirely defaults to "" (no skeleton)
-    it("check() treats an omitted content field as empty (fails MISSING_SKELETON)", () => {
+    // BOUNDARY — content omitted entirely is not a failure either
+    it("check() passes when the content field is omitted", () => {
       const ctx: GateContext = { parentType: null, specKind: "tech" };
       const results = checkpoint.check(ctx);
-      expect(selectFailures(results).some((f) => f.reason === "MISSING_SKELETON")).toBe(true);
+      expect(isCheckpointBlocked(results)).toBe(false);
     });
 
     // HAPPY — verdict purity: same input in, same output out
@@ -127,7 +128,7 @@ describe("checkpointRegistry", () => {
       const text = checkpoint.feed(feedCtx, failures);
       expect(text).toContain("[source: knowledge-write-spec-rules, trust: team-authored]");
       expect(text).toContain("- a spec takes no parent");
-      expect(text).toContain("- MISSING_SKELETON");
+      expect(text).not.toContain("MISSING_SKELETON");
       expect(text).toContain("Every spec needs a legal parent.");
     });
 

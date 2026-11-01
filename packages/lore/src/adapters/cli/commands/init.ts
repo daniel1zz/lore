@@ -12,9 +12,9 @@
  * initialised `config.yaml`. The user's decision (BR-807 as modified) is that a fresh corpus carries
  * the template; such fixtures must merge their overrides instead of appending.
  *
- * It writes no corpus document, version or audit entry for a document (BR-807): the write-spec rule the spec-create
- * gate feeds ships with the binary (`assets/governance/write-spec-rule.md`, read by `lore gate`, BR-1359), so a fresh
- * corpus adds no orphan to the tree check.
+ * It writes no rule document (BR-807): the rule the spec-create gate feeds is the approved corpus template of the spec's
+ * kind (the spec-rules document and the rule file shipped with the binary are retired), and the template documents
+ * themselves are seeded separately from `assets/templates/`.
  *
  * Side-effect class: IO (fs writes, SQLite, one rename).
  */

@@ -187,7 +187,7 @@ describe("AC-073-1: gate-denial hint — configured consumer earns exactly 1 hin
     configureUpstream(tmpDir);
 
     const result = await runLore(
-      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","content":""}'],
+      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","parent_id":"some-parent","content":""}'],
       tmpDir,
     );
 
@@ -196,7 +196,7 @@ describe("AC-073-1: gate-denial hint — configured consumer earns exactly 1 hin
     expect(result.stderr).toContain(HINT_TOKEN);
     expect(result.stderr.toLowerCase()).toContain(REVERIFY_TOKEN);
     // The pre-existing feeding-pack content (stdout) is untouched by this seam.
-    expect(result.stdout).toContain("MISSING_SKELETON");
+    expect(result.stdout).toContain("a spec takes no parent");
   });
 
   it("BOUNDARY: unconfigured consumer's IDENTICAL gate denial now carries exactly 1 provision-guidance line naming feedback.upstream.repo (SPEC-OOB supersedes the old SPEC-073 byte-absent baseline)", async () => {
@@ -206,7 +206,7 @@ describe("AC-073-1: gate-denial hint — configured consumer earns exactly 1 hin
     // config.yaml has no feedback.upstream section at all.
 
     const result = await runLore(
-      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","content":""}'],
+      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","parent_id":"some-parent","content":""}'],
       tmpDir,
     );
 
@@ -221,7 +221,7 @@ describe("AC-073-1: gate-denial hint — configured consumer earns exactly 1 hin
     expect(nonEmptyLineCount(result.stderr)).toBe(1);
     expect(result.stderr).not.toBe("");
     // The pre-existing feeding-pack content (stdout) is untouched by this seam.
-    expect(result.stdout).toContain("MISSING_SKELETON");
+    expect(result.stdout).toContain("a spec takes no parent");
   });
 });
 
@@ -296,7 +296,7 @@ describe("AC-OOB-6: self-lock broken, both directions — unconfigured gate-deni
     await initCorpus(tmpDir);
 
     const unconfigured = await runLore(
-      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","content":""}'],
+      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","parent_id":"some-parent","content":""}'],
       tmpDir,
     );
     // Clean up this half's throwaway dir now — the second half below reassigns
@@ -324,7 +324,7 @@ describe("AC-OOB-6: self-lock broken, both directions — unconfigured gate-deni
     configureUpstream(tmpDir);
 
     const configured = await runLore(
-      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","content":""}'],
+      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","parent_id":"some-parent","content":""}'],
       tmpDir,
     );
 

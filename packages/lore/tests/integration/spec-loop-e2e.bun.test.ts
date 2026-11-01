@@ -1,6 +1,6 @@
 // @spawns packages/lore/src/index.ts
 // @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
-// @reads assets/governance/write-spec-rule.md
+// @reads assets/templates/**
 /**
  * @spec_ref IoC vertical-slice tech-spec §9 AC6 — end-to-end closed-loop proof that the
  * spec-production inversion-of-control slice actually works together: a non-compliant
@@ -49,6 +49,8 @@ import { execSync } from "child_process";
 import { createApp, type App } from "../../src/app.js";
 import { saveConfig } from "@lore/core/node";
 import { checkRepoPollution } from "../../src/repo-pollution-guard.js";
+import { readShippedTemplateSeeds } from "../../src/adapters/cli/template-seeds.js";
+import { TemplateSeedService } from "../../src/service/template-seed-service.js";
 import { citeSpecViaCli, type LoreRunner } from "../helpers/cli-live-rule.js";
 import type { CreateDocInput } from "@lore/core";
 import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../live-invocation.js";
@@ -58,29 +60,18 @@ let lastExitCode = 0;
 import type { Invocation } from "@lore/core";
 
 /**
- * `scripts/` lives outside `packages/lore/tsconfig.tests.json`'s `rootDir` (scoped to
- * the `@lore/lore` workspace package), so a static `import` of the seed script would
- * fail `tsc --noEmit` with TS6059 even though bun's runtime resolver handles the
- * relative path fine. Building the specifier as a runtime `string` (not a string-literal
- * syntax form) makes TypeScript treat the dynamic `import()` as `Promise<any>` and skip
- * static module resolution — the same escape hatch
- * `tests/unit/service/seed-write-spec-rule.bun.test.ts` documents and uses.
+ * Seeds the shipped templates (`assets/templates/*.json`) as approved corpus templates through the production
+ * `TemplateSeedService`: the rule a spec-create denial quotes is the approved template of the spec's kind (the spec-rules
+ * document, its seed script and the rule file shipped with the binary are retired).
  */
-const SEED_SCRIPT_PATH: string = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "..",
-  "..",
-  "scripts",
-  "seed-write-spec-rule.ts",
-);
-
-interface SeedWriteSpecRuleModule {
-  seedWriteSpecRule: (app: App) => Promise<{ slug: string; created: boolean }>;
+async function seedShippedTemplates(app: App): Promise<void> {
+  if (app.templateService === undefined) throw new Error("TemplateService is not wired on this App");
+  const assetsRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "assets");
+  const seeds = readShippedTemplateSeeds(assetsRoot);
+  if (!seeds.ok) throw new Error(`reading the shipped template seeds failed: ${JSON.stringify(seeds.error)}`);
+  const applied = await new TemplateSeedService(app.templateService, app.corpusService).apply(seeds.value);
+  if (!applied.ok) throw new Error(`seeding the shipped templates failed: ${JSON.stringify(applied.error)}`);
 }
-
-const { seedWriteSpecRule } = (await import(SEED_SCRIPT_PATH)) as unknown as SeedWriteSpecRuleModule;
 
 // ─── Command type + importer (mirrors gate-spec-promote.bun.test.ts) ─────────
 
@@ -346,11 +337,10 @@ async function countDocs(): Promise<number> {
 
 describe("spec-production IoC closed loop (tech-spec §9 AC6)", () => {
   it("gate-blocked create -> corrected create -> gate-blocked promote -> AC added -> gate-passed promote", async () => {
-    // ── setup: seed the write-spec rule doc + a legal PRD parent ──
-    // reason: BR-709 - the seed files the rule doc under the corpus requirements document, so the PRD comes first.
+    // ── setup: seed the shipped templates (the rule source) + a legal PRD parent ──
     const prdSlug = await createPrd("spec-loop-e2e PRD");
     const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
-    await seedWriteSpecRule(app);
+    await seedShippedTemplates(app);
     app.close();
     suppressJudgeAdvisory();
 
@@ -403,8 +393,9 @@ describe("spec-production IoC closed loop (tech-spec §9 AC6)", () => {
     expect(result.exitCode).toBe(4);
     expect(result.stdout).toContain("Missing:");
     expect(result.stdout).toContain("a spec takes no parent");
-    // BR-1359: no project doc, so the rule shipped with the binary feeds the pack and its source line says so.
-    expect(result.stdout).toContain("[source: shipped asset assets/governance/write-spec-rule.md");
+    // no approved template in this corpus: the pack names the missing template, never a shipped or invented rule.
+    expect(result.stdout).toContain("[source: template lookup");
+    expect(result.stdout).not.toContain("shipped asset");
     expect(result.stdout).not.toContain("bun scripts/");
   });
 
