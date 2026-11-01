@@ -50,7 +50,6 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
-import { alwaysAutoOverridePort } from "../../helpers/always-auto-override-port.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
@@ -136,10 +135,10 @@ function makeStore(kind: StoreKind): StoreHandle {
 
 // ─── Services over a given store ─────────────────────────────────────────────
 
-function services(store: StoreInterface) {
+/** `gitCwd` makes the task service's git facts read that repository (the `done` kind needs a real commit to bind its pass to). */
+function services(store: StoreInterface, gitCwd?: string) {
   const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-  const twf = new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe());
-  twf.setOverrideDecisionPort(alwaysAutoOverridePort()); // AU-T7: explicit test port; no port = override refused
+  const twf = new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, fakeWorktreeProbe(gitCwd === undefined ? {} : { currentWorkingDirectory: () => gitCwd }));
   return {
     corpus,
     twf,
@@ -238,6 +237,8 @@ interface WriteKind {
   readonly act: (f: Fixture) => Promise<void>;
   /** A doc-mutating kind must write at least one version row (guards against a vacuous version check). */
   readonly writesVersion: boolean;
+  /** The task service of the write under test reads the repository this test runs in (its git facts), not the unit-test fake. */
+  readonly readsRepository?: boolean;
 }
 
 const SETUP_BY = "agent:matrix-setup";
@@ -247,7 +248,7 @@ async function planAndTask(s: Svc): Promise<{ planId: string; taskSlug: string; 
   const plan = await mkDoc(s, { type: "plan", title: "Matrix plan", content: "body" }, SETUP_BY);
   const task = await mkDoc(
     s,
-    { type: "task", title: "Matrix task", parent_id: plan.id, content: "body", extra: { plan_id: plan.id } },
+    { type: "task", title: "Matrix task", parent_id: plan.id, content: "body", extra: { kind: "code", plan_id: plan.id } },
     SETUP_BY,
   );
   return { planId: plan.id, taskSlug: task.slug, taskId: task.id };
@@ -299,7 +300,8 @@ const KINDS: readonly WriteKind[] = [
     writesVersion: false,
     setup: async ({ s }) => ({ task: (await planAndTask(s)).taskSlug }),
     act: async (f) => {
-      must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by, harnessRun: f.run })) as never, "claim");
+      // reason: a code task is claimed on its own branch (AC-DCS1-14); the name is all this store-level fixture needs.
+      must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by, harnessRun: f.run, worktree: "wt-matrix-claim" })) as never, "claim");
     },
   },
   {
@@ -308,7 +310,7 @@ const KINDS: readonly WriteKind[] = [
     setup: async ({ s }) => ({ task: (await planAndTask(s)).taskSlug }),
     // The claim is placed by the SAME identity through the store under test, so the measured write is the holder's own release.
     prepare: async (f) => {
-      must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by, harnessRun: f.run })) as never, "claim before release");
+      must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by, harnessRun: f.run, worktree: "wt-matrix-release" })) as never, "claim before release");
     },
     act: async (f) => {
       must((await f.w.twf.release(f.ids["task"] as string, { by: f.by, harnessRun: f.run })) as never, "release");
@@ -386,18 +388,58 @@ const KINDS: readonly WriteKind[] = [
   {
     name: "done",
     writesVersion: true,
-    setup: async ({ s }) => ({ task: (await planAndTask(s)).taskSlug }),
-    // The holder (same identity, through the store under test) finishes its own task.
+    // reason: `lore done` judges the stored contract (AC-DCS1-7) and a code task needs a landing, so the task is a corpus task (never
+    // claimed, lands nothing, AC-DCS1-19) holding the stored contract of a corpus task with no oracle; its one runner-attested pass
+    // (the evidence floor the retired attestation override used to waive) is recorded in `prepare` on a commit of the repository this
+    // test runs in, which contains the contract's compile commit (the rule for a corpus task). The write under test is the same
+    // archive walk, attributed to the same run.
+    readsRepository: true,
     prepare: async (f) => {
-      must((await f.w.twf.claim(f.ids["task"] as string, { by: f.by, harnessRun: f.run })) as never, "claim before done");
+      const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+      must(
+        (await f.w.twf.recordVerifiedEvidence(
+          f.ids["task"] as string,
+          { oracle: "test", command: "echo matrix-done-pass", result: "pass", recorded_by: f.by, capture_source: "runner", attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, head_sha: head } },
+          new Date().toISOString(),
+        )) as never,
+        "attested pass before done",
+      );
+    },
+    setup: async ({ s }) => {
+      const root = execFileSync("git", ["rev-list", "--max-parents=0", "HEAD"], { encoding: "utf8" }).trim().split("\n").pop() ?? "";
+      const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).trim();
+      const plan = await mkDoc(s, { type: "plan", title: "Matrix done plan", content: "body" }, SETUP_BY);
+      const task = await mkDoc(
+        s,
+        {
+          type: "task",
+          title: "Matrix done task",
+          parent_id: plan.id,
+          content: "body",
+          extra: {
+            kind: "corpus",
+            plan_id: plan.id,
+            done_contract: {
+              compiled_at_commit: root,
+              kind: "corpus",
+              base_branch: branch,
+              oracles: [],
+              red_required: false,
+              landing_route: "none",
+              new_symbols: [],
+              added_oracles: [],
+            },
+          },
+        },
+        SETUP_BY,
+      );
+      return { task: task.slug };
     },
     act: async (f) => {
       must(
         (await f.w.twf.done(f.ids["task"] as string, {
           by: f.by,
           harnessRun: f.run,
-          overrideReason: "attribution matrix fixture: no runner-attested pass exists for this throwaway task",
-          noNewTestsReason: "attribution matrix fixture: throwaway task with no new tests",
         } as never)) as never,
         "done",
       );
@@ -420,7 +462,7 @@ async function runKind(
       await registerRun(handle.store, identity);
       target = await decorate(handle.store, identity);
     }
-    const f: Fixture = { s: raw, w: services(target), by: identity.claimed, run: identity.harnessRun as RunId, ids };
+    const f: Fixture = { s: raw, w: services(target, kind.readsRepository === true ? process.cwd() : undefined), by: identity.claimed, run: identity.harnessRun as RunId, ids };
     if (kind.prepare !== undefined) await kind.prepare(f);
     return await capture(handle.store, () => kind.act(f));
   } finally {
@@ -587,7 +629,7 @@ describe("CLI chokepoint: `LORE_HARNESS_RUN=R lore <write>` (name N from the ses
   beforeAll(() => {
     dir = corpusDir("attr-matrix-cli-");
     task = JSON.parse(
-      mustLore(["create", "task", "--adhoc", "--title", "Matrix CLI task", "--ac-scope", "", "--json"], dir, sessionEnvFor("agent:matrix-setup")).stdout,
+      mustLore(["create", "task", "--kind", "code", "--adhoc", "--title", "Matrix CLI task", "--ac-scope", "", "--json"], dir, sessionEnvFor("agent:matrix-setup")).stdout,
     ).data.slug as string;
   });
 

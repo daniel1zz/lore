@@ -92,9 +92,13 @@ function makeBranch(name: string): void {
 
 function createTask(title: string): string {
   taskCounter += 1;
-  return parseSlug(
-    mustRun(["create", "task", "--title", `${title} ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"]),
+  const slug = parseSlug(
+    mustRun(["create", "task", "--kind", "code", "--title", `${title} ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"]),
   );
+  // reason: `lore integrate` records a landing only on a task whose oracles it can run, i.e. one approved with its contract (AC-DCS2-1);
+  // the red run is not this file's subject (AC-DCS1-5).
+  mustRun(["approve", slug, "--red-waiver", "the red run is not the subject of this test"]);
+  return slug;
 }
 
 beforeEach(() => {
@@ -102,7 +106,13 @@ beforeEach(() => {
   makeCleanTreeRepo(dir);
   appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n");
   mustRun(["init"]);
-  patchLoreConfig(dir, ["workflow:", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"', ""].join("\n"));
+  patchLoreConfig(
+    dir,
+    [
+      "workflow:", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"',
+      "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"', "",
+    ].join("\n"),
+  );
   const prd = parseSlug(mustRun(["create", "prd", "--title", "Claim PRD", "--content", "root", "--no-ai"]));
   planSlug = parseSlug(mustRun(["create", "plan", "--title", "Claim Plan", "--parent", prd, "--content", "x", "--no-ai"]));
   git(["checkout", "-q", "--detach", "main"]);

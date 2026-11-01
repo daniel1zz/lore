@@ -90,7 +90,7 @@ beforeEach(() => {
   const draftPlanSlug = mkPlan("Active Gate Second Plan");
   const taskSlug = parseSlug(
     mustRun(
-      ["create", "task", "--title", "Active Gate Task", "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"],
+      ["create", "task", "--kind", "code", "--title", "Active Gate Task", "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"],
       tmpDir,
     ),
   );

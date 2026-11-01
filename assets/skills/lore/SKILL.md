@@ -65,7 +65,10 @@ lore tree <plan>                               # tasks grouped under phase heade
 Advisory lease + append-only oracle evidence, for agents executing plan tasks:
 
 ```bash
-lore claim <task> [--branch <b>] [--steal]   # acquire/refresh lease; fresh claim held by someone else → exit 5 unless --steal
+lore start <task> [--write-set <path>]...    # code task: worktree + branch + install + claim, prints the done contract (kind code|check|corpus is fixed at approve)
+lore finish [--red] <task>   # run every contract oracle and record the rows (check/corpus tasks: from the shared checkout); then `lore land <task>` folds, integrates, archives and cleans up
+lore dispatch <task>         # print the subagent prompt from the stored contract; `lore approve <code task> --red-waiver "<reason>"` waives the red run
+lore claim <task> [--branch <b>] [--steal]   # acquire/refresh lease (a harness-made worktree: `--worktree <b>`, `--write-set`); fresh claim held by someone else → exit 5 unless --steal
 lore evidence <task> --oracle tsc|test|lint|build|e2e|manual|other \
   --command "<cmd>" --result pass|fail --capture   # --capture: runner spawns --command and records its output; pass needs it (manual: --output-tail instead)
 lore release <task> [--reason "why"] [--force]   # non-holder needs --force

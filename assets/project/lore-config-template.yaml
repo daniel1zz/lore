@@ -24,6 +24,13 @@
 # floor per spec_kind — `0` is legal (a narrative kind needs no declared ACs at
 # all); omitting `min_acs` keeps the default floor of 1.
 workflow:
+  # The three commands a task's done contract runs (written into the contract by `lore approve`; a missing key
+  # refuses the approval of a code task, naming it). `test_file` is a template: `{file}` is the anchored test file.
+  # Replace these Bun defaults with your project's own commands.
+  done_contract:
+    install: "bun install --frozen-lockfile"
+    typecheck: "bun run typecheck"
+    test_file: "bun run test:file {file}"
   verification_profiles:
     design:
       required_oracles:

@@ -359,20 +359,21 @@ describe("`lore session list` command-level oracle (AC-OWN-5's own named surface
       );
       const mineTaskSlug = parseSlugFromCreateOutput(
         (await mustRunLoreCmd(
-          ["create", "task", "--title", "Mine task", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "Task body."],
+          ["create", "task", "--title", "Mine task", "--kind", "code", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "Task body."],
           tmpDir,
         )).stdout,
       );
       const peerTaskSlug = parseSlugFromCreateOutput(
         (await mustRunLoreCmd(
-          ["create", "task", "--title", "Peer task", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "Task body."],
+          ["create", "task", "--title", "Peer task", "--kind", "code", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "Task body."],
           tmpDir,
         )).stdout,
       );
 
       // Two REAL claimed sessions, each with its own captured session_id.
-      await mustRunLoreCmd(["claim", mineTaskSlug], tmpDir, { CLAUDE_CODE_SESSION_ID: MINE_RAW_SESSION_ID });
-      await mustRunLoreCmd(["claim", peerTaskSlug], tmpDir, { CLAUDE_CODE_SESSION_ID: PEER_RAW_SESSION_ID });
+      // reason: a code task is claimed only on a branch (AC-DCS1-14).
+      await mustRunLoreCmd(["claim", mineTaskSlug, "--worktree", "liveness-mine"], tmpDir, { CLAUDE_CODE_SESSION_ID: MINE_RAW_SESSION_ID });
+      await mustRunLoreCmd(["claim", peerTaskSlug, "--worktree", "liveness-peer"], tmpDir, { CLAUDE_CODE_SESSION_ID: PEER_RAW_SESSION_ID });
       // ⛔ The peer session NEVER runs `lore session list|show` — no heartbeat
       // is ever recorded for it. This is the precondition itself: liveness is
       // measurable ONLY for a session that has self-registered by running the

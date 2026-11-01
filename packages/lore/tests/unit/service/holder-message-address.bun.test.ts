@@ -61,7 +61,7 @@ async function seed(options: { resumeAddress?: string } = {}) {
       title,
       parent_id: plan.id,
       content: `# ${title}`,
-      extra: { plan_id: plan.id },
+      extra: { plan_id: plan.id, kind: "code" },
     } as CreateDocInput);
   const [a, b, c] = [await mk("Task A"), await mk("Task B"), await mk("Task C")];
 
@@ -175,7 +175,7 @@ describe("holder listings show the holding run's messaging address (AC-MA-3)", (
       title: "Only sub",
       parent_id: plan.id,
       content: "# t",
-      extra: { plan_id: plan.id },
+      extra: { plan_id: plan.id, kind: "code" },
     } as CreateDocInput);
     await w.runs.register({ harness: "claude-code", sessionId: "S9", composition: COMPOSITION, messageAddress: "uds:/nine" });
     const sub = await w.runs.register({
@@ -201,7 +201,7 @@ describe("holder listings show the holding run's messaging address (AC-MA-3)", (
       title: "Ghost",
       parent_id: plan.id,
       content: "# t",
-      extra: { plan_id: plan.id },
+      extra: { plan_id: plan.id, kind: "code" },
     } as CreateDocInput);
     // reason: the claim verb may refuse an unregistered run; when it accepts, the listing must still be total.
     const claimed = await w.tasks.claim(t.id, { by: "agent:session-ghost", harnessRun: "cc:ghost" as RunId, worktree: "/w/g", branch: "b-g" });

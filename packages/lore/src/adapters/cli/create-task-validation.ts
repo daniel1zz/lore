@@ -44,6 +44,8 @@
  * Source: SPEC-065 D4, AC-065-5, AC-065-6; SPEC-069 D2, D3, D4, AC-069-5, AC-069-6
  */
 
+import { TASK_KINDS, formatTaskKindRequiredMessage } from "@lore/core";
+
 /** Raw, unresolved `lore create task` flag values this module's checks consume. */
 export interface TaskCreateFlags {
   /** `args["plan-id"]`, or `undefined`/empty-string when the flag was omitted. */
@@ -70,6 +72,11 @@ export interface TaskCreateFlags {
    * plan; `--adhoc` declares there is none to justify).
    */
   linkage?: string | undefined;
+  /**
+   * `args.kind`, or `undefined`/empty-string when the flag was omitted. REQUIRED for every task, `--adhoc` included
+   * (spec-done-contract-compiled-at-approve-task-kinds-write-sets AC-DCS1-4, ledger D28): there is no kind-less task and no default.
+   */
+  kind?: string | undefined;
 }
 
 /**
@@ -87,12 +94,16 @@ export interface TaskCreateFlags {
  *   `flags.adhoc === true`
  */
 export function checkTaskCreateRequiredFlags(flags: TaskCreateFlags): string[] {
-  if (flags.adhoc === true) return [];
+  const kind = flags.kind;
   const missing: string[] = [];
-  const hasPlanId = flags.planId !== undefined && flags.planId.trim() !== "";
-  const hasParent = flags.parent !== undefined && flags.parent.trim() !== "";
-  if (!hasPlanId) missing.push("--plan-id");
-  if (!hasParent && !hasPlanId) missing.push("--parent");
+  // reason: --adhoc relaxes only --plan-id/--parent; the kind below is required for every task, an --adhoc one included (AC-DCS1-4).
+  if (flags.adhoc !== true) {
+    const hasPlanId = flags.planId !== undefined && flags.planId.trim() !== "";
+    const hasParent = flags.parent !== undefined && flags.parent.trim() !== "";
+    if (!hasPlanId) missing.push("--plan-id");
+    if (!hasParent && !hasPlanId) missing.push("--parent");
+  }
+  if (kind === undefined || kind === "") missing.push("kind");
   return missing;
 }
 
@@ -147,10 +158,13 @@ export function formatTaskCreateAdhocConflictError(conflicts: string[]): string 
  * @param missing - non-empty result of {@link checkTaskCreateRequiredFlags}
  */
 export function formatTaskCreateMissingFlagsError(missing: string[]): string {
-  const lines = [
-    `Error: type 'task' is missing required flag(s): ${missing.join(", ")}.`,
-    "  --plan-id <plan-id-or-slug> is always required for type 'task'.",
-  ];
+  const lines = [`Error: type 'task' is missing required flag(s): ${missing.map((flag) => (flag === "kind" ? "--kind" : flag)).join(", ")}.`];
+  if (missing.some((flag) => flag !== "kind")) {
+    lines.push("  --plan-id <plan-id-or-slug> is always required for type 'task'.");
+  }
+  if (missing.includes("kind")) {
+    lines.push(`  --kind <${TASK_KINDS.join("|")}> is required: ${formatTaskKindRequiredMessage(undefined, "--kind")}`);
+  }
   if (missing.includes("--parent")) {
     lines.push(
       "  --parent <id-or-slug> is required because --plan-id is also missing — with " +
@@ -173,7 +187,7 @@ export function formatTaskCreateMissingFlagsError(missing: string[]): string {
  * `VerifyRunnerService.verifyAdhocTask` resolves an ad-hoc task's governing
  * spec THROUGH `extra.ac_scope`. With the key absent, the one flag that unlocks
  * the shipped ad-hoc attestation path was gated on the one condition `--adhoc`
- * guarantees is absent, so `lore done --override-attestation` became the routine
+ * guarantees is absent, so the attestation waiver then in force became the routine
  * archival route for the dominant task shape (and `lore done`'s red-first floor,
  * keyed on the same key's presence, never fired either).
  *
@@ -229,8 +243,8 @@ export function formatAdhocAcScopeMissingError(): string {
     "Error: --adhoc requires an explicit --ac-scope declaration.",
     "  An ad-hoc task has no parent plan, so `lore verify --task <slug>` resolves its",
     "  governing spec THROUGH extra.ac_scope. With that key absent the task can never",
-    "  reach a runner-attested pass, leaving `lore done --override-attestation` as its",
-    "  only archival route.",
+    "  reach a runner-attested pass for its declared criteria (`lore evidence --capture`",
+    "  remains its route to an attested pass).",
     "  Declare the criterion ids this task claims (legal ids: lore ac list <spec>):",
     "    --ac-scope <AC-ID> [--ac-scope <AC-ID> ...]",
     "  Or declare explicitly that it claims NONE — an auditable decision, not a silence:",

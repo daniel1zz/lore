@@ -85,7 +85,7 @@ beforeEach(() => {
   const prd = slugOf(mustLore(["create", "prd", "--title", "SFC PRD", "--content", "root", "--no-ai"], repo, false));
   const plan = slugOf(mustLore(["create", "plan", "--title", "SFC Plan", "--parent", prd, "--content", "x", "--no-ai"], repo, false));
   task = slugOf(
-    mustLore(["create", "task", "--title", "SFC Task", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", "--anchor", "a.ts"], repo, false),
+    mustLore(["create", "task", "--kind", "code", "--title", "SFC Task", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", "--anchor", "a.ts"], repo, false),
   );
   wt = join(base, "wt");
   git(repo, "worktree", "add", "-q", "-b", "sfc-branch", wt);

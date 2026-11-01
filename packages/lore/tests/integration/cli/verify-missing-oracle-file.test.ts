@@ -6,13 +6,20 @@
  * baseline AS-17: a completeness/fidelity oracle never reports complete over what it could not see).
  *
  * Subprocess pattern (commands/ac.ts imports bun:sqlite, unresolvable under vitest): `bun run src/index.ts` in a
- * `mkdtemp` + `lore init` corpus, never this repo's `.lore/`.
+ * `mkdtemp` + `lore init` corpus inside a git repository on `main`, never this repo's `.lore/`.
+ *
+ * Under the done-contract model (AC-DCS1-7) `lore done` judges a task by the contract compiled at approve: the AC of the task's
+ * ac_scope is the contract oracle `ac:<id>`, which a counted pass row must have run with the AC's CURRENT command, bound to the code the
+ * task landed. The retired "oracle-file" floor of `lore done` (a refusal read from the AC's coverage state) therefore became the
+ * `contract-oracles` floor: an AC whose file is missing has no counted pass, so `lore done` exits 4 naming `ac:<id>` and the command
+ * (which names the missing path), once the task is landed and its other oracles hold their passes. Each task is approved with its
+ * contract, claimed on a branch of its own, landed on main (a merge commit and the landing record) and given the pass of `typecheck`.
  *
  * Dimension mapping:
  *   HAPPY:      the oracle file exists -> verify records an attested pass, `ac list` renders attested_pass
  *   NEGATIVE:   file deleted -> verify exits 3 (the inconclusive exit) with the missing path in its output, records `inconclusive` (never pass/fail),
- *               `ac list` coverage state is `not_measured`, `lore done` exits exactly 4 naming the AC
- *   STATE:      the earlier attested pass stays in the log but no longer renders as passing
+ *               `ac list` coverage state is `not_measured`, `lore done` exits exactly 4 [floor: contract-oracles] naming the AC and the path
+ *   STATE:      the earlier attested pass stays in the log but no longer renders as passing (and no longer counts: its tree is not the landed tree)
  *   REGRESSION: repointing the command to an existing file clears the refusal (verify passes, done exits 0)
  *
  * @spec_ref AC-TG-6
@@ -20,16 +27,19 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { FIXTURE_HOME_OUTSIDE_REPO } from "../../helpers/clean-tree-repo.js";
 import { withSessionIdentity } from "../../helpers/session-actor.js";
+import { landTask, type TaskWorld } from "../support/land-task.js";
 
 const GIT_AUTHOR_ARGS = ["-c", "user.email=lore-test@example.com", "-c", "user.name=Lore Test"] as const;
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
 const AC_ID = "AC-M-1";
+const TYPECHECK_COMMAND = "echo typecheck-ok";
 
 interface RunResult {
   readonly stdout: string;
@@ -40,7 +50,8 @@ interface RunResult {
 function runLore(args: string[], cwd: string, actor: string | null = "missing-oracle-test"): RunResult {
   const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
     cwd,
-    env: withSessionIdentity({ ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" }, actor) as Record<string, string>,
+    // reason: HOME lies outside the fixture repository, so bun/lore caches never dirty the tree a captured pass is bound to
+    env: withSessionIdentity({ ...process.env, HOME: FIXTURE_HOME_OUTSIDE_REPO, EDITOR: "true", CLAUDECODE: "1" }, actor) as Record<string, string>,
     encoding: "utf8",
   });
   return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: result.status ?? 1 };
@@ -68,6 +79,11 @@ function disableAllGates(dir: string): void {
         `    ${g}:`,
         "      enabled: false",
       ]),
+      // approve compiles each task's done contract from these commands (a code task needs all three)
+      "  done_contract:",
+      '    install: "echo install-ok"',
+      `    typecheck: "${TYPECHECK_COMMAND}"`,
+      '    test_file: "echo Ran 1 tests in {file}"',
       "",
     ].join("\n"),
   );
@@ -75,16 +91,47 @@ function disableAllGates(dir: string): void {
 
 const PASSING_TEST_BODY = 'import { test, expect } from "bun:test";\ntest("ok", () => { expect(1).toBe(1); });\n';
 
+/** A git repository on `main` with one commit; the corpus and the linked worktrees never dirty its tree. */
+function makeRepo(dir: string): void {
+  const git = (...args: string[]): void => void execFileSync("git", [...GIT_AUTHOR_ARGS, ...args], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+  git("init", "-q", "-b", "main");
+  appendFileSync(join(dir, ".git", "info", "exclude"), ".lore/\n.claude/\n");
+  writeFileSync(join(dir, "README.md"), "fixture\n");
+  git("add", "-A");
+  git("commit", "-q", "-m", "fixture base");
+}
+
+/** Commits whatever is pending ON main (a landing leaves the shared checkout detached at main's tip, so main is checked out first). */
 function commitAll(dir: string, msg: string): void {
+  execFileSync("git", ["checkout", "-q", "main"], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
   execFileSync("git", ["add", "-A"], { cwd: dir });
   execFileSync("git", [...GIT_AUTHOR_ARGS, "commit", "-q", "-m", msg, "--allow-empty"], { cwd: dir });
 }
 
-function coverageState(dir: string, spec: string): string | undefined {
+function worldOf(dir: string): TaskWorld {
+  return { dir, git: (args) => execFileSync("git", [...GIT_AUTHOR_ARGS, ...args], { cwd: dir, encoding: "utf8" }).trim(), lore: (args) => runLore([...args], dir) };
+}
+
+/** The shared scratch directory that holds the linked worktrees of every landing in this file. */
+const wtRoots: string[] = [];
+
+/**
+ * Claims the approved `task` on a branch of its own, commits there, lands the branch on main (no integrate run) and leaves the shared
+ * checkout detached at the landing commit, with the task holding no pass yet; then records the runner pass of `typecheck`.
+ */
+async function landWithTypecheckPass(dir: string, task: string, branch: string): Promise<void> {
+  const wtRoot = mkdtempSync(join(tmpdir(), "lore-missing-oracle-wt-"));
+  wtRoots.push(wtRoot);
+  await landTask(worldOf(dir), { slug: task, branch, worktree: join(wtRoot, branch), claimValue: "branch", session: "missing-oracle-test", approve: false, recordPasses: false });
+  const recorded = runLore(["evidence", task, "--oracle", "test", "--command", TYPECHECK_COMMAND, "--result", "pass", "--capture"], dir);
+  expect(recorded.exitCode, recorded.stdout + recorded.stderr).toBe(0);
+}
+
+function coverageState(dir: string, spec: string, acId: string = AC_ID): string | undefined {
   const parsed = JSON.parse(mustRun(["ac", "list", spec, "--json"], dir)) as {
     data: { coverage: Array<{ ac_id: string; state: string }> | null };
   };
-  return parsed.data.coverage?.find((f) => f.ac_id === AC_ID)?.state;
+  return parsed.data.coverage?.find((f) => f.ac_id === acId)?.state;
 }
 
 function lastEvidenceResult(dir: string, task: string): string | undefined {
@@ -95,6 +142,10 @@ function lastEvidenceResult(dir: string, task: string): string | undefined {
   return rows[rows.length - 1]?.result;
 }
 
+afterAll(() => {
+  for (const root of wtRoots) rmSync(root, { recursive: true, force: true });
+});
+
 describe("lore verify / ac list / done over an AC whose oracle file is missing", () => {
   let dir: string;
   let spec: string;
@@ -103,8 +154,9 @@ describe("lore verify / ac list / done over an AC whose oracle file is missing",
 
   // reason: ~10 CLI spawns at ~1-2s each.
   beforeAll(() => {
+    mkdirSync(FIXTURE_HOME_OUTSIDE_REPO, { recursive: true });
     dir = mkdtempSync(join(tmpdir(), "lore-missing-oracle-"));
-    execFileSync("git", ["init", "-q"], { cwd: dir });
+    makeRepo(dir);
     mustRun(["init"], dir);
     disableAllGates(dir);
     mustRun(["create", "prd", "--title", "Missing Oracle PRD", "--no-ai", "--content", "body"], dir);
@@ -118,9 +170,11 @@ describe("lore verify / ac list / done over an AC whose oracle file is missing",
     );
     plan = extractSlug(mustRun(["create", "plan", "--title", "Missing Oracle Plan", "--parent", spec, "--no-ai", "--content", "body"], dir));
     task = extractSlug(
-      mustRun(["create", "task", "--title", "Missing Oracle Task", "--parent", plan, "--plan-id", plan, "--ac-scope", AC_ID, "--no-ai", "--content", "body"], dir),
+      mustRun(["create", "task", "--kind", "code", "--title", "Missing Oracle Task", "--parent", plan, "--plan-id", plan, "--ac-scope", AC_ID, "--no-ai", "--content", "body"], dir),
     );
     commitAll(dir, "fixture");
+    // the contract (oracles ac:AC-M-1 and typecheck) is compiled here; the red run is not this file's subject (AC-DCS1-5)
+    mustRun(["approve", task, "--red-waiver", "the red run is not the subject of this test"], dir);
   }, 180_000);
 
   afterAll(() => {
@@ -138,7 +192,7 @@ describe("lore verify / ac list / done over an AC whose oracle file is missing",
     expect(coverageState(dir, spec)).toBe("attested_pass");
   });
 
-  it("NEGATIVE/STATE: file deleted -> verify records not-measured with the path, list stops showing a pass, done exits 4 naming the AC", { timeout: 180_000 }, () => {
+  it("NEGATIVE/STATE: file deleted -> verify records not-measured with the path, list stops showing a pass, done exits 4 naming the AC", { timeout: 180_000 }, async () => {
     rmSync(join(dir, "oracle.test.ts"));
     commitAll(dir, "delete oracle");
 
@@ -149,9 +203,15 @@ describe("lore verify / ac list / done over an AC whose oracle file is missing",
 
     expect(coverageState(dir, spec)).toBe("not_measured");
 
-    const done = runLore(["done", task, "--declare-no-new-tests", "fixture"], dir);
+    // the task lands on a main without the file; the earlier pass ran on a tree that held it, so it no longer counts
+    await landWithTypecheckPass(dir, task, "missing-oracle-landing");
+    const again = runLore(["verify", plan, "--task", task, "--ac", AC_ID, "--yes"], dir);
+    expect(again.exitCode, again.stdout + again.stderr).toBe(3);
+
+    const done = runLore(["done", task], dir);
     expect(done.exitCode, done.stdout + done.stderr).toBe(4);
-    expect(done.stderr).toContain(AC_ID);
+    expect(done.stderr).toContain("[floor: contract-oracles]");
+    expect(done.stderr).toContain(`ac:${AC_ID}`);
     expect(done.stderr).toContain("oracle.test.ts");
   });
 
@@ -160,19 +220,19 @@ describe("lore verify / ac list / done over an AC whose oracle file is missing",
       ["ac", "set", spec, AC_ID, "--command", `bun test replacement.test.ts && echo '${AC_ID} PASS: replacement ran'`],
       dir,
     );
-    commitAll(dir, "repoint");
+    commitAll(dir, "repoint"); // an empty commit: the tree is still the landed tree, so the rows recorded on it count
     const verified = runLore(["verify", plan, "--task", task, "--ac", AC_ID, "--yes"], dir);
     expect(verified.exitCode, verified.stdout + verified.stderr).toBe(0);
     expect(coverageState(dir, spec)).toBe("attested_pass");
 
-    const done = runLore(["done", task, "--declare-no-new-tests", "fixture"], dir);
+    const done = runLore(["done", task], dir);
     expect(done.exitCode, done.stdout + done.stderr).toBe(0);
   });
 });
 
 // ─── A declared-not-yet-written oracle is not a lie; a declared one that once passed and vanished is ───────────
 
-describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays none and does not block done; a vanished once-passing oracle still does", () => {
+describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays none; done refuses until the oracle has a counted pass; a vanished once-passing oracle refuses too", () => {
   let dir: string;
   let spec: string;
   let plan: string;
@@ -189,24 +249,27 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
       dir,
     );
   };
-  const stateOf = (id: string): string | undefined => {
-    const parsed = JSON.parse(mustRun(["ac", "list", spec, "--json"], dir)) as {
-      data: { coverage: Array<{ ac_id: string; state: string }> | null };
-    };
-    return parsed.data.coverage?.find((f) => f.ac_id === id)?.state;
-  };
+  const stateOf = (id: string): string | undefined => coverageState(dir, spec, id);
   const newTask = (title: string, scope: string[]): string => {
     const slug = extractSlug(
-      mustRun(["create", "task", "--title", title, "--parent", plan, "--plan-id", plan, "--ac-scope", scope[0] as string, "--no-ai", "--content", "body"], dir),
+      mustRun(["create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--ac-scope", scope[0] as string, "--no-ai", "--content", "body"], dir),
     );
     for (const extra of scope.slice(1)) mustRun(["scope", "add", slug, extra], dir);
     return slug;
   };
+  /** Asserts the refusal every case below ends in: the contract-oracles floor, naming the AC oracle and its command (which names the path). */
+  const expectRefusedNaming = (done: RunResult, acId: string, path: string): void => {
+    expect(done.exitCode, done.stdout + done.stderr).toBe(4);
+    expect(done.stderr).toContain("[floor: contract-oracles]");
+    expect(done.stderr).toContain(`ac:${acId}`);
+    expect(done.stderr).toContain(path);
+  };
 
   // reason: ~20 CLI spawns at ~1-2s each.
   beforeAll(() => {
+    mkdirSync(FIXTURE_HOME_OUTSIDE_REPO, { recursive: true });
     dir = mkdtempSync(join(tmpdir(), "lore-missing-oracle-rf-"));
-    execFileSync("git", ["init", "-q"], { cwd: dir });
+    makeRepo(dir);
     mustRun(["init"], dir);
     disableAllGates(dir);
     mustRun(["create", "prd", "--title", "RF PRD", "--no-ai", "--content", "body"], dir);
@@ -229,7 +292,11 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
     taskDotSpelling = newTask("RF Task Four", ["AC-OK", "AC-DOT"]);
     taskScript = newTask("RF Task Five", ["AC-OK", "AC-SCR"]);
     commitAll(dir, "fixture");
-  }, 180_000);
+    // every task's contract (its ac oracles and typecheck) is compiled here; the red run is not this file's subject (AC-DCS1-5)
+    for (const t of [taskRedFirst, taskVanished, taskDifferentFile, taskDotSpelling, taskScript]) {
+      mustRun(["approve", t, "--red-waiver", "the red run is not the subject of this test"], dir);
+    }
+  }, 240_000);
 
   afterAll(() => {
     try {
@@ -239,16 +306,16 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
     }
   });
 
-  it("STATE/HAPPY: a declared red-first AC with no evidence reads none and its task can be archived", { timeout: 180_000 }, () => {
+  it("STATE: a declared red-first AC with no evidence reads none, and its task is refused by done naming that AC until the oracle has a counted pass", { timeout: 180_000 }, async () => {
+    await landWithTypecheckPass(dir, taskRedFirst, "rf-landing-one");
     const verified = runLore(["verify", plan, "--task", taskRedFirst, "--ac", "AC-OK", "--yes"], dir);
     expect(verified.exitCode, verified.stdout + verified.stderr).toBe(0);
     expect(stateOf("AC-RF")).toBe("none");
 
-    const done = runLore(["done", taskRedFirst, "--declare-no-new-tests", "fixture"], dir);
-    expect(done.exitCode, done.stdout + done.stderr).toBe(0);
+    expectRefusedNaming(runLore(["done", taskRedFirst], dir), "AC-RF", "later.test.ts");
   });
 
-  it("NEGATIVE: a declared AC that once passed and whose file is gone is not measured and still refuses done with exit 4", { timeout: 180_000 }, () => {
+  it("NEGATIVE: a declared AC that once passed and whose file is gone is not measured and still refuses done with exit 4", { timeout: 180_000 }, async () => {
     writeFileSync(join(dir, "vanish.test.ts"), PASSING_TEST_BODY);
     commitAll(dir, "write vanish oracle");
     for (const ac of ["AC-OK", "AC-VAN"]) {
@@ -259,17 +326,20 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
     commitAll(dir, "delete vanish oracle");
 
     expect(stateOf("AC-VAN")).toBe("not_measured");
-    const done = runLore(["done", taskVanished, "--declare-no-new-tests", "fixture"], dir);
-    expect(done.exitCode, done.stdout + done.stderr).toBe(4);
-    expect(done.stderr).toContain("AC-VAN");
-    expect(done.stderr).toContain("vanish.test.ts");
+    // the task lands on a main without the file: the passes recorded while it existed ran on another tree and no longer count
+    await landWithTypecheckPass(dir, taskVanished, "rf-landing-two");
+    const verified = runLore(["verify", plan, "--task", taskVanished, "--ac", "AC-OK", "--yes"], dir);
+    expect(verified.exitCode, verified.stdout + verified.stderr).toBe(0);
+    expectRefusedNaming(runLore(["done", taskVanished], dir), "AC-VAN", "vanish.test.ts");
   });
 
-  it("REGRESSION (TG-22 narrowing removed; AC-TG-6 text + AC-EI-2): a declared red-first AC with a pass tagged to it that ran a DIFFERENT existing file renders not_measured and lore done exits 4 naming the AC and its path", { timeout: 180_000 }, () => {
-    const verified = runLore(["verify", plan, "--task", taskDifferentFile, "--ac", "AC-OK", "--yes"], dir);
-    expect(verified.exitCode, verified.stdout + verified.stderr).toBe(0);
+  it("REGRESSION (TG-22 narrowing removed; AC-TG-6 text + AC-EI-2): a declared red-first AC with a pass tagged to it that ran a DIFFERENT existing file renders not_measured and lore done exits 4 naming the AC and its path", { timeout: 180_000 }, async () => {
     // A pass tagged AC-DIFF whose command runs other.bun.test.ts (exists), never never-written.test.ts (the AC's oracle).
     writeFileSync(join(dir, "other.bun.test.ts"), PASSING_TEST_BODY);
+    commitAll(dir, "write other oracle");
+    await landWithTypecheckPass(dir, taskDifferentFile, "rf-landing-three");
+    const verified = runLore(["verify", plan, "--task", taskDifferentFile, "--ac", "AC-OK", "--yes"], dir);
+    expect(verified.exitCode, verified.stdout + verified.stderr).toBe(0);
     const recorded = runLore(
       ["evidence", taskDifferentFile, "--oracle", "test", "--command", "bun test other.bun.test.ts", "--result", "pass", "--ac", "AC-DIFF", "--capture"],
       dir,
@@ -279,14 +349,12 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
     // AC-EI-2: a missing oracle is not measured whichever files earlier passes ran (TG-22's "passes that ran the
     // missing file" narrowing is gone; spec-test-governance-guards-that-refuse-bad-tests-declared AC-TG-6 text never had it).
     expect(stateOf("AC-DIFF")).toBe("not_measured");
-    // AC-TG-6 text: `lore done` exits 4 naming the AC until its command is repointed — no "ran the missing file" narrowing.
-    const done = runLore(["done", taskDifferentFile, "--declare-no-new-tests", "fixture"], dir);
-    expect(done.exitCode, done.stdout + done.stderr).toBe(4);
-    expect(done.stderr).toContain("AC-DIFF");
-    expect(done.stderr).toContain("never-written.test.ts");
+    // AC-TG-6 text: `lore done` exits 4 naming the AC until its command is repointed: the row ran another command than the AC's own,
+    // so it is no pass of the contract oracle ac:AC-DIFF.
+    expectRefusedNaming(runLore(["done", taskDifferentFile], dir), "AC-DIFF", "never-written.test.ts");
   });
 
-  it("NEGATIVE (TG-22): a pass recorded as ./dotspelled.bun.test.ts of an AC path dotspelled.bun.test.ts that has since vanished is still not measured and refuses done", { timeout: 180_000 }, () => {
+  it("NEGATIVE (TG-22): a pass recorded as ./dotspelled.bun.test.ts of an AC path dotspelled.bun.test.ts that has since vanished is still not measured and refuses done", { timeout: 180_000 }, async () => {
     writeFileSync(join(dir, "dotspelled.bun.test.ts"), PASSING_TEST_BODY);
     commitAll(dir, "write dotspelled oracle");
     const verified = runLore(["verify", plan, "--task", taskDotSpelling, "--ac", "AC-OK", "--yes"], dir);
@@ -300,11 +368,12 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
     commitAll(dir, "delete dotspelled oracle");
 
     expect(stateOf("AC-DOT")).toBe("not_measured");
-    const done = runLore(["done", taskDotSpelling, "--declare-no-new-tests", "fixture"], dir);
-    expect(done.exitCode, done.stdout + done.stderr).toBe(4);
-    expect(done.stderr).toContain("AC-DOT");
+    await landWithTypecheckPass(dir, taskDotSpelling, "rf-landing-four");
+    const again = runLore(["verify", plan, "--task", taskDotSpelling, "--ac", "AC-OK", "--yes"], dir);
+    expect(again.exitCode, again.stdout + again.stderr).toBe(0);
+    expectRefusedNaming(runLore(["done", taskDotSpelling], dir), "AC-DOT", "dotspelled.bun.test.ts");
   });
-  it("NEGATIVE (AC-EI-2): a script path that once passed and vanished is not measured and lore done exits 4 naming the AC and the script", { timeout: 180_000 }, () => {
+  it("NEGATIVE (AC-EI-2): a script path that once passed and vanished is not measured and lore done exits 4 naming the AC and the script", { timeout: 180_000 }, async () => {
     mkdirSync(join(dir, "scripts"), { recursive: true });
     writeFileSync(join(dir, "scripts", "ran.sh"), "echo ran\n");
     commitAll(dir, "write script oracle");
@@ -316,9 +385,9 @@ describe("AC-TG-6 — red-first (--allow-missing-path) ACs: no evidence stays no
     commitAll(dir, "delete script oracle");
 
     expect(stateOf("AC-SCR")).toBe("not_measured");
-    const done = runLore(["done", taskScript, "--declare-no-new-tests", "fixture"], dir);
-    expect(done.exitCode, done.stdout + done.stderr).toBe(4);
-    expect(done.stderr).toContain("AC-SCR");
-    expect(done.stderr).toContain("scripts/ran.sh");
+    await landWithTypecheckPass(dir, taskScript, "rf-landing-five");
+    const verified = runLore(["verify", plan, "--task", taskScript, "--ac", "AC-OK", "--yes"], dir);
+    expect(verified.exitCode, verified.stdout + verified.stderr).toBe(0);
+    expectRefusedNaming(runLore(["done", taskScript], dir), "AC-SCR", "scripts/ran.sh");
   });
 });

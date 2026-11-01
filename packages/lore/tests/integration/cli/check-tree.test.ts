@@ -32,6 +32,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
 import { mkdirSync, rmSync, copyFileSync, existsSync } from "fs";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { makeCleanTreeRepo } from "../../helpers/clean-tree-repo.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
@@ -106,6 +107,11 @@ function disableAllGates(dir: string): void {
       "      enabled: false",
       "    task-claim:",
       "      enabled: false",
+      // reason: `lore set <task> --status approved` compiles the task's done contract at a commit (AC-DCS1-1), which needs these commands
+      "  done_contract:",
+      '    install: "echo install-ok"',
+      '    typecheck: "echo typecheck-ok"',
+      '    test_file: "echo Ran 1 tests in {file}"',
       "",
     ].join("\n"),
   );
@@ -118,6 +124,8 @@ let tmpDir: string;
 beforeEach(() => {
   tmpDir = join(tmpdir(), `lore-check-tree-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(tmpDir, { recursive: true });
+  // reason: approving a task compiles its done contract at a commit of the repository, so the corpus lives in one (main, one commit)
+  makeCleanTreeRepo(tmpDir);
 
   const init = runLore(["init"], tmpDir);
   if (init.exitCode !== 0) {
@@ -142,7 +150,7 @@ function armBlueprint(): void {
 
 function createDoc(type: string, extraArgs: string[]): string {
   const r = runLore(
-    ["create", type, "--title", `${type} fixture`, "--no-ai", "--content", "body", ...extraArgs],
+    ["create", type, "--title", `${type} fixture`, "--no-ai", "--content", "body", ...(type === "task" ? ["--kind", "code"] : []), ...extraArgs],
     tmpDir,
   );
   if (r.exitCode !== 0) throw new Error(`create ${type} failed: ${r.stderr}`);

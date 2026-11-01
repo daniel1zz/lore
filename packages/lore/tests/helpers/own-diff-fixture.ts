@@ -7,6 +7,7 @@
  * Never touches the repo's own `.lore/`, refs or worktrees. Side-effect class: IO (git + `bun run src/index.ts`).
  */
 import { execFileSync, spawnSync } from "node:child_process";
+import type { TaskKind } from "@lore/core";
 import { patchLoreConfig } from "./patch-lore-config.js";
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -161,10 +162,14 @@ export class OwnDiffFixture {
     this.git(["commit", "-q", "-m", message]);
   }
 
-  /** A task of `plan` (default plan when omitted) declaring `anchors`; returns its slug. */
-  createTask(title: string, anchors: readonly string[], plan: string = this.planSlug): string {
+  /**
+   * A task of `plan` (default plan when omitted) of the given `kind`, declaring `anchors`; returns its slug.
+   * The kind is explicit and never defaulted: `lore create task` refuses a creation without one. Only a `code` task may
+   * declare file anchors.
+   */
+  createTask(title: string, anchors: readonly string[], kind: TaskKind, plan: string = this.planSlug): string {
     this.taskSeq += 1;
-    const args = ["create", "task", "--title", `${title} ${this.taskSeq}`, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"];
+    const args = ["create", "task", "--title", `${title} ${this.taskSeq}`, "--kind", kind, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"];
     for (const anchor of anchors) args.push("--anchor", anchor);
     return this.parseSlug(this.mustLore(args).stdout);
   }

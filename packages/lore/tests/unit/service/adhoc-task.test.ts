@@ -94,6 +94,7 @@ describe("AC-069-5: create task --adhoc — CLI single-pass validation (pure)", 
       planId: undefined,
       parent: undefined,
       adhoc: true,
+      kind: "check",
     });
     expect(missing).toEqual([]);
   });
@@ -165,7 +166,7 @@ describe("AC-069-5: create task --adhoc — CLI single-pass validation (pure)", 
   // ── BOUNDARY ───────────────────────────────────────────────────────────
 
   it("BOUNDARY: --adhoc=false (falsy) behaves exactly like --adhoc omitted — required flags still enforced", () => {
-    const missing = checkTaskCreateRequiredFlags({ planId: undefined, parent: undefined, adhoc: false });
+    const missing = checkTaskCreateRequiredFlags({ planId: undefined, parent: undefined, adhoc: false, kind: "code" });
     expect(missing).toEqual(["--plan-id", "--parent"]);
   });
 
@@ -184,15 +185,15 @@ describe("AC-069-5: create task --adhoc — CLI single-pass validation (pure)", 
   it("STATE: --adhoc true short-circuits checkTaskCreateRequiredFlags before any other flag is inspected", () => {
     // even with --plan-id/--parent ALSO both absent, --adhoc alone makes the
     // required-flags check a pure no-op — the two concerns never double-report.
-    const missing = checkTaskCreateRequiredFlags({ planId: undefined, parent: undefined, adhoc: true });
+    const missing = checkTaskCreateRequiredFlags({ planId: undefined, parent: undefined, adhoc: true, kind: "code" });
     expect(missing).toEqual([]);
   });
 
   // ── REGRESSION ─────────────────────────────────────────────────────────
 
   it("REGRESSION: pre-SPEC-069 callers passing only {planId, parent} (no adhoc field) are unaffected", () => {
-    expect(checkTaskCreateRequiredFlags({ planId: "plan-x", parent: undefined })).toEqual([]);
-    expect(checkTaskCreateRequiredFlags({ planId: undefined, parent: undefined })).toEqual([
+    expect(checkTaskCreateRequiredFlags({ planId: "plan-x", parent: undefined, kind: "code" })).toEqual([]);
+    expect(checkTaskCreateRequiredFlags({ planId: undefined, parent: undefined, kind: "code" })).toEqual([
       "--plan-id",
       "--parent",
     ]);
@@ -521,12 +522,13 @@ describe("AC-069-7: readyAdhoc() lists OPEN ad-hoc tasks corpus-wide", () => {
     const created = await corpusService.create({
       type: "task",
       title: "Claimed adhoc",
-      extra: { adhoc: true },
+      extra: { adhoc: true, kind: "code" },
     } as CreateDocInput);
     expect(created.ok).toBe(true);
     if (!created.ok) return;
 
-    await taskWorkflowService.claim(created.value.id, { by: "alice" });
+    const claimed = await taskWorkflowService.claim(created.value.id, { by: "alice", worktree: "wt-adhoc" });
+    expect(claimed.ok).toBe(true);
 
     const result = await taskWorkflowService.readyAdhoc();
     expect(result.ok).toBe(true);

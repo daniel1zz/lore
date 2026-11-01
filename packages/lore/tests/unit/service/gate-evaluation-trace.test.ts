@@ -281,7 +281,7 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
         const prd = parseSlug(runLoreOk(["create", "prd", "--title", "GET-2 PRD", "--content", "## Overview\n\nbody", "--no-ai"], tmpDir, "create prd").stdout);
         const plan = parseSlug(runLoreOk(["create", "plan", "--title", "GET-2 plan (no spec ancestor)", "--parent", prd, "--content", "plan body", "--no-ai"], tmpDir, "create plan").stdout);
         const taskResult = runLoreOk(
-          ["create", "task", "--title", "GET-2 task-create target", "--plan-id", plan, "--content", "task body", "--no-ai"],
+          ["create", "task", "--title", "GET-2 task-create target", "--kind", "code", "--plan-id", plan, "--content", "task body", "--no-ai"],
           tmpDir,
           "create task (task-create)",
         );
@@ -372,7 +372,7 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
         const prd = parseSlug(runLoreOk(["create", "prd", "--title", "GET-5 PRD", "--content", "## Overview\n\nbody", "--no-ai"], tmpDir, "create prd").stdout);
         const plan = parseSlug(runLoreOk(["create", "plan", "--title", "GET-5 plan", "--parent", prd, "--content", "plan body", "--no-ai"], tmpDir, "create plan").stdout);
         const task = parseSlug(
-          runLoreOk(["create", "task", "--title", "GET-5 task-claim target", "--plan-id", plan, "--content", "task body", "--no-ai"], tmpDir, "create task").stdout,
+          runLoreOk(["create", "task", "--title", "GET-5 task-claim target", "--kind", "code", "--plan-id", plan, "--content", "task body", "--no-ai"], tmpDir, "create task").stdout,
         );
         runLoreOk(["claim", task, "--worktree", "trace-test-worktree"], tmpDir, "claim task (task-claim)");
 

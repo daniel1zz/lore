@@ -8,6 +8,8 @@
  * Side-effect class: IO (the injected `lore` runner). Never touches the repo's own `.lore/`.
  */
 
+import type { TaskKind } from "@lore/core";
+
 /** Runs `lore <args>` in the throwaway repository; `status` is the process exit code. */
 export type LoreRunner = (args: readonly string[]) => { readonly status: number; readonly out: string };
 
@@ -27,9 +29,10 @@ function slugOf(run: LoreRunner, args: readonly string[]): string {
  * @param run - the repository's `lore` runner.
  * @param repoKey - any string unique to the throwaway repository (its path): the plan is created once per key.
  * @param branch - the branch the task is claimed on.
+ * @param kind - the task kind (`code`, `check` or `corpus`); never defaulted, because `lore create task` refuses a missing kind.
  * @returns the task slug.
  */
-export function claimBranchTask(run: LoreRunner, repoKey: string, branch: string): string {
+export function claimBranchTask(run: LoreRunner, repoKey: string, branch: string, kind: TaskKind): string {
   let plan = planOfRepo.get(repoKey);
   if (plan === undefined) {
     const prd = slugOf(run, ["create", "prd", "--title", "Fixture PRD", "--content", "root", "--no-ai"]);
@@ -37,7 +40,7 @@ export function claimBranchTask(run: LoreRunner, repoKey: string, branch: string
     planOfRepo.set(repoKey, plan);
   }
   titleSeq += 1;
-  const task = slugOf(run, ["create", "task", "--title", `Fixture task ${titleSeq}`, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"]);
+  const task = slugOf(run, ["create", "task", "--title", `Fixture task ${titleSeq}`, "--kind", kind, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"]);
   const claimed = run(["claim", task, "--worktree", branch]);
   if (claimed.status !== 0) throw new Error(`lore claim ${task} --worktree ${branch} exited ${claimed.status}: ${claimed.out}`);
   return task;

@@ -145,6 +145,12 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     plan: () => import("./commands/plan.js"),
     claim: () => import("./commands/claim.js"),
     release: () => import("./commands/release.js"),
+    // finish (AC-DCS1-15..17) — runs every oracle of the stored done contract in the claim worktree and keeps the claim finished.
+    finish: () => import("./commands/finish.js"),
+    // start (AC-DCS1-13, AC-DCS1-14) — creates the task's worktree on the contract base, installs, claims and prints the contract.
+    start: () => import("./commands/start.js"),
+    // dispatch (AC-DCS2-6) — prints the subagent prompt of a code task from its stored contract and the shipped standing rules.
+    dispatch: () => import("./commands/dispatch.js"),
     evidence: () => import("./commands/evidence.js"),
     // done (spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3) —
     // evidence-validated atomic lifecycle walk to archived; see commands/done.ts's
@@ -180,10 +186,6 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     // dedicated writer for a task's/phase's `extra.ac_scope`, the anchor
     // command's sibling; see commands/scope.ts's module header.
     scope: () => import("./commands/scope.js"),
-    // red-first (task-red-first-discipline-is-asked-for-in-prose-but-never) —
-    // dedicated writer for a task's `extra.red_first`; see commands/red-first.ts's
-    // module header.
-    "red-first": () => import("./commands/red-first.js"),
     // refs (spec-prose-about-code-is-bound-to-what-it-describes-one D2) — read verb over the
     // one reverse index of code references; see commands/refs.ts's module header.
     refs: () => import("./commands/refs.js"),
@@ -240,6 +242,8 @@ export const COMMAND_LOADERS: Readonly<Record<string, () => Promise<CommandModul
     // integration worktree, post-merge floor, CAS update of main, max 3 attempts, exit 75 on three lost races;
     // spec-main-advances-only-through-lore-integrate-per-session AC-INT-1); see commands/integrate.ts's header.
     integrate: () => import("./commands/integrate.js"),
+    // land — `land <task | integration-branch>`: fold into the plan's integration branch or integrate, archive and clean up; see commands/land.ts.
+    land: () => import("./commands/land.js"),
 };
 
 /**

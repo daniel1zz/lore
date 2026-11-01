@@ -28,6 +28,7 @@ import { handleGetIssueReports } from "./issue-reports-routes.js";
 import type { ListFilters, SearchFilters } from "../../service/corpus-service.js";
 import type { PendingFilters } from "../../service/review-service.js";
 import { isActivePlan } from "@lore/core";
+import { requireTaskKindOnCreate } from "./task-kind-input.js";
 import type { CreateDocInput, DocPatch } from "@lore/core";
 import type { DocStatus, DocType, LinkType } from "@lore/core";
 import { computeValidityState } from "../../flows/validity-state.js";
@@ -408,7 +409,9 @@ async function handleCreateDoc(req: Request, app: App, actor: ActorContext): Pro
   // is the single cookie-vs-bearer attribution policy seam (see auth.ts). Cookie
   // sessions get the full resolveActor chain + doc/version created_by attribution;
   // bearer sessions keep the pre-existing `by: actor.name` (API key name) behavior.
-  const result = await app.corpusService.create(body as CreateDocInput, resolveDocWriteOpts(actor));
+  const kindChecked = requireTaskKindOnCreate(body as Record<string, unknown>);
+  if (!kindChecked.ok) return jsonError(kindChecked.error, 400);
+  const result = await app.corpusService.create(kindChecked.input, resolveDocWriteOpts(actor));
   if (!result.ok) return loreErrorResponse(result.error);
   return jsonOk(result.value, 201);
 }

@@ -172,7 +172,7 @@ beforeAll(async () => {
   slugs["lockedOpenPlan"] = await createLegacySpec("Locked spec open plan");
   setStatus(slugs["lockedOpenPlan"], "approved");
   slugs["openPlan"] = await created(["create", "plan", "--title", "Open plan", "--parent", slugs["lockedOpenPlan"], "--content", "x"]);
-  slugs["openTask"] = await created(["create", "task", "--title", "Open task", "--parent", slugs["openPlan"], "--plan-id", slugs["openPlan"], "--content", "x"]);
+  slugs["openTask"] = await created(["create", "task", "--kind", "code", "--title", "Open task", "--parent", slugs["openPlan"], "--plan-id", slugs["openPlan"], "--content", "x"]);
   slugs["openKnowledge"] = await created(["create", "knowledge", "--sub-type", "reference", "--title", "Open reference", "--parent", prd, "--content", "live notes"]);
   const node = await rig.lore(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "Legacy Root"]);
   expect(node.exitCode, node.stderr).toBe(0);

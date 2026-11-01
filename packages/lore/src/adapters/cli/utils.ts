@@ -306,6 +306,15 @@ export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean
         retryCommand: opts?.retryCommand ?? WRITE_CONTENTION_GENERIC_RETRY,
       });
     case "CLAIM_CONFLICT":
+      if (error.finished_commit !== undefined) {
+        // reason: AC-DCS1-18 — a finished lease is held until `lore done`, however old; the refusal says so and names the way on.
+        return (
+          `Error: Task ${error.id} is finished by '${error.holder}'` +
+          (typeof error.holder_run === "string" ? ` (run ${error.holder_run})` : "") +
+          ` at commit ${error.finished_commit.slice(0, 12)} (claimed ${error.age_minutes}m ago); the lease is held until lore done.\n` +
+          "  Wait for `lore done` / `lore land`, or pass --steal (claim) or --force (release) to take it over."
+        );
+      }
       return (
         `Error: Task ${error.id} is claimed by '${error.holder}'` +
         (typeof error.holder_run === "string" ? ` (run ${error.holder_run})` : "") +

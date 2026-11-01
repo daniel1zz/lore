@@ -208,6 +208,8 @@ async function createFullChain(dir: string): Promise<{
     [
       "create",
       "task",
+      "--kind",
+      "code",
       "--title",
       "T1 E2E Task",
       "--parent",
@@ -338,6 +340,8 @@ async function createPhaseChain(dir: string): Promise<{ planSlug: string; phaseS
     [
       "create",
       "task",
+      "--kind",
+      "code",
       "--title",
       taskTitle,
       "--parent",

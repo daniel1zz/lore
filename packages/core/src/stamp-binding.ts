@@ -211,6 +211,26 @@ export function stampCurrencyOf(reading: StampAxisReading, radius: RadiusMeasure
     : { stamp: reading.stamp, radius };
 }
 
+/**
+ * The reason a row's stamp verdict is `unbound`, or `undefined` when the row is anything else (or not attested). Routes the
+ * reading through {@link readStampVerdict} (the stamp axis is read first, so the radius never changes the answer and an
+ * `unmeasured` placeholder is exact), so a consumer asks "is this row unbound, and why" without re-deriving the verdict.
+ *
+ * @param reading - one entry of {@link classifyEvidenceStamps} (`null` = not attested)
+ * @returns the unbound reason, or `undefined` when the verdict is not `unbound`
+ * @example
+ * unboundReasonOfReading({ stamp: "unbound", reason: "no_stamp" }); // => "no_stamp"
+ * @example
+ * unboundReasonOfReading({ stamp: "stamped" }); // => undefined
+ * @example
+ * unboundReasonOfReading(null); // => undefined
+ */
+export function unboundReasonOfReading(reading: StampAxisReading | null | undefined): string | undefined {
+  if (reading === null || reading === undefined) return undefined;
+  const currency = stampCurrencyOf(reading, { status: "unmeasured" });
+  return readStampVerdict(currency) === "unbound" ? currency.reason : undefined;
+}
+
 /** Input to {@link classifyStampAxis}. */
 export interface StampAxisInput {
   /** The corpus's arming audit id, or `undefined` when the corpus is UNARMED. */

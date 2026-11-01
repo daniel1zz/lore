@@ -106,6 +106,7 @@
 import { err, ok } from "@lore/core";
 import type { AIProvider, DocRecord, DocType, GenerateInput, GenerateOutput, LinkType, LoreError, Telemetry } from "@lore/core";
 import type { AiDefaultSource, CallerSurface, Result } from "@lore/core";
+import type { JudgeIdentity } from "./judge-unit-keys.js";
 import { extractAssessmentJson, linkTypeSchema } from "@lore/core";
 import type { CheckResult, LlmReviewOutput, NewReviewJudgment, ReviewBundle, ReviewTruncationEntry } from "@lore/core";
 import { completeDimensionVerdicts, llmReviewOutputSchema } from "@lore/core";
@@ -144,6 +145,8 @@ import {
  */
 export interface AssessBudgets {
   readonly max_diff_chars: number;
+  /** `ai.assess.model`: the model the milestone judge is invoked with (BR-1535); absent = the answering model is unknown. */
+  readonly model?: string | undefined;
 }
 
 /**
@@ -160,6 +163,10 @@ export interface AssessBudgets {
  */
 interface ModelAwareProvider {
   readonly modelId?: string;
+  /** True when a call's `model` decides the model that answers (`claude -p --model`, the HTTP request body). */
+  readonly acceptsModelOverride?: boolean;
+  /** The configured arguments that are the same for every call (the model-behaviour settings of a verdict key). */
+  readonly fixedArgs?: readonly string[];
 }
 
 export class AIProviderService {
@@ -268,7 +275,7 @@ export class AIProviderService {
    * @returns `ok(text)` or the provider's own `AI_PROVIDER_ERROR`; never throws
    */
   async judgeMilestone(prompt: string, title: string): Promise<Result<string, LoreError>> {
-    const { result } = await this._invokeProvider({ prompt, doc_type: "knowledge", title });
+    const { result } = await this._invokeProvider({ prompt, doc_type: "knowledge", title, ...this._milestoneModel() });
     return result.ok ? ok(result.value.content) : result;
   }
 
@@ -283,15 +290,49 @@ export class AIProviderService {
   async judgeMilestoneMeasured(
     prompt: string,
     title: string,
-  ): Promise<Result<{ text: string; duration_ms: number; tokens_in?: number; tokens_out?: number }, LoreError>> {
-    const { result, duration_ms } = await this._invokeProvider({ prompt, doc_type: "knowledge", title });
+  ): Promise<Result<{ text: string; duration_ms: number; tokens_in?: number; tokens_out?: number; model?: string }, LoreError>> {
+    const { result, duration_ms } = await this._invokeProvider({ prompt, doc_type: "knowledge", title, ...this._milestoneModel() });
     if (!result.ok) return result;
     const usage = result.value.usage;
+    const model = result.value.model;
     return ok({
       text: result.value.content,
       duration_ms,
       ...(usage !== undefined ? { tokens_in: usage.input_tokens, tokens_out: usage.output_tokens } : {}),
+      // reason: BR-1535 S5 — the model is whatever the provider's REPLY named (claude JSON `modelUsage`, HTTP `model`), never the requested name.
+      ...(model !== undefined ? { model } : {}),
     });
+  }
+
+  /**
+   * The explicit model a milestone call is invoked with: `ai.assess.model`, only when the active provider can take one
+   * (`claude -p --model`, the HTTP request body). Empty when none is configured or the provider cannot take it, so a custom
+   * judge command is never handed a model it did not ask for.
+   */
+  private _milestoneModel(): { model?: string } {
+    const provider = this.providers.get(this.active) as (AIProvider & Partial<ModelAwareProvider>) | undefined;
+    const configured = this.assessBudgets.model;
+    return configured !== undefined && provider?.acceptsModelOverride === true ? { model: configured } : {};
+  }
+
+  /**
+   * Which judge answers milestone reviews (BR-1535 S2, S5). `model` is the CONFIGURED `ai.assess.model` (what lookups match; an
+   * alias such as `sonnet` finds nothing because verdicts are stored under the model id the reply names). `reportsAnsweringModel`
+   * is true for a provider whose reply names its model: the `claude` binary (JSON output, `modelUsage`) and the HTTP provider
+   * (`model` field); a custom judge command does not. `settings` are the provider arguments that are the same for every call.
+   *
+   * @returns the identity; never throws
+   */
+  judgeIdentity(): JudgeIdentity {
+    const provider = this.providers.get(this.active) as (AIProvider & Partial<ModelAwareProvider>) | undefined;
+    const reports = provider?.acceptsModelOverride === true;
+    const fixed = provider?.fixedArgs ?? [];
+    const settings: Record<string, string | number> = fixed.length > 0 ? { args: fixed.join(" ") } : {};
+    const configured = this.assessBudgets.model;
+    const hint = reports
+      ? "set ai.assess.model to the full id of the model the judge should answer with (the judge is then invoked with it explicitly)"
+      : `use the claude-cli provider with the claude binary, or the http provider, and set ai.assess.model; provider "${this.active}" does not report the model that answered`;
+    return { provider: this.active, model: configured, reportsAnsweringModel: reports, settings, modelHint: hint };
   }
 
   // ─── SPEC-017: create path ──────────────────────────────────────────────────

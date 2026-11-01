@@ -1,3 +1,4 @@
+// @layer service-claim-branch-binding AC-DCS1-14
 // @spawns-external git builds a throwaway git repository the test runs against
 /**
  * AC-OWN-2 (spec-multi-session-concurrency-queryable-ownership-checkout) —
@@ -112,7 +113,7 @@ async function createPlanAndTask(cs: CorpusService): Promise<{ taskId: string }>
     title: "Task",
     parent_id: plan.id,
     content: "# Task",
-    extra: { plan_id: plan.id },
+    extra: { plan_id: plan.id, kind: "code" },
   } as CreateDocInput);
   return { taskId: task.id };
 }
@@ -203,14 +204,15 @@ describe("TaskWorkflowService.claim — auto-captures claim.branch from the work
     );
   });
 
-  it("REGRESSION: no --worktree given at all — detection is never attempted, branch stays absent", async () => {
+  it("REGRESSION: no --worktree given at all — a code task's claim is refused work-needs-branch (AC-DCS1-14), no branch is detected or recorded", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const { taskId } = await createPlanAndTask(corpusService);
 
     const result = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const claim = result.value.extra["claim"] as Record<string, unknown>;
-    expect(Object.prototype.hasOwnProperty.call(claim, "branch")).toBe(false);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(JSON.stringify(result.error)).toContain("work-needs-branch");
+    const after = await corpusService.get(taskId);
+    expect(JSON.stringify(after)).not.toContain('"claim":');
   });
 });

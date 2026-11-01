@@ -295,6 +295,7 @@ export type CalibrationRecordWithPromptVersion = CalibrationRecord & {
 export type {
   FileRunClassification,
   InconclusiveCause,
+  JudgeVerdictRow,
   SuiteFileRunRecord,
   SuiteResultRecord,
   CheckOutcomeInput,
@@ -314,6 +315,7 @@ export type {
   TraceStatsWindow,
 } from "./store-shared.js";
 import type {
+  JudgeVerdictRow,
   SuiteFileRunRecord,
   SuiteResultRecord,
   CheckOutcomeInput,
@@ -1533,6 +1535,28 @@ export interface StoreInterface {
 
   /** One stored result by its id, or null. */
   getSuiteResult(id: string): Promise<Result<SuiteResultRecord | null, LoreError>>;
+
+  /**
+   * The stored judge verdict under `key` (migration-049, BR-1535), or null. A found row's `last_read_at` is set to `readAt` in the
+   * same call, so expiry sees the read; the returned row carries the refreshed value.
+   */
+  getJudgeVerdict(key: string, readAt: string): Promise<Result<JudgeVerdictRow | null, LoreError>>;
+
+  /**
+   * Insert-if-absent: the first writer of a key wins. Returns the row now stored under `row.key`: `row` itself when this call
+   * stored it, the earlier writer's row when the key was taken. Concurrent writers of one key all receive the one stored row.
+   */
+  insertJudgeVerdictIfAbsent(row: JudgeVerdictRow): Promise<Result<JudgeVerdictRow, LoreError>>;
+
+  /**
+   * Compare-and-swap on the exact stored text: replaces the row under `key` with `row` only while its `raw_answer` still equals
+   * `expectedRawAnswer`. Returns the row stored under `key` afterwards (`row` when the swap happened, the current row when another
+   * writer replaced it first, `row` when the key is gone and was inserted).
+   */
+  replaceJudgeVerdictIfEquals(key: string, expectedRawAnswer: string, row: JudgeVerdictRow): Promise<Result<JudgeVerdictRow, LoreError>>;
+
+  /** Deletes every verdict whose `last_read_at` is before `cutoff` (ISO 8601) and nothing else; returns how many. */
+  pruneJudgeVerdictsNotReadSince(cutoff: string): Promise<Result<number, LoreError>>;
 
   /**
    * Append per-file re-run rows (migration-043) in ONE write; an empty array writes nothing. A row whose `suite_result_id` is a

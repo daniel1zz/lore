@@ -114,7 +114,8 @@ function createAppStaleRefresherDeps(
             type: "task",
             title,
             priority: "low",
-            extra: { adhoc: true, ac_scope: [acId], governing_spec: spec.id },
+            // AC-DCS1-4 (BR-1488): a re-verification proves something at main's head and changes nothing — a `check` task.
+            extra: { adhoc: true, ac_scope: [acId], governing_spec: spec.id, kind: "check" },
           },
           adhocVerifyTaskFields({ acId, specSlug: spec.slug }),
         ),

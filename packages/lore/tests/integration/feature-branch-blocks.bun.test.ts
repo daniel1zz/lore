@@ -72,7 +72,11 @@ function statusOf(slug: string, cwd: string): string {
 function relaxPlanGates(dir: string): void {
   patchLoreConfig(
     dir,
-    ["workflow:", "  gates:", '    "plan-close":', "      enabled: false", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"', ""].join("\n"),
+    [
+      "workflow:", "  gates:", '    "plan-close":', "      enabled: false", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"',
+      // approve compiles each task's done contract from these commands (a code task needs all three)
+      "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"', "",
+    ].join("\n"),
   );
 }
 
@@ -82,9 +86,13 @@ let counter = 0;
 
 function createTask(title: string): string {
   counter += 1;
-  return parseSlug(
-    mustRun(["create", "task", "--title", `${title} ${counter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"], dir),
+  const slug = parseSlug(
+    mustRun(["create", "task", "--kind", "code", "--title", `${title} ${counter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"], dir),
   );
+  // reason: `lore done` and `lore integrate` judge a task by the contract compiled at approve (AC-DCS1-7, AC-DCS2-1); the red run is
+  // not this file's subject (AC-DCS1-5)
+  mustRun(["approve", slug, "--red-waiver", "the red run is not the subject of this test"], dir);
+  return slug;
 }
 
 interface ReadyRow {
@@ -111,10 +119,6 @@ function startWork(task: string, name: string, from: string, commit: boolean): v
   git(["add", `${name}.txt`], dir);
   git(["commit", "-q", "-m", `work on ${name}`], dir);
   git(["checkout", "-q", "main"], dir);
-}
-
-function capturePass(task: string): void {
-  mustRun(["evidence", task, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"], dir);
 }
 
 beforeEach(() => {
@@ -161,18 +165,17 @@ describe("a blocks edge in a feature-branch plan is met when the blocker landed 
     startWork(b, "feat-b", INTEGRATION, false);
     expect(statusOf(b, dir)).not.toBe("archived");
 
-    capturePass(a);
     const refused = runLore(["done", a], dir);
     expect(refused.exitCode).toBe(4);
     expect(refused.text).toContain("[floor: not-landed]");
 
     git(["merge", "-q", "--no-ff", "-m", "land I on main", INTEGRATION], dir);
-    // both branches are on main now; integrate finds each already integrated and records the landing on its claimant
+    // both branches are on main now; integrate finds each already integrated, runs its task's contract oracles and records the
+    // landing and the rows on its claimant (D44), which is all `lore done` needs
     git(["checkout", "-q", "--detach", "main"], dir); // the shared checkout is a detached view of main
     installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
     mustRun(["integrate", "feat-a", "--session", "blocks-session"], dir);
     mustRun(["integrate", "feat-b", "--session", "blocks-session"], dir);
-    capturePass(b);
     expect(runLore(["done", a], dir).exitCode).toBe(0);
     expect(runLore(["done", b], dir).exitCode).toBe(0);
     expect(statusOf(a, dir)).toBe("archived");

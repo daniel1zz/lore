@@ -151,6 +151,7 @@ beforeAll(() => {
     [
       "create", "task",
       "--title", "Pipe Wiring Task",
+      "--kind", "code",
       "--plan-id", parseSlug(plan.stdout),
       "--content", "## Task\n\nbody",
       "--no-ai",

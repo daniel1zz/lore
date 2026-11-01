@@ -43,7 +43,7 @@ describe("AC-HID-1: a write with no known party is refused before anything is wr
     prd = corpus.slugOf(corpus.setup(["create", "prd", "--title", "Known party PRD", "--content", "root", "--no-ai"]));
     const plan = corpus.slugOf(corpus.setup(["create", "plan", "--title", "Known party plan", "--parent", prd, "--content", "x", "--no-ai"]));
     task = corpus.slugOf(
-      corpus.setup(["create", "task", "--title", "Known party task", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"]),
+      corpus.setup(["create", "task", "--kind", "code", "--title", "Known party task", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"]),
     );
   });
 

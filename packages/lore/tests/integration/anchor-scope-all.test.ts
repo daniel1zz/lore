@@ -73,7 +73,7 @@ beforeAll(() => {
   const prd = slugOf(mustLore(["create", "prd", "--title", "USW3 PRD", "--content", "root", "--no-ai"], repo));
   const plan = slugOf(mustLore(["create", "plan", "--title", "USW3 Plan", "--parent", prd, "--content", "x", "--no-ai"], repo));
   const newTask = (title: string, anchor: string): string =>
-    slugOf(mustLore(["create", "task", "--title", title, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", "--anchor", anchor], repo));
+    slugOf(mustLore(["create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", "--anchor", anchor], repo));
   taskA = newTask("USW3 Task A", "src/a.ts");
   taskB = newTask("USW3 Task B", "src/b.ts");
   wtA = join(base, "wt-a");

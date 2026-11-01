@@ -132,6 +132,7 @@ beforeAll(async () => {
       [
         "create", "task",
         "--title", "Extra Notice Task",
+        "--kind", "code",
         "--parent", planSlug,
         "--plan-id", planSlug,
         "--no-ai",

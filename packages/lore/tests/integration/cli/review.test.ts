@@ -126,7 +126,7 @@ function createOrphanPlan(title: string, parentSlug: string): string {
  * deterministic check without needing to fabricate an invalid doc via direct store access. */
 function createTaskWithoutEvidence(planSlug: string, title: string): string {
   const r = runLore(
-    ["create", "task", "--title", title, "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"],
+    ["create", "task", "--title", title, "--parent", planSlug, "--plan-id", planSlug, "--kind", "code", "--no-ai", "--content", "body"],
     tmpDir,
   );
   if (r.exitCode !== 0) throw new Error(`create task failed: ${r.stderr}`);
@@ -183,28 +183,28 @@ describe("lore review — missing doc argument (no --pending)", () => {
 // ─── ERROR: deterministic-check-fail path never touches the AI provider ──────
 
 describe("lore review — deterministic check failure short-circuits before any AI call", () => {
-  it("a task with no verification_evidence: exit 0, decision=reject, confidence=1.00, checks table shows evidence_completeness FAIL", () => {
-    const planSlug = createPlan("Det Fail Plan");
-    const taskSlug = createTaskWithoutEvidence(planSlug, "Evidence-less Task");
+  it("an orphan plan: exit 0, decision=reject, confidence=1.00, checks table shows parent_contract FAIL", () => {
+    const prdSlug = createPrd("Det Fail PRD");
+    const orphanSlug = createOrphanPlan("Det Fail Plan", prdSlug);
 
-    const result = runLore(["review", taskSlug], tmpDir);
+    const result = runLore(["review", orphanSlug], tmpDir);
 
     // exit 0 — recording a judgment (even decision=reject) counts as success; if the AI
     // provider HAD been invoked, the stub would force exit 6 instead.
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Decision: reject");
     expect(result.stdout).toContain("confidence: 1.00");
-    expect(result.stdout).toContain("evidence_completeness");
+    expect(result.stdout).toContain("parent_contract");
     expect(result.stdout).toContain("fail");
     // The judge identity for a deterministic-only judgment is NOT the real AI provider.
     expect(result.stdout).toContain("deterministic-checks");
   });
 
   it("--json envelope carries the same deterministic judgment shape", () => {
-    const planSlug = createPlan("Det Fail Plan JSON");
-    const taskSlug = createTaskWithoutEvidence(planSlug, "Evidence-less Task JSON");
+    const prdSlug = createPrd("Det Fail PRD JSON");
+    const orphanSlug = createOrphanPlan("Det Fail Plan JSON", prdSlug);
 
-    const result = runLore(["review", taskSlug, "--json"], tmpDir);
+    const result = runLore(["review", orphanSlug, "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as {
       ok: boolean;

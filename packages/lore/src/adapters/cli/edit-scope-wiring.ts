@@ -108,6 +108,7 @@ export function buildEditScopeDeps(app: App): EditScopeDeps {
     buildSiblingContext: (by, candidate, siblings, nowIso) =>
       app.taskWorkflowService.buildAnchorGateContext(by, candidate, siblings, nowIso),
     addAnchors: (slug, anchors, opts) => app.taskWorkflowService.addAnchors(slug, anchors, opts),
+    addToWriteSet: (slug, paths, opts) => app.taskWorkflowService.addToWriteSet(slug, paths, opts),
     ignoreProbe: spawnGitCheckIgnore,
     touchedFiles: touchedFilesOf,
     realpath: (path) => realpathSync(path),

@@ -166,6 +166,12 @@ export const acFalsifierSchema = z.object({
   find: z.string().min(1),
   replace: z.string(),
   expected_exit_code: z.number().int(),
+  /**
+   * `true` when `find` names a symbol the task has yet to create, so the done-contract compile accepts a `find` that is
+   * absent from `path` at the compile commit (spec-done-contract-compiled-at-approve-task-kinds-write-sets, AC-DCS1-3).
+   * Stored only when marked: an unmarked falsifier carries no key, never `false`.
+   */
+  new_symbol: z.boolean().optional(),
 });
 
 /** Derived TypeScript type for one declared falsifier. */

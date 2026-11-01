@@ -56,7 +56,7 @@ async function createTask(cs: CorpusService, planId: string, title = "Audit Test
     title,
     parent_id: planId,
     content: "body",
-    extra: { plan_id: planId },
+    extra: { plan_id: planId, kind: "code" },
   } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create task: ${JSON.stringify(result.error)}`);
   return result.value.id;
@@ -349,7 +349,7 @@ describe("REGRESSION — TaskWorkflowService's action-string divergence does not
     const planId = await createPlan(corpusService, store);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     expect(claimResult.ok).toBe(true);
 
     // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-

@@ -73,6 +73,7 @@ import type { Result, LoreError } from "./errors.js";
 import type { DocId, DocRecord, DocStatus, DocSummary, LinkRecord } from "./types.js";
 import type { CompletenessVerdict } from "./attestation-completeness.js";
 import { isTerminalStatus } from "./lifecycle.js";
+import { MAX_FILE_ANCHORS, extractFileAnchors, normalizeFileAnchors } from "./file-anchors.js";
 
 /**
  * `attestation.completeness`'s value set, mirrored here (not re-derived) from
@@ -544,6 +545,17 @@ export const evidenceEntrySchema = z.object({
    * trusted runner path (`VerifiedEvidenceInput`), never by a self-report.
    */
   milestone_refresh: z.literal(true).optional(),
+  /**
+   * `true` on a pass row `lore integrate` recorded after the oracle failed once and passed on its single re-run (AC-DCS2-4).
+   * Present-iff-true; written only by `lore integrate` through the trusted runner path, never by a self-report. A flaky row counts
+   * as evidence but is shown next to the row by `lore get` and `lore done`.
+   */
+  flaky: z.literal(true).optional(),
+  /**
+   * Why the flaky-tests ledger issue could not be filed or commented (AC-DCS2-4): present only on a `flaky` row whose ledger write
+   * failed (no tracker configured, no network, a refusal). The landing still proceeds; the failure is recorded here, never dropped.
+   */
+  ledger_error: z.string().min(1).optional(),
   /** Runner-issued attestation metadata (SPEC-039 §2 D1) — see the field-level invariant above. */
   attestation: z
     .object({
@@ -633,6 +645,12 @@ export const evidenceEntrySchema = z.object({
        * head): the pass counts only when `head_sha` equals it. Written by the evidence write path, never by a caller.
        */
       main_head: z.string().regex(/^[0-9a-f]{40}$/, "main_head must be a 40-hex git sha").optional(),
+      /**
+       * The landing commit (`extra.landing.landing_commit`) of the landing `lore integrate` recorded this row for (AC-DCS1-27 (b)):
+       * a pass `lore done` counts for a code oracle without comparing trees while it names the task's newest landing. Written by
+       * `lore integrate` only (never by a public write path, like the enclosing `attestation`); absent on every other row.
+       */
+      recorded_at_landing: z.string().regex(/^[0-9a-f]{40}$/, "recorded_at_landing must be a 40-hex git sha").optional(),
     })
     .optional(),
 });
@@ -852,10 +870,28 @@ export const taskClaimSchema = z.object({
    * The newest write wins, so a branch the harness removed without a release still has its last known tip.
    */
   end_tip: z.string().regex(/^[0-9a-f]{40}$/).optional(),
+  /**
+   * The files the claim declares it will touch (`lore claim --write-set`, plus every edit-time `lore anchor declare`).
+   * It judges OVERLAP only (the task-claim gate and the ready report); the oracle set never shrinks to it. Absent ⇒ the
+   * task's approved anchors are the write set ({@link effectiveWriteSet}). No count cap: the 50-anchor cap bounds approved anchors.
+   */
+  write_set: z.array(z.string().min(1)).optional(),
+  /**
+   * When `lore finish` ended the claim's run of oracles (AC-DCS1-15). The claim stays held, marked finished, until `lore done` or
+   * `lore land`. Both finished fields are written together, only by `lore finish`, and are in force only while the branch tip
+   * equals `finished_commit` ({@link isFinishedInForce}); a later commit makes the claim an ordinary one again.
+   */
+  finished_at: z.string().optional(),
+  /** The commit `lore finish` ran every oracle on (its `preRunHead`): the code the recorded rows are bound to. */
+  finished_commit: z.string().regex(/^[0-9a-f]{40}$/).optional(),
 }).refine((claim) => claim.branch === undefined || claim.start_head !== undefined, {
   // reason: after the one-time back-fill an open branch claim always has a sha start (no unmeasured variant, no read-time default).
   message: "a branch claim needs a sha start_head",
   path: ["start_head"],
+}).refine((claim) => (claim.finished_at === undefined) === (claim.finished_commit === undefined), {
+  // reason: finished_at and finished_commit describe one event; one without the other is a corrupt record, never a partial finish.
+  message: "finished_at and finished_commit are written together",
+  path: ["finished_commit"],
 });
 
 /** Derived TypeScript type for a task claim lease. */
@@ -876,6 +912,8 @@ export interface ClaimCaptureInput {
   harness_run?: string | null;
   /** See {@link taskClaimSchema}'s `start_head` — a carried-forward value wins over this one. */
   start_head?: string;
+  /** See {@link taskClaimSchema}'s `write_set` — an omitted value on a same-holder refresh keeps the recorded set. */
+  write_set?: readonly string[];
 }
 
 /**
@@ -960,6 +998,12 @@ export function buildTaskClaim(
   // reason: a same-holder refresh continues the same work, so the start it recorded first stays the start.
   const startHead = base?.start_head ?? input.start_head;
   const endTip = base?.end_tip;
+  // reason: a same-holder refresh continues the same work, so the files it declared (at claim and at edit time) stay declared.
+  const writeSet = input.write_set ?? base?.write_set;
+  // reason: AC-DCS1-18 — a same-holder refresh continues the same work, so a finished mark stays; whether it is still in force is
+  // decided by the branch tip ({@link isFinishedInForce}), never by dropping the mark here.
+  const finishedAt = base?.finished_at;
+  const finishedCommit = base?.finished_commit;
 
   return {
     by: input.by,
@@ -974,7 +1018,68 @@ export function buildTaskClaim(
     ...(input.harness_run !== undefined ? { harness_run: input.harness_run } : {}),
     ...(startHead !== undefined ? { start_head: startHead } : {}),
     ...(endTip !== undefined ? { end_tip: endTip } : {}),
+    ...(writeSet !== undefined ? { write_set: [...writeSet] } : {}),
+    ...(finishedAt !== undefined && finishedCommit !== undefined ? { finished_at: finishedAt, finished_commit: finishedCommit } : {}),
   };
+}
+
+/**
+ * Validates and normalizes the entries of a claim write set with the anchor grammar (repo-relative POSIX path, a trailing `/`
+ * for a directory, `path#Symbol`), WITHOUT the 50-entry cap: that cap bounds a task's approved anchors, never a claim's write
+ * set. Duplicates after normalization are dropped, first occurrence wins.
+ *
+ * @example
+ * normalizeWriteSet(["./src/a.ts", "src/a.ts", "tests/"]) // => ok(["src/a.ts", "tests/"])
+ */
+export function normalizeWriteSet(entries: readonly string[]): Result<string[], LoreError> {
+  const normalized: string[] = [];
+  for (let from = 0; from < entries.length; from += MAX_FILE_ANCHORS) {
+    // reason: the grammar check lives in normalizeFileAnchors; it is fed one cap-sized slice at a time so that only the cap is not applied.
+    const slice = normalizeFileAnchors(entries.slice(from, from + MAX_FILE_ANCHORS));
+    if (!slice.ok) return slice;
+    for (const entry of slice.value) if (!normalized.includes(entry)) normalized.push(entry);
+  }
+  return ok(normalized);
+}
+
+/**
+ * The files a task is judged to touch for overlap: its held claim's declared write set, else its approved anchors.
+ * Both overlap computations (the task-claim gate's sibling context and the ready report's anchor conflicts) call this and
+ * nothing else, so they cannot disagree.
+ *
+ * @example
+ * effectiveWriteSet(taskWithClaimWriteSet) // => the claim's write_set
+ * effectiveWriteSet(taskHoldingNoClaim)    // => its file_anchors
+ */
+export function effectiveWriteSet(task: DocRecord): string[] {
+  const claim = extractHeldClaim(task);
+  if (claim === undefined) return extractFileAnchors(task);
+  return claim.write_set ?? extractFileAnchors(task);
+}
+
+/**
+ * Whether `claim` is finished and the finish still holds: it carries a finished commit and the branch tip measured now equals
+ * it (AC-DCS1-18). A later commit moves the tip and makes the claim an ordinary one again (lease, overlap and run end); an
+ * unmeasured tip (`undefined`) is never "finished". The ONE predicate behind the lease, staleness, run-end and overlap paths.
+ *
+ * @param claim - the held claim
+ * @param tip - where the claim's branch ends now, as measured by the caller (`undefined` when it cannot be measured)
+ * @example
+ * isFinishedInForce({ by: "a", at: "t", finished_at: "t", finished_commit: "a".repeat(40) }, "a".repeat(40)); // => true
+ * isFinishedInForce({ by: "a", at: "t", finished_at: "t", finished_commit: "a".repeat(40) }, "b".repeat(40)); // => false
+ */
+export function isFinishedInForce(claim: TaskClaim, tip: string | undefined): boolean {
+  return claim.finished_commit !== undefined && tip !== undefined && tip === claim.finished_commit;
+}
+
+/**
+ * The claim marked finished at `commit`: the finish event `lore finish` writes (with its rows) in one corpus write. Pure.
+ *
+ * @example
+ * markClaimFinished({ by: "a", at: "t" }, "a".repeat(40), "t2").finished_commit // "aaa…a"
+ */
+export function markClaimFinished(claim: TaskClaim, commit: string, atIso: string): TaskClaim {
+  return { ...claim, finished_at: atIso, finished_commit: commit, end_tip: commit };
 }
 
 /**
@@ -1444,7 +1549,10 @@ export function evaluateReadiness(
         // its status stays unarchived (`lore done` judges landing against main), so it is reported apart
         // from archived blockers rather than silently dropped. Only a blocker the caller proved landed
         // (`landedOnIntegration`) qualifies; absence from the map keeps the original blocked behaviour.
-        const branch = landedOnIntegration.get(link.from_id);
+        // reason: BR-1313 — a check or corpus task runs at main's tip, so a blocker counts as met for it only when its work is
+        // on main (the blocker is then archived), never merely on the integration branch.
+        const runsOnMain = task.extra["kind"] === "check" || task.extra["kind"] === "corpus";
+        const branch = runsOnMain ? undefined : landedOnIntegration.get(link.from_id);
         if (branch !== undefined && blocker !== undefined) {
           metOnIntegration.push({ id: link.from_id, slug: blocker.slug, status, branch });
         } else {

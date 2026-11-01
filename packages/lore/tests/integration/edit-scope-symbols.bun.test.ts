@@ -132,7 +132,7 @@ function buildFixture(): Fixture {
   const newTask = (title: string, anchors: string[]): string =>
     slugOf(
       mustLore(
-        ["create", "task", "--title", title, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", ...anchors.flatMap((a) => ["--anchor", a])],
+        ["create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", ...anchors.flatMap((a) => ["--anchor", a])],
         repo,
       ),
     );
@@ -206,12 +206,17 @@ function bashAsB(command: string, agent: string | null = AGENT_B): HookResult {
   return runHook({ cwd: fx.wtB, tool: "Bash", agent, input: { command } });
 }
 
+/**
+ * What the task's claim covers: its write set (AC-DCS1-10/12: an edit-time declaration extends the claim write set and never the
+ * task's approved anchors), which is the task's file anchors until the claim declares its own.
+ */
 function anchorsOf(slug: string): string[] {
   const db = new Database(join(fx.repo, ".lore", "lore.db"), { readonly: true });
   try {
     const doc = db.query("SELECT extra FROM docs WHERE slug = ?").get(slug) as { extra: string } | null;
     if (doc === null) throw new Error(`no doc ${slug}`);
-    return (JSON.parse(doc.extra) as { file_anchors?: string[] }).file_anchors ?? [];
+    const extra = JSON.parse(doc.extra) as { file_anchors?: string[]; claim?: { write_set?: string[] } };
+    return extra.claim?.write_set ?? extra.file_anchors ?? [];
   } finally {
     db.close();
   }

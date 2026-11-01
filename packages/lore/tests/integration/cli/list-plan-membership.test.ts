@@ -147,6 +147,8 @@ function createTask(title: string, parentSlug: string, planIdSlug: string): stri
       [
         "create",
         "task",
+        "--kind",
+        "code",
         "--title",
         title,
         "--parent",
@@ -166,7 +168,7 @@ function createTask(title: string, parentSlug: string, planIdSlug: string): stri
 function createAdhocTask(title: string): string {
   return parseCreatedSlug(
     runLoreOk(
-      ["create", "task", "--title", title, "--adhoc", "--ac-scope", "", "--no-ai", "--content", "body"],
+      ["create", "task", "--kind", "code", "--title", title, "--adhoc", "--ac-scope", "", "--no-ai", "--content", "body"],
       tmpDir,
     ).stdout,
   );

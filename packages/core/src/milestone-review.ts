@@ -98,6 +98,17 @@ export const judgedDimensionAnswerSchema = z.object({
   cites: z.array(z.string().trim().min(1)).optional(),
 });
 
+/**
+ * One changed file's answer (BR-1535): the file's own security and concurrency_safety verdicts, judged on that file's net diff
+ * alone. Both keys are optional in the shape; the judgment layer requires every dimension a call asked for every file it asked.
+ */
+export const fileUnitAnswerSchema = z.object({
+  path: z.string().min(1),
+  security: judgedDimensionAnswerSchema.optional(),
+  concurrency_safety: judgedDimensionAnswerSchema.optional(),
+});
+export type FileUnitAnswer = z.infer<typeof fileUnitAnswerSchema>;
+
 /** One AI-mode criterion's verdict from the judge. */
 export const aiCriterionAnswerSchema = z.object({
   spec: z.string().min(1).optional(),
@@ -118,8 +129,16 @@ export type AiCriterionAnswer = z.infer<typeof aiCriterionAnswerSchema>;
 export function judgmentAnswerSchema(dimensions: readonly JudgedDimension[]) {
   const shape = Object.fromEntries(dimensions.map((d) => [d, judgedDimensionAnswerSchema])) as Record<string, typeof judgedDimensionAnswerSchema>;
   return z
-    .object({ dimensions: z.object(shape), criteria: z.array(aiCriterionAnswerSchema).optional() })
+    .object({ dimensions: z.object(shape), criteria: z.array(aiCriterionAnswerSchema).optional(), files: z.array(fileUnitAnswerSchema).optional() })
     .superRefine((output, ctx) => {
+      (output.files ?? []).forEach((file, index) => {
+        for (const d of ["security", "concurrency_safety"] as const) {
+          const j = file[d];
+          if (j !== undefined && j.verdict === "fail" && (j.cites ?? []).length === 0) {
+            ctx.addIssue({ code: "custom", path: ["files", index, d, "cites"], message: "a failed finding must cite at least one AC id, rule id, file path or symbol" });
+          }
+        }
+      });
       for (const d of dimensions) {
         const j = output.dimensions[d];
         if (j !== undefined && j.verdict === "fail" && (j.cites ?? []).length === 0) {
@@ -174,6 +193,8 @@ export interface AiCriterionInput {
   readonly spec: string;
   readonly ac: string;
   readonly rubric: string;
+  /** The criterion's statement; part of its verdict key (BR-1535). Absent = the rubric alone is its text. */
+  readonly statement?: string;
 }
 
 /**
@@ -223,8 +244,53 @@ export interface MilestoneFacts {
   readonly criteria_run?: CriteriaRunRecord;
 }
 
+/**
+ * One judged unit of a review (BR-1535, spec S6): a changed file (`security` and `concurrency_safety` verdicts) or an AI criterion
+ * (`verdict`), whether this review asked the judge (`fresh`) or took the stored answer (`reused`), the review the answer was first
+ * produced in, and the sha256 of the stored raw answer, so two reviews that recorded one stored answer carry the same digest.
+ */
+export const judgeUnitRecordSchema = z.object({
+  kind: z.enum(["file", "criterion"]),
+  /** The file's repo-relative path, or `<spec slug>:<ac id>`. */
+  id: z.string().min(1),
+  source: z.enum(["fresh", "reused"]),
+  key: z.string().min(1),
+  /** The review token (`judgment.review_token`) of the review that first produced the answer. */
+  first_review: z.string().min(1),
+  answer_sha256: z.string().min(1),
+  verdicts: z.record(z.string(), z.enum(["pass", "fail", "na"])),
+});
+export type JudgeUnitRecord = z.infer<typeof judgeUnitRecordSchema>;
+
+/**
+ * Whether the review could reuse stored unit verdicts; a disabled review names the cause (spec S5). An enabled review may carry a
+ * `note`: why nothing could be reused although it was on (a configured alias is not the answering model; `--rejudge`).
+ */
+export const judgeReuseRecordSchema = z.discriminatedUnion("enabled", [
+  z.object({ enabled: z.literal(true), note: z.string().min(1).optional() }),
+  z.object({ enabled: z.literal(false), cause: z.string().min(1) }),
+]);
+export type JudgeReuseRecord = z.infer<typeof judgeReuseRecordSchema>;
+
 /** What the judgment layer did, stored on the review: calls, tokens, time, and the files no call showed. */
 export const judgmentRecordSchema = z.object({
+  /** Names this review in the units of later reviews (`first_review`); stored with the review so its document can be found from a unit. */
+  review_token: z.string().min(1).optional(),
+  /** The judge that answered: provider, the answering model when the provider can name it, the model-behaviour settings. */
+  judge: z
+    .object({
+      provider: z.string().min(1),
+      /** The configured `ai.assess.model` (what lookups key by). */
+      model: z.string().min(1).optional(),
+      /** The model the provider's reply named for the answering call(s); stored verdicts are keyed by it. */
+      answering_model: z.string().min(1).optional(),
+      settings: z.record(z.string(), z.union([z.string(), z.number()])),
+    })
+    .optional(),
+  /** Whether stored unit verdicts were used; absent on a review stored before per-unit verdicts. */
+  reuse: judgeReuseRecordSchema.optional(),
+  /** Every unit judged by this review, fresh or reused; absent on a review stored before per-unit verdicts. */
+  units: z.array(judgeUnitRecordSchema).optional(),
   calls: z.number().int().min(0),
   /** Summed over the calls that reported usage; absent when no call reported any (never 0 for "unknown"). */
   tokens_in: z.number().int().min(0).optional(),
@@ -353,6 +419,24 @@ export const milestoneReviewSchema = z.object({
   diff_source: z.string().min(1),
 });
 export type MilestoneReview = z.infer<typeof milestoneReviewSchema>;
+
+/**
+ * One line of fresh and reused counts per judged dimension, for `lore assess` (BR-1535, spec S6). `security` and
+ * `concurrency_safety` count changed-file units, `criteria` counts AI-criterion units.
+ *
+ * @param review - a stored review
+ * @returns e.g. `security: 1 fresh, 2 reused; concurrency_safety: 1 fresh, 2 reused; criteria: 0 fresh, 0 reused`; a review stored
+ *   before per-unit verdicts says so instead of printing zeros
+ */
+export function renderUnitCounts(review: MilestoneReview): string {
+  const units = review.judgment?.units;
+  if (units === undefined) return "units: not recorded (the review predates per-unit verdicts)";
+  const count = (kind: JudgeUnitRecord["kind"]): string => {
+    const of = units.filter((u) => u.kind === kind);
+    return `${String(of.filter((u) => u.source === "fresh").length)} fresh, ${String(of.filter((u) => u.source === "reused").length)} reused`;
+  };
+  return `security: ${count("file")}; concurrency_safety: ${count("file")}; criteria: ${count("criterion")}`;
+}
 
 /**
  * Applies the rules the judge cannot waive: `design_necessity` without a reference fails.

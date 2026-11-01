@@ -36,6 +36,9 @@
  *     complete); a task with no landing record or an unmappable landing waits for the plan's own landing, a landing touching its
  *     failing facts, or a manual `lore assess`.
  *   - The landing never waits for a review: {@link ReviewTriggerService.start} only reads state and spawns.
+ *   - Each plan is assessed through the ONE close function when {@link BatchRunPorts.closeFlow} is wired (BR-1507, AC-DCS2-11): the batch
+ *     keeps the store lease and the once-per-batch suite (BR-1379), the close function holds the plan's own lease and runs verify, rule
+ *     apply, the anchor check and the P0 UAT gate before the runner's review, filing and gated archive.
  *   - One batch per machine (BR-1532): `start` spawns only while holding `batch:<machine>`; a batch loop revisits a plan only at a changed fingerprint.
  * Side-effect class: IO through injected ports (services never import each other; the CLI adapter binds the real ones).
  *
@@ -197,6 +200,13 @@ export interface BatchRunPorts {
   readonly recordError: (error: BatchErrorRecord) => Promise<Result<void, LoreError>>;
   readonly filing: IssueFilingService | undefined;
   readonly now: () => string;
+  /**
+   * The ONE close function (`PlanCloseService.close`, BR-1507) around one plan's assess: it refuses a plan with an open task, holds the
+   * plan's own lease, runs verify, rule apply, the anchor check and the P0 UAT gate, then calls `assess` — the runner's own review,
+   * filing and gated archive of that plan — and returns its row (or a row saying why the plan stayed open or was left to another close).
+   * Optional (absent = the runner assesses and archives directly, as a bare construction does).
+   */
+  readonly closeFlow?: (ref: string, assess: () => Promise<BatchPlanRow>) => Promise<BatchPlanRow>;
   /**
    * `batch` (default, `--where`): a plan whose current review stands is skipped as "already reviewed". `direct` (plan ids given):
    * the plan is always judged again (BR-1379, BR-1511).
@@ -458,6 +468,8 @@ export class ReviewBatchRunner {
       }
       return suite;
     };
+    // reason: the plan's keyed lease (BR-1511) is taken inside `runPlan`, which then runs the close function (AC-DCS2-11, its own
+    // plan-scoped lease) around the leased assess.
     for (const ref of planRefs) rows.push(await this.runPlan(ref, ports, measureOnce));
     return { state: "ran", suiteRuns, rows };
   }
@@ -503,7 +515,10 @@ export class ReviewBatchRunner {
     }
     const handle = leased.value.handle;
     try {
-      return await this.runPlanLeased(ref, ports, measureOnce, handle);
+      // reason: AC-DCS2-11 — the close function wraps the assess, and only for a plan whose review lease this holder has: a held plan is
+      // a skipped row above and never reaches (or builds) the close.
+      const assess = (): Promise<BatchPlanRow> => this.runPlanLeased(ref, ports, measureOnce, handle);
+      return ports.closeFlow === undefined ? await assess() : await ports.closeFlow(ref, assess);
     } finally {
       await handle.release();
     }

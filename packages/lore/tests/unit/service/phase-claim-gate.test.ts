@@ -119,6 +119,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import {
+  buildAnchorGateContext,
   checkpointRegistry,
   isCheckpointBlocked,
   selectFailures,
@@ -127,7 +128,7 @@ import {
 } from "../../../src/service/checkpoint-registry.js";
 import { ANCHOR_OVERLAP_FIELD, type SiblingClaimInfo } from "../../../src/service/gate-predicates.js";
 import { resolveGateEnabled, retiredConfigKeyNotices } from "@lore/core";
-import type { LoreConfig } from "@lore/core";
+import type { DocRecord, LoreConfig } from "@lore/core";
 
 // ─── §1 — SPEC-042 fixture, imported (never copied, plan invariant R4) ────────
 // Bare side-effect import: re-registers and re-runs claim-anchor-gate.test.ts's
@@ -230,6 +231,28 @@ describe("checkpointRegistry['phase-claim'] — noAnchorOverlap on phase docs (S
       hasSpecParent: false,
     };
     expect(isCheckpointBlocked(def.check(ctx))).toBe(false);
+  });
+
+  // HAPPY / NEGATIVE — AC-DCS1-10: the context carries the claim's DECLARED write set, not the task's anchors
+  it("write set: a candidate whose declared write set avoids the sibling passes though its anchors overlap; one declaring the held path is blocked", () => {
+    const def = checkpointRegistry[PHASE_CLAIM]!;
+    const doc = (slug: string, extra: Record<string, unknown>): DocRecord =>
+      ({ id: slug, slug, title: slug, type: "task", status: "draft", parent_id: null, extra } as unknown as DocRecord);
+    const sibling = doc("held", { file_anchors: ["src/a/"], claim: { by: "agent:p1", at: "2026-07-19T09:00:00.000Z", harness_run: "cc:7ab19c04" } });
+    const candidate = doc("candidate", { file_anchors: ["src/a"] });
+    const build = (writeSet?: readonly string[]) =>
+      buildAnchorGateContext("agent:p2", candidate, [sibling, candidate], "2026-07-19T09:05:00.000Z", 120, writeSet);
+
+    const avoids = { ...build(["src/b.test.ts"]), hasSpecParent: false };
+    expect(avoids.candidateAnchors).toEqual(["src/b.test.ts"]);
+    expect(isCheckpointBlocked(def.check(avoids))).toBe(false);
+
+    // controls: the held path in the write set blocks, and so does no declaration at all (the anchors are the write set)
+    const touches = { ...build(["src/a"]), hasSpecParent: false };
+    expect(isCheckpointBlocked(def.check(touches))).toBe(true);
+    const undeclared = { ...build(), hasSpecParent: false };
+    expect(undeclared.candidateAnchors).toEqual(["src/a"]);
+    expect(isCheckpointBlocked(def.check(undeclared))).toBe(true);
   });
 
   // STATE — stale foreign claim never blocks

@@ -380,6 +380,34 @@ function formatFieldShape(field: HiddenExtraField): string {
   }
 }
 
+/**
+ * The `Removed oracles` section of `lore get <task>` (AC-DCS1-30): one line per test-file oracle the task's landing deleted,
+ * with the reason and the landed commit. Empty input yields no lines (no section).
+ */
+export function formatRemovedOracleLines(
+  removed: readonly { readonly id: string; readonly path: string; readonly reason: string; readonly landed_commit: string }[],
+): string[] {
+  if (removed.length === 0) return [];
+  return [
+    "Removed oracles:",
+    ...removed.map((entry) => `  ${entry.id}  ${entry.path}  ${entry.reason}  (landed ${entry.landed_commit.slice(0, 12)})`),
+  ];
+}
+
+/**
+ * The `Flaky oracle rows` section of `lore get <task>` and the matching lines of `lore done` (AC-DCS2-4): one line per evidence row
+ * `lore integrate` recorded after the oracle failed once and passed on its re-run, with the ledger failure when the issue could not be
+ * written. A flaky row counts as evidence but is never silent. Empty input yields no lines.
+ */
+export function formatFlakyRowLines(rows: readonly { readonly command: string; readonly flaky?: boolean | undefined; readonly ledger_error?: string | undefined }[]): string[] {
+  const flaky = rows.filter((row) => row.flaky === true);
+  if (flaky.length === 0) return [];
+  return [
+    "Flaky oracle rows:",
+    ...flaky.map((row) => `  flaky  ${row.command}  (failed once, passed on its re-run)${row.ledger_error !== undefined ? `  [ledger not updated: ${row.ledger_error}]` : ""}`),
+  ];
+}
+
 /** One known defect with the live state read for display. */
 export interface KnownDefectDisplayRow {
   readonly number: number;

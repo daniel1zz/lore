@@ -129,17 +129,47 @@ function fillMinimal(schema: JsonSchemaNode | undefined, blank: unknown): unknow
   return blank;
 }
 
+/**
+ * Every optional array entry is filled with minimal values EXCEPT where the template makes a non-empty list demand another
+ * field: the task template's `if ac_scope has an item then spec_ref is required`. A minimal `ac_scope` entry names no real
+ * criterion and a `spec_ref` must name a real spec, so for such a list the entry is deleted, as its optional-entry comment
+ * says it may be.
+ */
+function dropDependentEntries(shown: ShownTemplate, fields: Record<string, unknown>): Record<string, unknown> {
+  const condition = shown.fields["if"];
+  const demanded = isNode(shown.fields["then"]) && Array.isArray(shown.fields["then"]["required"]) ? shown.fields["then"]["required"] : [];
+  if (!isNode(condition) || !isNode(condition["properties"]) || demanded.some((name) => fields[String(name)] !== undefined)) return fields;
+  const result = { ...fields };
+  for (const name of Object.keys(condition["properties"])) if (Array.isArray(result[name])) result[name] = [];
+  return result;
+}
+
 /** The fields file a round-trip writes: the blank filled with minimal values, every dimension answered (refs where required). */
 function filledFilesOf(shown: ShownTemplate): { fields: unknown; dimensions: unknown[] } {
   const needsRefs = new Set(shown.dimensions.filter((dimension) => dimension.needs_refs === true).map((dimension) => dimension.id));
   return {
-    fields: fillMinimal(shown.fields, shown.blank.fields),
+    fields: dropDependentEntries(shown, fillMinimal(shown.fields, shown.blank.fields) as Record<string, unknown>),
     dimensions: shown.blank.dimensions.map((entry) => ({
       ...entry,
       answer: "A minimal answer.",
       refs: needsRefs.has(String(entry["id"])) ? ["AC-ROUNDTRIP-1"] : [],
     })),
   };
+}
+
+/** Paths of every array reachable through required properties whose blank value has no entry (an optional entry must still be shown). */
+function arraysWithoutEntry(schema: JsonSchemaNode | undefined, blank: unknown, path: string): string[] {
+  if (schema === undefined) return [];
+  if (schema["type"] === "array") {
+    const items = isNode(schema["items"]) ? schema["items"] : undefined;
+    if (!Array.isArray(blank) || blank.length === 0) return items === undefined ? [] : [path];
+    return arraysWithoutEntry(items, blank[0], `${path}[0]`);
+  }
+  if (isNode(blank) && isNode(schema["properties"])) {
+    const properties = schema["properties"] as Record<string, unknown>;
+    return Object.entries(blank).flatMap(([key, value]) => arraysWithoutEntry(isNode(properties[key]) ? (properties[key] as JsonSchemaNode) : undefined, value, `${path}.${key}`));
+  }
+  return [];
 }
 
 /** Knowledge sub-types `lore create` refuses by design: retired, or written only by their dedicated command. */
@@ -239,6 +269,24 @@ describe("AC-ST-8: the filled blank of every type and kind creates in a fresh co
     expect(result.exitCode).not.toBe(0);
   });
 
+  it("the spec-tech blank shows one out_of_scope entry with its id/text/why item shape", async () => {
+    const shown = await showBlank("spec", "tech");
+    expect(shown.blank.fields["out_of_scope"]).toEqual([{ id: "", text: "", why: "" }]);
+    const itemProperties = ((shown.fields["properties"] as Record<string, { items?: { properties?: Record<string, unknown> } }>)["out_of_scope"]?.items?.properties) ?? {};
+    expect(Object.keys(itemProperties)).toEqual(["id", "text", "why"]);
+    const yaml = await rig.lore(["template", "show", "spec", "--kind", "tech", "--blank"]);
+    expect(yaml.stdout).toMatch(/out_of_scope:\n\s+# optional[^\n]*\n\s+- id: ""\n\s+text: ""\n\s+# optional property\n\s+why: ""/);
+  });
+
+  it("every blank shows one entry for every array reachable through its required fields", async () => {
+    const defects: string[] = [];
+    for (const seed of requiredSeeds()) {
+      const shown = await showBlank(seed.docType, seed.kind);
+      for (const path of arraysWithoutEntry(shown.fields, shown.blank.fields, "fields")) defects.push(`${seed.file}: ${path}`);
+    }
+    expect(defects).toEqual([]);
+  });
+
   it("the milestone-review template allows several root causes in one dimension, and refuses a root cause without a fingerprint", async () => {
     const twoCauses = (files: { fields: Record<string, unknown> }): void => {
       files.fields["findings"] = [
@@ -304,7 +352,7 @@ describe("AC-ST-8: the filled blank of every type and kind creates in a fresh co
         : docType === "adr" ? ["--parent", created["prd"]!, "--decision-status", "accepted"]
         : docType === "plan" ? ["--parent", created["spec-feature"]!]
         : docType === "knowledge" ? ["--sub-type", kind!, "--parent", created["prd"]!]
-        : docType === "task" ? ["--plan-id", created["plan"]!]
+        : docType === "task" ? ["--kind", "code", "--plan-id", created["plan"]!]
         : [];
       created[kind === undefined ? docType : `${docType}-${kind}`] = await write([...base, ...extra]);
     });

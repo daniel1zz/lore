@@ -491,7 +491,7 @@ export async function resolveFidelityParentId(store: StoreInterface, record: Fid
     field: "parent_id",
     message:
       live.length === 0
-        ? "a fidelity sample needs a parent: it measures several specs and this corpus has no requirements document; create the requirements document first (`lore create prd --title <title>`)"
+        ? "a fidelity sample needs a parent: it measures several specs and this corpus has no requirements document; create the requirements document first (`lore template show prd --blank`, fill it, then `lore create prd --title <title> --fields-file <file>`)"
         : `a fidelity sample needs a parent: it measures several specs and this corpus has ${live.length} requirements documents (${live.map((d) => d.slug).join(", ")}), so none is chosen for it`,
     rule: "BR-709",
   });

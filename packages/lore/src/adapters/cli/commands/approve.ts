@@ -49,6 +49,12 @@ export default defineLoreCommand({
         "recorded on the approve audit entry as override_no_judgment. Mutually exclusive " +
         "with --override-judgment.",
     },
+    "red-waiver": {
+      type: "string",
+      description:
+        "Code task only (AC-DCS1-5): waive the red run its done contract requires, with a reason stored verbatim as " +
+        "red_waiver_reason. Not named --no-red: the argument parser reads any --no-<x> as a negation and drops the value.",
+    },
     item: {
       type: "string",
       description:
@@ -63,6 +69,13 @@ export default defineLoreCommand({
   async run(context): Promise<number> {
     const { args } = context;
     const inv = invocationOf(context);
+    // reason: AC-DCS1-5 — a blank reason is a usage error (exit 2) caught before the corpus is opened; the typed reason is
+    // otherwise passed on byte for byte (never trimmed, never coerced).
+    const redWaiverArg: unknown = args["red-waiver"];
+    if (redWaiverArg !== undefined && (typeof redWaiverArg !== "string" || redWaiverArg.trim() === "")) {
+      inv.io.stderr.write("Error: --red-waiver needs a non-blank reason: say why this code task has no red run to record.\n");
+      return 2;
+    }
     const { app } = loadLoreApp({ inv });
     try {
       const reviewer = resolveActor(inv);
@@ -73,6 +86,7 @@ export default defineLoreCommand({
           : {}),
         ...(args["override-no-judgment"] === true ? { overrideNoJudgment: true } : {}),
         ...(typeof args.item === "string" ? { item: args.item } : {}),
+        ...(typeof redWaiverArg === "string" ? { redWaiverReason: redWaiverArg } : {}),
       });
 
       if (!result.ok) {

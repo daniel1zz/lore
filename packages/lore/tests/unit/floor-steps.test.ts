@@ -120,7 +120,8 @@ describe("lean floor (AC-LG-5)", () => {
     const src = readFileSync(join(ROOT, "packages/lore/src/service/integrate-service.ts"), "utf8");
     const judged = src.indexOf("await this.judgeOwnDiff(request.branch, tip)");
     const refused = src.indexOf("if (!footprint.ok) return footprint;");
-    const floorRun = src.indexOf("this.landOn(request, request.floorCommand");
+    // reason: the floor command is a checked local (`floorCommand`) handed down from `landInTurn` after the empty-command refusal.
+    const floorRun = src.indexOf("this.landOn(request, floorCommand");
     expect(judged).toBeGreaterThan(0);
     expect(refused).toBeGreaterThan(judged);
     expect(floorRun).toBeGreaterThan(refused);

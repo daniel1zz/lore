@@ -66,7 +66,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
 import type { DocRecord, DocType, JudgeIdentity, KnowledgeSubType, LoreError, Priority } from "@lore/core";
-import { KNOWLEDGE_SUB_TYPES, SPEC_KINDS, extractFileAnchors } from "@lore/core";
+import { KNOWLEDGE_SUB_TYPES, SPEC_KINDS, TASK_KINDS, extractFileAnchors, formatTaskKindRequiredMessage, isTaskKind } from "@lore/core";
 import { createWithSupersedes, renderSupersedeRepairMessage } from "../../../flows/supersede-flow.js";
 import { collectFileAnchorResolution, renderFileAnchorAdvisory } from "../../../service/anchor-resolution.js";
 import { buildFileAnchorProbeContext } from "../../real-fs-probe.js";
@@ -123,7 +123,7 @@ const TYPE_SPECIFIC_FLAGS: Readonly<Record<string, readonly DocType[]>> = {
   "sub-type": ["knowledge"],
   "plan-id": ["task"],
   phase: ["task"],
-  kind: ["spec"],
+  kind: ["spec", "task"],
   anchor: ["task"],
   "ac-scope": ["task"],
   "code-anchor": ["spec"],
@@ -205,7 +205,7 @@ export default defineLoreCommand({
     },
     kind: {
       type: "string",
-      description: `[spec only] Spec kind: ${SPEC_KINDS.join(" | ")} (defaults to "feature" when omitted). Source: SPEC-032`,
+      description: `Spec kind: ${SPEC_KINDS.join(" | ")} (defaults to "feature" when omitted; Source: SPEC-032). For a TASK: its kind, ${TASK_KINDS.join(" | ")} — REQUIRED, no default (AC-DCS1-4).`,
     },
     anchor: {
       type: "string",
@@ -356,6 +356,7 @@ export default defineLoreCommand({
         adhoc: args.adhoc as boolean | undefined,
         phase: args.phase,
         linkage: args.linkage as string | undefined,
+        kind: args.kind as string | undefined,
       };
       if (args.spec !== undefined && args.adhoc !== true) {
         inv.io.stderr.write(
@@ -371,6 +372,12 @@ export default defineLoreCommand({
       const missingTaskFlags = checkTaskCreateRequiredFlags(taskCreateFlags);
       if (missingTaskFlags.length > 0) {
         inv.io.stderr.write(formatTaskCreateMissingFlagsError(missingTaskFlags) + "\n");
+        exitCli(2);
+      }
+      // AC-DCS1-4: a given --kind must be one of the three task kinds (usage error, nothing written). A missing one is
+      // already refused above together with every other missing flag.
+      if (taskCreateFlags.kind !== undefined && taskCreateFlags.kind !== "" && !isTaskKind(taskCreateFlags.kind)) {
+        inv.io.stderr.write(`Error: ${formatTaskKindRequiredMessage(taskCreateFlags.kind, "--kind")}\n`);
         exitCli(2);
       }
       // The ad-hoc branch of --ac-scope requiredness (task-an-ad-hoc-task-can-
@@ -572,6 +579,7 @@ export default defineLoreCommand({
         args.linkage as string | undefined,
         acScope,
         args.spec as string | undefined,
+        args.kind,
       );
       const extra = issueRefs.length > 0 ? { ...(baseExtra ?? {}), issues: issueRefs } : baseExtra;
 
@@ -760,6 +768,7 @@ function buildExtra(
   linkage?: string,
   acScope?: ResolvedAcScope,
   governingSpec?: string,
+  taskKind?: string,
 ): Record<string, unknown> | undefined {
   if (docType === "adr" && decisionStatus !== undefined) {
     return { decision_status: decisionStatus };
@@ -774,6 +783,8 @@ function buildExtra(
     // BR-1495: the service (CorpusService._createImpl) checks and normalizes it; the CLI only forwards.
     if (adhoc === true && governingSpec !== undefined) extra["governing_spec"] = governingSpec;
     if (linkage !== undefined) extra["linkage"] = linkage;
+    // AC-DCS1-4: the CLI has already refused a missing or unknown kind; the service stores what it is given.
+    if (taskKind !== undefined) extra["kind"] = taskKind;
     if (phase !== undefined) {
       extra["phase"] = phase.trim();
     }

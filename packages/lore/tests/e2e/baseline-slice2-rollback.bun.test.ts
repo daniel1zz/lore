@@ -136,7 +136,7 @@ function buildCorpus(label: string, setup: GateSetup): Corpus {
   );
   const taskSlug = parseSlug(
     mustRun(
-      ["create", "task", "--title", "Slice2 Rollback Task", "--plan-id", planSlug, "--parent", planSlug, "--content", "## Task", "--ac-scope", "AC-S2-1", "--no-ai"],
+      ["create", "task", "--title", "Slice2 Rollback Task", "--kind", "code", "--plan-id", planSlug, "--parent", planSlug, "--content", "## Task", "--ac-scope", "AC-S2-1", "--no-ai"],
       dir,
     ).stdout,
   );
@@ -421,7 +421,8 @@ async function claimAndResume(c: Corpus, specCitesRule = false): Promise<RunResu
     }
   }
   mustRun(["approve", c.planSlug, "--override-no-judgment"], c.dir);
-  mustRun(["claim", c.taskSlug], c.dir);
+  // a code task is claimed on a branch (a task without one would be a check or corpus task, which is never claimed)
+  mustRun(["claim", c.taskSlug, "--worktree", "slice2-resume-branch"], c.dir);
   return mustRun(["feed", "session-resume", "--plan", c.planSlug], c.dir);
 }
 

@@ -32,6 +32,7 @@ import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installShippedGuard } from "../integration/support/main-guard-repo.js";
+import { FIXTURE_DONE_CONTRACT_CONFIG } from "../helpers/landed-code-task";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -63,6 +64,8 @@ let aaa = "";
 let bbb = "";
 let ccc = "";
 let handMade = "";
+/** The spec governing CCC's ad-hoc task (an ad-hoc task has no plan, so it names its spec). */
+let spec = "";
 
 /** Hermetic environment: no inherited session/identity variables, HOME inside the sandbox. */
 function envFor(session: string): Record<string, string> {
@@ -150,11 +153,22 @@ beforeAll(async () => {
   mustOk(await lore(["init"]), "lore init");
   // `lore integrate` keeps its own worktree under `.claude/` and needs the floor key; neither may dirty the tree
   appendFileSync(join(repo, ".git", "info", "exclude"), ".claude/\n.lore/integrate-attempts/\n.lore/integrate-losses/\n");
-  patchLoreConfig(repo, 'workflow:\n  integrate:\n    floor_command: "true"\n');
+  // reason: approve compiles the contract of CCC's task from these three commands; the claim gate wants an approved spec and a
+  // spec approval wants a review judgment; none of those is this file's subject.
+  patchLoreConfig(repo, {
+    workflow: {
+      integrate: { floor_command: "true" },
+      done_contract: { ...FIXTURE_DONE_CONTRACT_CONFIG },
+      gates: { "task-claim": { enabled: false } },
+      review: { judgment_required_types: [] },
+    },
+  });
   // reason: `lore init` arms state binding (AC-CT-3); evidence captured on a dirty tree is unbound and refused by `lore done`.
   mustOk(git(repo, "add", "-A"), "git add corpus");
   mustOk(git(repo, "commit", "-q", "-m", "lore corpus"), "git commit corpus");
   mustOk(await lore(["create", "prd", "--title", "Root", "--content", "Root PRD.", "--no-ai", "--json"]), "create prd");
+  const createdSpec = mustOk(await lore(["create", "spec", "--title", "Sweep spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai", "--json"]), "create spec");
+  spec = (JSON.parse(createdSpec.stdout) as { data: { slug: string } }).data.slug;
 
   aaa = addMergedWorktree("agent-AAA");
   bbb = addMergedWorktree("agent-BBB");
@@ -169,15 +183,19 @@ beforeAll(async () => {
   await registerRun("S3", "CCC"); // never ended
 
   // CCC: a task claimed from this worktree, then archived — only its run keeps the worktree.
-  const created = mustOk(await lore(["create", "task", "--adhoc", "--title", "CCC claimed work", "--content", "Throwaway task.", "--no-ai", "--ac-scope", "", "--json"], "S3"), "create task");
+  const created = mustOk(
+    await lore(["create", "task", "--adhoc", "--spec", spec, "--title", "CCC claimed work", "--kind", "code", "--content", "Throwaway task.", "--no-ai", "--ac-scope", "", "--json"], "S3"),
+    "create task",
+  );
   const slug = (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
+  mustOk(await lore(["approve", slug, "--red-waiver", "the red run is not the subject of this fixture"], "S3"), "approve");
   mustOk(await lore(["claim", slug, "--worktree", ccc], "S3"), "claim");
-  // the branch is on main already (merged above); integrate finds it already integrated and records the landing
-  // `lore done` requires (BR-1291)
+  // the branch is on main already (merged above); integrate finds it already integrated, runs the contract oracles on main's tip,
+  // records the landing and the rows, and archives the task through the same floors `lore done` applies
   installShippedGuard(repo, join(repo, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
   mustOk(await lore(["integrate", "agent-CCC", "--session", "S3"], "S3"), "integrate CCC");
-  mustOk(await lore(["evidence", slug, "--oracle", "test", "--command", "echo 1 passed", "--result", "pass", "--capture"], "S3"), "evidence");
-  mustOk(await lore(["done", slug, "--declare-no-new-tests", "fixture: throwaway task"], "S3"), "done");
+  const archived = JSON.parse(mustOk(await lore(["get", slug, "--json"], "S3"), "get CCC task").stdout) as { data: { doc?: { status: string }; status?: string } };
+  expect(archived.data.doc?.status ?? archived.data.status).toBe("archived");
 }, 300_000);
 
 afterAll(() => {

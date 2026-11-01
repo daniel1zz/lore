@@ -331,6 +331,30 @@ export interface VerifyPlanOpts {
    * byte-identical to pre-SPEC-063 behavior (REGRESSION, AC-063-3).
    */
   executionRoot?: VerifyExecutionRootResolution;
+  /**
+   * `lore finish` (AC-DCS1-15): hands every attested row to the caller instead of writing it, so the caller records ALL rows of
+   * one finish in ONE corpus write (`TaskWorkflowService.recordFinishRun`). The row is exactly the one the runner would have
+   * written; nothing about how it is measured changes.
+   */
+  collectRows?: (entry: VerifiedEvidenceInput) => void;
+  /**
+   * `lore finish`: the commands run are the ones the task's done contract fixed at approve, so the SPEC-039 §M2 approval gate
+   * (a prompt or `--allow-new-commands` for a command with no attested row) does not apply: the approval already happened.
+   * Only the `first_seen` annotation of the attestation stays.
+   */
+  commandsApprovedByContract?: boolean;
+}
+
+/** One oracle of a done contract, run by {@link VerifyRunnerService.runContractOracles}. */
+export interface ContractOracleToRun {
+  /** The contract oracle id (`test:<path>`, `typecheck`, ...). */
+  readonly id: string;
+  /** The oracle kind its row is recorded under. */
+  readonly oracle: "test" | "tsc" | "lint" | "build" | "e2e" | "other";
+  /** The exact command of the oracle. */
+  readonly command: string;
+  /** This run's own time limit in milliseconds (`lore integrate`: `workflow.integrate.oracle_timeout_seconds`); absent = the runner's default. */
+  readonly timeoutMs?: number;
 }
 
 /** One executed script-mode AC's outcome. */
@@ -927,6 +951,48 @@ export class VerifyRunnerService {
   }
 
   /**
+   * The ONE place a runner-attested row leaves this service: written through the injected port, or handed to the caller's
+   * collector when `lore finish` records all rows of one run in one corpus write (`opts.collectRows`).
+   */
+  private async recordOrCollect(
+    opts: VerifyPlanOpts,
+    task: DocRecord,
+    entry: VerifiedEvidenceInput,
+    nowIso: string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    if (opts.collectRows === undefined) return this.recordVerifiedEvidence(task.id, entry, nowIso);
+    opts.collectRows(entry);
+    return ok(task);
+  }
+
+  /**
+   * Runs the non-AC oracles of a done contract (`test:<path>` whole-file runs, `typecheck`) through the same execution,
+   * guards and attestation as an AC oracle (AC-DCS1-15): each is a synthetic script criterion, so the discovery-refusal,
+   * completeness, build-freshness and missing-file guards apply unchanged, and no row carries an `ac_ref`. Every oracle runs,
+   * even after one fails. Rows go to `opts.collectRows`.
+   *
+   * @param task - the task the rows belong to
+   * @param oracles - the oracles to run, each with its exact command
+   * @param opts - same options as `verifyPlan`; `executionRoot` is where the commands run
+   * @returns one outcome per oracle, in order
+   */
+  async runContractOracles(
+    task: DocRecord,
+    oracles: readonly ContractOracleToRun[],
+    opts: VerifyPlanOpts,
+  ): Promise<Result<VerifyPlanResult, LoreError>> {
+    const criteria = oracles.map(
+      (oracle) =>
+        ({
+          id: oracle.id,
+          statement: `contract oracle ${oracle.id}`,
+          verify: { mode: "script", oracle: oracle.oracle, command: oracle.command, ...(oracle.timeoutMs !== undefined ? { timeout_ms: oracle.timeoutMs } : {}) },
+        }) as unknown as AcceptanceCriterion,
+    );
+    return this._runVerification(criteria, task, undefined, opts, false);
+  }
+
+  /**
    * Step ②.4 — the declared-scope pre-flight: decides WHICH declared criteria
    * this run may touch, or REFUSES the whole run before any command executes.
    * Pure over its arguments (no IO, no state) — the only reason it is a method
@@ -1085,7 +1151,7 @@ export class VerifyRunnerService {
   private async _runVerification(
     selectedCriteria: AcceptanceCriterion[],
     task: DocRecord,
-    spec: DocRecord,
+    spec: DocRecord | undefined,
     opts: VerifyPlanOpts,
     recordAcRef: boolean,
   ): Promise<Result<VerifyPlanResult, LoreError>> {
@@ -1105,7 +1171,7 @@ export class VerifyRunnerService {
 
     const warnings: string[] = [];
     const unboundCauses: { ac_id: string; cause: string }[] = [];
-    if (spec.status !== "approved" && spec.status !== "active") {
+    if (spec !== undefined && spec.status !== "approved" && spec.status !== "active") {
       warnings.push(
         `Spec "${spec.slug}" is not approved/active (status: ${spec.status}) — ` +
           `lore verify still ran (SPEC-039 §3: not a hard gate).`,
@@ -1137,7 +1203,7 @@ export class VerifyRunnerService {
     // attested row on this task, the SPEC-039 §M2 scope) is DECIDED first (class verify-new-command), BEFORE any
     // command runs or any evidence row is written: an escalation aborts the whole run with nothing recorded (exit 4,
     // pending decision named). Subject = task + AC, version = the command text, so a changed command is a new subject.
-    if (this.config.requireCommandApproval && opts.allowNewCommands === true) {
+    if (this.config.requireCommandApproval && opts.allowNewCommands === true && opts.commandsApprovedByContract !== true) {
       for (const criterion of scriptCriteria) {
         if (isApprovedVerifyCommand(task, criterion.verify.command)) continue;
         const decided = await requireOverrideAuto(this.overrideDecisions, {
@@ -1165,7 +1231,7 @@ export class VerifyRunnerService {
       // the task's evidence history is "new/changed"; `firstSeen` also feeds the
       // attestation annotation below REGARDLESS of whether the gate is enabled.
       const firstSeen = !isApprovedVerifyCommand(task, criterion.verify.command);
-      if (this.config.requireCommandApproval && firstSeen && opts.allowNewCommands !== true) {
+      if (this.config.requireCommandApproval && firstSeen && opts.allowNewCommands !== true && opts.commandsApprovedByContract !== true) {
         const confirmed =
           opts.confirmUnapprovedCommand !== undefined
             ? await opts.confirmUnapprovedCommand({
@@ -1388,8 +1454,9 @@ export class VerifyRunnerService {
       // so the git reads are discarded when a peer held the lock — spec AC-CT-8; see StateBindingOccupancyPort.
       const stampOutcome: StampOutcome =
         occupancy?.kind === "held" ? {} : decideStampOutcome(preRunGitState, postRunGitState);
-      const recordResult = await this.recordVerifiedEvidence(
-        task.id,
+      const recordResult = await this.recordOrCollect(
+        opts,
+        task,
         {
           oracle: criterion.verify.oracle,
           command: criterion.verify.command,

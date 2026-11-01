@@ -31,6 +31,7 @@ import {
   type DecisionFinding,
   type DocRecord,
   type LinkType,
+  type JudgedDimension,
   type LlmMilestoneOutput,
   type ReviewCauses,
   type LoreError,
@@ -42,8 +43,13 @@ import {
   type RetiredAcRef,
 } from "@lore/core";
 import { factsDimensions, mergeDimensions, runJudgment, type JudgePort } from "./milestone-review-judgment.js";
+import { randomUUID } from "node:crypto";
+import { UnitLedger, type JudgeVerdictStorePort } from "./judge-unit-ledger.js";
+import type { JudgeIdentity } from "./judge-unit-keys.js";
 import {
   MILESTONE_REVIEW_PROMPT_VERSION,
+  UNIT_INSTRUCTION_TEMPLATE,
+  unitTemplateSourceOf,
   type JudgedDecisionInput,
   type MilestoneTaskInput,
 } from "../ai/milestone-review-template.js";
@@ -93,6 +99,19 @@ export interface MilestoneReviewDeps {
    * other measured ports: a service without it puts no decisions section to the judge and records no judged findings.
    */
   readonly judgedDecisionInputs?: (bundle: PlanBundle) => Promise<Result<JudgedDecisionInput[], LoreError>>;
+  /**
+   * The verdict store the judge's per-unit answers are kept in and reused from (BR-1535). Absent (hand-built services) = reuse is
+   * off and the review records why.
+   */
+  readonly judgeVerdicts?: JudgeVerdictStorePort;
+  /** Which judge answers (provider, model, settings); its model must be known for reuse. Absent = reuse is off. */
+  readonly judgeIdentity?: () => JudgeIdentity;
+  /** The clock (verdict read stamps, the 30-day expiry and the review token); default the system clock. */
+  readonly now?: () => Date;
+  /** The unit-instruction template source; default the shipped text. Sent in every call and hashed into every unit key. */
+  readonly unitInstructions?: string;
+  /** The dimension guide; default the shipped one. Sent in every call and hashed (with the unit instructions) into every unit key. */
+  readonly dimensionGuide?: Readonly<Record<JudgedDimension, string>>;
 }
 
 /** Per-run inputs the adapter measured. */
@@ -109,6 +128,8 @@ export interface MilestoneReviewOptions {
   readonly suite?: SuiteRun;
   /** Runs one criterion in this run's execution context; absent = the re-run of criteria citing a reworded rule is not done. */
   readonly rerunCriterion?: CriterionRerunPort;
+  /** `lore assess --rejudge`: ignore stored unit verdicts for this review; fresh answers are still stored, replacing nothing (BR-1535 S5). */
+  readonly rejudge?: boolean;
 }
 
 /** A stored review and its document. */
@@ -297,7 +318,21 @@ export class MilestoneReviewService {
     const judgedInputsResult = this.deps.judgedDecisionInputs !== undefined ? await this.deps.judgedDecisionInputs(bundle) : ok<JudgedDecisionInput[]>([]);
     if (!judgedInputsResult.ok) return judgedInputsResult;
     const judgedInputs = judgedInputsResult.value;
+    const clock = this.deps.now ?? (() => new Date());
+    const identity = this.deps.judgeIdentity?.();
+    const unitInstructions = this.deps.unitInstructions ?? UNIT_INSTRUCTION_TEMPLATE;
+    // reason: BR-1535 — the review is named before it judges so the units it writes carry `first_review`; the review document does not exist yet.
+    const reviewToken = `${bundle.plan.slug}@${clock().toISOString()}#${randomUUID().slice(0, 8)}`;
+    const ledger = new UnitLedger(
+      this.deps.judgeVerdicts,
+      identity,
+      reviewToken,
+      clock,
+      unitTemplateSourceOf(unitInstructions, this.deps.dimensionGuide),
+      opts.rejudge === true,
+    );
     const judged = await runJudgment({
+      reuse: { ledger, identity, unitInstructions, ...(this.deps.dimensionGuide !== undefined ? { dimensionGuide: this.deps.dimensionGuide } : {}) },
       base: {
         suiteSection: renderSuiteSection(opts.suite),
         plan: { slug: bundle.plan.slug, title: bundle.plan.title, content: bundle.plan.content },

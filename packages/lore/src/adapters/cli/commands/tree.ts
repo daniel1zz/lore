@@ -305,7 +305,7 @@ export default defineLoreCommand({
           result.error.id === "prd"
         ) {
           inv.io.stderr.write(
-            "No PRD documents found. Create a PRD first with `lore create prd --title <name>`.\n",
+            "No PRD documents found. Create a PRD first: `lore template show prd --blank > prd-fields.yaml`, fill it in, then `lore create prd --title <name> --fields-file prd-fields.yaml`.\n",
           );
           return 3;
         }

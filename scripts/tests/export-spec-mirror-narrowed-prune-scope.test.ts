@@ -323,7 +323,7 @@ function seedSixTypeFixture(): Fixture {
   createDoc(fixture, ["create", "knowledge", "--parent", prdId, "--title", "Prune Scope Note One", "--sub-type", "reference", "--content", "# Prune Scope Note One\n"]);
   createDoc(fixture, ["create", "knowledge", "--parent", prdId, "--title", "Prune Scope Note Two", "--sub-type", "reference", "--content", "# Prune Scope Note Two\n"]);
   const planId = createDoc(fixture, ["create", "plan", "--title", "Prune Scope Plan", "--parent", prdId, "--content", "# Prune Scope Plan\n"]);
-  createDoc(fixture, ["create", "task", "--title", "Prune Scope Task", "--parent", planId, "--plan-id", planId, "--content", "# Prune Scope Task\n"]);
+  createDoc(fixture, ["create", "task", "--title", "Prune Scope Task", "--kind", "code", "--parent", planId, "--plan-id", planId, "--content", "# Prune Scope Task\n"]);
 
   const baseline = runMirror(fixture);
   if (baseline.exitCode !== 0) {

@@ -4,8 +4,10 @@
  * Purpose: the CLI-side wiring of the post-landing review batch: the trigger/start service for `lore integrate`, the
  *   keyed store leases of the process, and the detached `lore assess --where needs-review --file-issues --close` spawn.
  * Public surface: buildReviewTriggerService, buildReviewLeases, spawnDelegatedJob, spawnDetachedReviewBatch,
- *   REVIEW_BATCH_ARGS, REVIEW_BATCH_JOB.
+ *   buildReviewBatchStarter, buildPlanCloseTrigger (the automatic plan close, AC-DCS2-11), REVIEW_BATCH_ARGS, REVIEW_BATCH_JOB.
  * Invariants:
+ *   - ONE batch per process: a process that already started a review batch for a corpus while it still runs reuses it, so the several steps of
+ *     a landing that ask for the batch (the archive that completes a plan, the landing's last step, the branch landing's seam) start one.
  *   - The spawn is detached with no inherited output stream; its output goes to `<corpus>/review-batch.log` (append), so a
  *     failure of the unattended batch stays readable. The landing never waits for the job to finish.
  *   - The job runs as a CHILD run its VERIFIED caller registered for it (#501, `service/delegated-run.ts`): the job outlives
@@ -19,9 +21,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { closeSync, openSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
 import { z } from "zod";
 import { HARNESS_RUN_ENV, err, ok, type LoreError, type PlanBundle, type Result } from "@lore/core";
+import type { PlanCloseTrigger } from "../../service/task-workflow-service.js";
 import type { App } from "../../app.js";
 import { createRealProcessTablePort } from "../process-table-port.js";
 import {
@@ -190,6 +193,10 @@ export async function spawnDetachedReviewBatch(opts: {
   readonly runService: DelegatedRunRegistry | undefined;
   readonly caller: DelegatingCaller;
 }): Promise<Result<{ readonly pid: number | undefined }, LoreError>> {
+  // reason: AC-PCR-3 "one batch" — a landing process asks for the batch from more than one step (the archive that completes a plan, the
+  // landing's own last step, the branch landing's plan-close seam); the first spawn serves them all while that batch is still running.
+  const earlier = batchStartedByThisProcess.get(opts.corpusDir);
+  if (earlier !== undefined && processIsAlive(earlier)) return ok({ pid: earlier });
   if (opts.handoff === undefined) {
     return err(spawnRefusal(REVIEW_BATCH_HANDOFF_ENV, "no batch lease was taken for this batch (no lease store is wired), so it is not started: nothing could stop a second batch on this machine"));
   }
@@ -204,7 +211,91 @@ export async function spawnDetachedReviewBatch(opts: {
     runService: opts.runService,
     caller: opts.caller,
   });
+  if (spawned.ok) batchStartedByThisProcess.set(opts.corpusDir, spawned.value.pid);
   return spawned.ok ? ok({ pid: spawned.value.pid }) : spawned;
+}
+
+/** The pid of the review batch this process started, per corpus directory (see {@link spawnDetachedReviewBatch}). */
+const batchStartedByThisProcess = new Map<string, number>();
+
+/** Whether a process with this pid exists (signal 0 sends nothing); an unreadable answer other than "no such process" counts as alive. */
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (cause) {
+    return (cause as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+/** What {@link buildPlanCloseTrigger} needs of the invocation that archives. */
+export interface PlanCloseTriggerInput {
+  readonly app: App;
+  /** The corpus database path; the project root and the corpus directory derive from it. */
+  readonly dbPath: string;
+  readonly execPath: string;
+  readonly isCompiled: boolean;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  /** The acting identity (names the review lease holder). */
+  readonly actor: string;
+  /** The caller's claimed run and its verification outcome: an unverified caller cannot delegate a run to the batch. */
+  readonly caller: DelegatingCaller;
+}
+
+/**
+ * The starter behind every trigger of the automatic plan close: the existing `ReviewTriggerService.start` over the detached, delegated
+ * spawn. One call computes the trigger set and, when it is non-empty, starts ONE detached batch (plans another batch holds are skipped by its per-plan lease, BR-1511) and returns at
+ * once; a start that could not happen is a line, never a failure of the caller.
+ *
+ * @returns a function from the plan's slug and the reason it is asked (one phrase) to the line the caller prints; `undefined` when this
+ *   composition cannot compute the trigger set (no lease store or decision reader), so nothing can be started
+ */
+export function buildReviewBatchStarter(input: PlanCloseTriggerInput): ((planSlug: string, why: string) => Promise<string>) | undefined {
+  const corpusDir = dirname(resolvePath(input.dbPath));
+  const projectRoot = dirname(corpusDir);
+  // reason: BR-1532 — this process takes `batch:<machine>` itself and hands it to the batch it spawns; with no lease store no batch is started
+  const batchLeases = buildReviewLeases(input.app, `${input.actor}:plan-close:${String(process.pid)}`);
+  if (batchLeases === undefined) return undefined;
+  const trigger = buildReviewTriggerService(
+    input.app,
+    (handoff) =>
+      spawnDetachedReviewBatch({
+        handoff,
+        cwd: projectRoot,
+        corpusDir,
+        execPath: input.execPath,
+        isCompiled: input.isCompiled,
+        env: input.env,
+        // reason: #501 — the batch outlives this process, so it gets a child run registered by THIS (verified) caller
+        runService: input.app.runService,
+        caller: input.caller,
+      }),
+    batchLeases,
+  );
+  if (trigger === undefined) return undefined;
+  return async (planSlug, why) => {
+    const started = await trigger.start();
+    if (!started.ok) return `plan close: WARNING: the review batch for ${planSlug} was not started: ${started.error.code}${"message" in started.error ? ` ${started.error.message}` : ""}`;
+    switch (started.value.state) {
+      case "empty":
+        return `plan close: ${planSlug} ${why}; no plan needs review`;
+      case "started":
+        return `plan close: ${planSlug} ${why}; the review batch started${started.value.pid !== undefined ? ` (pid ${String(started.value.pid)})` : ""} and closes it in the background`;
+      case "covered":
+        return `plan close: ${planSlug} ${why}; another review batch (${started.value.holder}) holds ${started.value.key} and covers it`;
+    }
+  };
+}
+
+/**
+ * The trigger of the automatic plan close for the archiving command (AC-DCS2-11): {@link buildReviewBatchStarter} behind
+ * `TaskWorkflowService.done`'s last-archive hook.
+ *
+ * @returns `undefined` when no batch can be started in this composition, so no trigger is wired
+ */
+export function buildPlanCloseTrigger(input: PlanCloseTriggerInput): PlanCloseTrigger | undefined {
+  const start = buildReviewBatchStarter(input);
+  return start === undefined ? undefined : { afterLastArchive: (planSlug) => start(planSlug, "has no task left") };
 }
 
 /**

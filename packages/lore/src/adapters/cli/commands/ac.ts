@@ -198,6 +198,7 @@ import { createOverrideDecisionPort } from "../../../service/override-decision.j
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
 import { deriveAcCoverageState, findModeForeignDetail, getAllowedTransitions, modeForeignDetailMessage, ok } from "@lore/core";
 import type { AcceptanceCriterion, AcCoverageFact, Invocation, LoreError, Result } from "@lore/core";
+import { markFalsifierNewSymbol } from "../../../service/ac-service.js";
 import type { AcService, AcListResult, DeclarePathOpts, SetCriterionOpts, SetCriterionPatch } from "../../../service/ac-service.js";
 import type { App } from "../../../app.js";
 import type { CiteWarning } from "../../../service/ac-citations.js";
@@ -335,6 +336,12 @@ export default defineLoreCommand({
             "script mode only: the EXACT exit code (never \"non-zero\"; a whole number from 1 to 255) this mutation is declared to " +
             "produce when --command runs against the mutated file.",
         },
+        "falsifier-new-symbol": {
+          type: "boolean",
+          description:
+            "script mode only: the --falsifier-find literal names a symbol the task has yet to create, so it may be absent " +
+            "from --falsifier-path when the done contract is compiled. Valid only together with the four --falsifier-* flags.",
+        },
         correction: {
           type: "string",
           description: "NOT accepted here — exits 2; a correction fixes ONE existing criterion: `lore ac set --correction`",
@@ -354,6 +361,8 @@ export default defineLoreCommand({
         if (timeoutRefusal !== undefined) return timeoutRefusal;
         const foreignRefusal = refuseModeForeignDetail(inv.io, args);
         if (foreignRefusal !== undefined) return foreignRefusal;
+        const newSymbolRefusal = refuseNewSymbolWithoutFalsifier(inv.io, args);
+        if (newSymbolRefusal !== undefined) return newSymbolRefusal;
         const decision = decisionOf(inv, args);
         if (typeof decision === "number") return decision;
         const { app, dbPath } = loadLoreApp({ inv });
@@ -794,6 +803,12 @@ export default defineLoreCommand({
             "script mode only: REPLACE the EXACT exit code (never \"non-zero\"; a whole number from 1 to 255) the mutation is declared to " +
             "produce. Required together with the other three --falsifier-* flags.",
         },
+        "falsifier-new-symbol": {
+          type: "boolean",
+          description:
+            "script mode only: mark the replaced falsifier as naming a symbol the task has yet to create. Valid only together " +
+            "with the four --falsifier-* flags; a set without it stores an unmarked falsifier (the whole object is replaced).",
+        },
         correction: {
           type: "string",
           description:
@@ -827,6 +842,8 @@ export default defineLoreCommand({
 
         const timeoutRefusal = refuseBadTimeoutMs(inv.io, args, "set");
         if (timeoutRefusal !== undefined) return timeoutRefusal;
+        const setNewSymbolRefusal = refuseNewSymbolWithoutFalsifier(inv.io, args);
+        if (setNewSymbolRefusal !== undefined) return setNewSymbolRefusal;
         const patch = buildSetPatch(args);
         if (patch === null) {
           inv.io.stderr.write(
@@ -1057,17 +1074,37 @@ function buildFalsifierCandidate(args: Record<string, unknown>): unknown {
   ) {
     return undefined;
   }
-  return {
-    ...(typeof path === "string" ? { path } : {}),
-    ...(typeof find === "string" ? { find } : {}),
-    ...(typeof replace === "string" ? { replace } : {}),
-    // reason: citty yields every flag as a string; `acFalsifierSchema.expected_exit_code`
-    // is `z.number().int()` — a non-numeric string (e.g. "abc") becomes `NaN`, which
-    // Zod's `z.number()` REJECTS (NaN is not a valid `number` per Zod's own check),
-    // so a malformed value fails loud through schema validation rather than silently
-    // coercing to 0.
-    ...(typeof exitCodeRaw === "string" ? { expected_exit_code: Number(exitCodeRaw) } : {}),
-  };
+  return markFalsifierNewSymbol(
+    {
+      ...(typeof path === "string" ? { path } : {}),
+      ...(typeof find === "string" ? { find } : {}),
+      ...(typeof replace === "string" ? { replace } : {}),
+      // reason: citty yields every flag as a string; `acFalsifierSchema.expected_exit_code`
+      // is `z.number().int()` — a non-numeric string (e.g. "abc") becomes `NaN`, which
+      // Zod's `z.number()` REJECTS (NaN is not a valid `number` per Zod's own check),
+      // so a malformed value fails loud through schema validation rather than silently
+      // coercing to 0.
+      ...(typeof exitCodeRaw === "string" ? { expected_exit_code: Number(exitCodeRaw) } : {}),
+    },
+    args["falsifier-new-symbol"] === true,
+  );
+}
+
+/**
+ * `--falsifier-new-symbol` is valid only together with all four `--falsifier-*` flags: argv-decidable, so exit 2 BEFORE
+ * the app opens and nothing is written (AC-DCS1-3).
+ *
+ * @returns 2 when the flag was passed without the four flags (caller must return it), else `undefined`
+ */
+function refuseNewSymbolWithoutFalsifier(io: CliIo, args: Record<string, unknown>): number | undefined {
+  if (args["falsifier-new-symbol"] !== true) return undefined;
+  const four = ["falsifier-path", "falsifier-find", "falsifier-replace", "falsifier-exit-code"];
+  if (four.every((flag) => typeof args[flag] === "string")) return undefined;
+  io.stderr.write(
+    "Error: --falsifier-new-symbol is valid only together with --falsifier-path, --falsifier-find, " +
+      "--falsifier-replace and --falsifier-exit-code.\n",
+  );
+  return 2;
 }
 
 /**
@@ -1498,7 +1535,7 @@ function oracleFileMarkers(coverage: AcListResult["coverage"], acId: string): st
 function describeVerify(verify: AcceptanceCriterion["verify"]): string {
   switch (verify.mode) {
     case "script":
-      return `script:${verify.oracle} — ${verify.command}`;
+      return `script:${verify.oracle} — ${verify.command}${verify.falsifier?.new_symbol === true ? " (falsifier new_symbol)" : ""}`;
     case "ai":
       return `ai — ${verify.rubric}`;
     case "human":

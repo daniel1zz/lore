@@ -18,7 +18,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runLore, type RunResult } from "../cli/support/claim-run-fixture.js";
+import { claimWorktreeArgs, runLore, type RunResult } from "../cli/support/claim-run-fixture.js";
 
 export const REASON = "session-end";
 
@@ -34,7 +34,9 @@ const tempDirs: string[] = [];
 export function makeWorktree(opts: { dirty: boolean }): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "run-end-wt-")));
   tempDirs.push(dir);
-  git(dir, "init", "-q");
+  // reason: a code claim records its branch, and two live claims on one branch are refused (`shared-branch`, AC-DCS1-14), so
+  // every fixture working copy is on a branch named after its own temp directory.
+  git(dir, "init", "-q", "-b", `wt-${dir.split("/").pop() ?? "x"}`);
   git(dir, "config", "user.email", "fixture@example.com");
   git(dir, "config", "user.name", "Fixture");
   writeFileSync(join(dir, "tracked.txt"), "one\n");
@@ -122,7 +124,7 @@ export function planSlug(dir: string): string {
 /** `lore claim <task> [--worktree <wt>] [--steal]` as `run`. No `--by`: the run decides, the name is incidental. */
 export function claimAs(dir: string, task: string, run: string, opts: { worktree?: string; steal?: boolean } = {}): RunResult {
   return runLore(
-    ["claim", task, ...(opts.worktree !== undefined ? ["--worktree", opts.worktree] : []), ...(opts.steal === true ? ["--steal"] : [])],
+    ["claim", task, ...claimWorktreeArgs(task, opts.worktree), ...(opts.steal === true ? ["--steal"] : [])],
     dir,
     run,
   );

@@ -27,10 +27,12 @@
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ok, type CreateDocInput, type DocRecord, type LoreConfig, type UatVerdict } from "@lore/core";
+import { readShippedTemplateSeeds } from "../../../src/adapters/cli/template-seeds.js";
 import { createAppStaleRefresher } from "../../../src/adapters/cli/assess-stale-refresh.js";
 import { handleApiRoute } from "../../../src/adapters/http/routes.js";
 import { handleDashboardRoute } from "../../../src/adapters/http/dashboard-routes.js";
@@ -58,6 +60,18 @@ async function expectCheckClean(slug: string): Promise<void> {
 
 async function docOf(slug: string): Promise<DocRecord> {
   return await rig.withApp(async (app) => (await must(app.corpusService.get(slug), `get ${slug}`)).doc, config);
+}
+
+/**
+ * The `template_ref` the corpus pins for a (type, kind): the version is read from the shipped seed, never a literal, so a
+ * seed bump cannot leave an assertion stale.
+ */
+function seededRef(docType: string, kind?: string): string {
+  const seeds = readShippedTemplateSeeds(fileURLToPath(new URL("../../../../../assets", import.meta.url)));
+  if (!seeds.ok) throw new Error(`seededRef: ${JSON.stringify(seeds.error)}`);
+  const seed = seeds.value.find((s) => s.template.doc_type === docType && (kind === undefined || s.template.kind === kind));
+  if (seed === undefined) throw new Error(`seededRef: no shipped seed for ${docType}/${kind ?? "-"}`);
+  return `${docType}${kind === undefined ? "" : `-${kind}`}-template@${String(seed.template.version)}`;
 }
 
 function pinnedRef(doc: DocRecord): unknown {
@@ -91,7 +105,7 @@ describe("BR-1528 generators create structured documents with require_create ON"
     expect(written.exitCode, written.stderr + written.stdout).toBe(0);
     const slug = (JSON.parse(written.stdout) as { data: { slug: string } }).data.slug;
     const doc = await docOf(slug);
-    expect(pinnedRef(doc)).toBe("knowledge-handoff-template@1");
+    expect(pinnedRef(doc)).toBe(seededRef("knowledge", "handoff"));
     expect((doc.extra as { handoff?: unknown }).handoff).toBeDefined();
     expect(doc.content).toContain("## Next steps");
     await expectCheckClean(slug);
@@ -122,7 +136,7 @@ describe("BR-1528 generators create structured documents with require_create ON"
     expect(review.ok, JSON.stringify(review)).toBe(true);
     if (!review.ok) return;
     const doc = await docOf(review.value.doc.slug);
-    expect(pinnedRef(doc)).toBe("knowledge-milestone-review-template@1");
+    expect(pinnedRef(doc)).toBe(seededRef("knowledge", "milestone-review"));
     expect(doc.parent_id).toBe(planId);
     expect((doc.extra as { milestone_review?: unknown }).milestone_review).toBeDefined();
     await expectCheckClean(doc.slug);
@@ -142,7 +156,7 @@ describe("BR-1528 generators create structured documents with require_create ON"
     const tasks = await rig.withApp(async (app) => (await must(app.corpusService.listFull({ type: "task" }), "list tasks")).docs, config);
     const adhoc = tasks.find((task) => (task.extra as Record<string, unknown>)["adhoc"] === true);
     expect(adhoc).toBeDefined();
-    expect(pinnedRef(adhoc as DocRecord)).toBe("task-template@1");
+    expect(pinnedRef(adhoc as DocRecord)).toBe(seededRef("task"));
     // its `ac_scope` names an AC the spec in its `spec_ref` declares, which the check resolves against that spec's criteria
     expect((adhoc as DocRecord).extra["ac_scope"]).toEqual(["AC-GEN-1"]);
     expect(((adhoc as DocRecord).extra["fields"] as Record<string, unknown>)["spec_ref"]).toBe(specSlug);
@@ -164,7 +178,7 @@ describe("BR-1528 generators create structured documents with require_create ON"
       );
       return await must(app.corpusService.createUatDoc(input), "create uat doc");
     }, config);
-    expect(pinnedRef(doc)).toBe("knowledge-uat-template@1");
+    expect(pinnedRef(doc)).toBe(seededRef("knowledge", "uat"));
     await expectCheckClean(doc.slug);
   });
 

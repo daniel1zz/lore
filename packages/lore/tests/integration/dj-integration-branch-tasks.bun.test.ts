@@ -14,6 +14,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { OwnDiffFixture } from "../helpers/own-diff-fixture.js";
+import { approvedTask, DONE_CONTRACT_FIXTURE_CONFIG } from "./support/own-diff-contract.js";
 
 let fx: OwnDiffFixture | undefined;
 
@@ -24,23 +25,27 @@ afterEach(() => {
 
 describe("AC-DJ-3 — an integration branch is judged against its plan's tasks", () => {
   it("(1) lands and records on every task of the plan; (2) refuses what another plan's task holds; (3) refuses a branch with no task", () => {
-    const f = new OwnDiffFixture();
+    const f = new OwnDiffFixture(DONE_CONTRACT_FIXTURE_CONFIG);
     fx = f;
     f.commitOnMain({ "src/a.ts": "export const a = 1;\n", "src/b.ts": "export const b = 1;\n", "src/z.ts": "export const z = 1;\n" }, "base sources");
-    const t1 = f.createTask("T1", ["src/a.ts"]);
-    const t2 = f.createTask("T2", ["src/b.ts"]);
+    // reason: integrate selects only approved tasks holding a stored contract (AC-DCS2-1), so every task is approved before its claim
+    const t1 = approvedTask(f, "T1", ["src/a.ts"]);
+    const t2 = approvedTask(f, "T2", ["src/b.ts"]);
     const otherPlan = f.createPlan("Other plan");
-    const u = f.createTask("U", ["src/z.ts"], otherPlan);
+    const u = approvedTask(f, "U", ["src/z.ts"], otherPlan);
     f.makeBranch("t1-branch", { "src/a.ts": "export const a = 2;\n" });
     f.makeBranch("t2-branch", { "src/b.ts": "export const b = 2;\n" });
     f.makeBranch("branch-y", { "y.txt": "y\n" });
     f.claim(t1, "t1-branch");
     f.claim(t2, "t2-branch");
     f.claim(u, "branch-y");
-    f.makeBranch("integration-i", { "i.txt": "i\n" });
+    // reason: a plan declares its integration branch at main's tip (a branch that already holds other work is refused,
+    // `integration-branch-exists`), so the branch is cut from main, declared, and only then receives the plan's work.
+    f.git(["branch", "integration-i", "main"]);
+    f.mustLore(["plan", "integration-branch", f.defaultPlan, "integration-i"]);
+    f.commitOnBranch("integration-i", { "i.txt": "i\n" });
     f.mergeIntoBranch("integration-i", "t1-branch");
     f.mergeIntoBranch("integration-i", "t2-branch");
-    f.mustLore(["plan", "integration-branch", f.defaultPlan, "integration-i"]);
 
     const landed = f.integrate("integration-i");
 

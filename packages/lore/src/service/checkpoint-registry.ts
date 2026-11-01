@@ -83,7 +83,7 @@
 
 import {
   extractHeldClaim,
-  extractFileAnchors,
+  effectiveWriteSet,
   isClaimStale,
   lintAcQuantifiability,
   checkOracleCoverage,
@@ -1741,8 +1741,11 @@ export function buildAnchorGateContext(
   siblingTasks: DocRecord[],
   nowIso: string,
   ttlMinutes: number,
+  candidateWriteSet?: readonly string[],
 ): Pick<GateContext, "candidateBy" | "candidateAnchors" | "siblingClaims"> {
-  const candidateAnchors = extractFileAnchors(candidateTask);
+  // reason: AC-DCS1-10 — overlap is judged on WRITE SETS: a sibling's is its claim's declared set (else its approved anchors),
+  // and the candidate's is the set the claim being taken declares (`candidateWriteSet`), else what `effectiveWriteSet` reads.
+  const candidateAnchors = candidateWriteSet !== undefined ? [...candidateWriteSet] : effectiveWriteSet(candidateTask);
   const siblingClaims: SiblingClaimInfo[] = [];
   for (const sibling of siblingTasks) {
     if (sibling.id === candidateTask.id) continue;
@@ -1754,7 +1757,7 @@ export function buildAnchorGateContext(
       by: claim.by,
       at: claim.at,
       stale: isClaimStale(claim, nowIso, ttlMinutes),
-      anchors: extractFileAnchors(sibling),
+      anchors: effectiveWriteSet(sibling),
       ...(claim.worktree !== undefined ? { worktree: claim.worktree } : {}),
       // reason: BR-1056 — `noAnchorOverlap` compares holders by RUN; a lease with no run stays without one and
       // conflicts with everyone.

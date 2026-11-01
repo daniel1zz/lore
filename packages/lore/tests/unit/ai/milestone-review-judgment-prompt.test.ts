@@ -80,7 +80,7 @@ describe("AC-AF-4 milestone judgment prompt", () => {
 
   it("AC-AF-4 STATE: the prompt version is bumped past milestone-5", () => {
     expect(MILESTONE_REVIEW_PROMPT_VERSION).not.toBe("milestone-5");
-    expect(MILESTONE_REVIEW_PROMPT_VERSION).toBe("milestone-6");
+    expect(MILESTONE_REVIEW_PROMPT_VERSION).toBe("milestone-7");
   });
 
   it("AC-AF-4 NEGATIVE: an AI verdict on a facts dimension is ignored", async () => {

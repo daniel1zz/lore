@@ -840,6 +840,8 @@ function buildFixture(cwd: string, opts: { forceRemove: boolean }): { taskSlug: 
   // fixture task actually claims (it genuinely references FIXTURE_AC_ID in its
   // evidence below), so the real id is declared, not a vacuous empty array.
   const task = createDoc(cwd, "task", "Fixture task", "Fixture task body.", [
+    "--kind",
+    "code",
     "--plan-id",
     plan.id,
     "--ac-scope",

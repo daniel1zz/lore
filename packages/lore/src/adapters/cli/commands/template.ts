@@ -78,7 +78,7 @@ const show = defineLoreCommand({
   args: {
     type: { type: "positional", description: "Document type (prd, spec, adr, plan, task, knowledge, baseline, ...)", required: true },
     kind: { type: "string", description: "Kind: spec kind, knowledge sub-type, baseline node" },
-    blank: { type: "boolean", description: "Print a fill-in YAML skeleton: required fields and one entry per dimension" },
+    blank: { type: "boolean", description: "Print a fill-in YAML skeleton: required fields (every list shows one placeholder entry with its item shape; an entry marked optional may be deleted, in JSON output too) and one entry per dimension" },
     json: { type: "boolean", description: "Output result as JSON" },
   },
   async run(context): Promise<number> {

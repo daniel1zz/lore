@@ -1,12 +1,12 @@
 /**
  * Override decision port — the ONE seam through which a self-grantable override asks decide() before it applies.
  *
- * Purpose: `approve --override-judgment/--override-no-judgment`, `done --override-attestation(-cite)`,
+ * Purpose: `approve --override-judgment/--override-no-judgment`,
  *   `ac exempt` and `verify --yes` (a command with no attested row on the task) were granted to whoever typed them.
  *   Each now asks DecisionService.decide() for its registered class and proceeds only on an effective `auto`;
  *   anything else is refused with exit 4 (VALIDATION_ERROR), writes nothing else, and names the pending decision
- *   and the `lore decide <id>` line a human answers it with (never a nonce). EXCEPT the three milestone classes
- *   (override-judgment, override-attestation, ac-exempt; BR-1370): the override APPLIES at once, a `milestone` decision
+ *   and the `lore decide <id>` line a human answers it with (never a nonce). EXCEPT the two milestone classes
+ *   (override-judgment, ac-exempt; BR-1370): the override APPLIES at once, a `milestone` decision
  *   is recorded for the milestone review to resolve, and NO pending human decision is opened.
  * Public surface: OverrideClassId, OverrideRequest, OverrideDecisionPort, createOverrideDecisionPort, requireOverrideAuto,
  *   OVERRIDE_MEASURED_FACTS.
@@ -14,7 +14,7 @@
  *   - INV-2: the facts are what lore itself measured (an override is reversible; the caller is the calling session;
  *     lore evaluated the precondition). No factor and NO confidence is caller-supplied; C is computed inside
  *     DecisionService from the class's recorded outcomes.
- *   - INV-5: this is the only permission rule for the four paths; a service holds the port and applies the verdict,
+ *   - INV-5: this is the only permission rule for the three paths; a service holds the port and applies the verdict,
  *     it never re-derives one. A service whose override is REQUESTED while no port is wired refuses loudly
  *     ({@link requireOverrideAuto} -> VALIDATION_ERROR naming the missing port): there is no ungated fallback, so a
  *     composition root that forgets the port turns the override into an error, never into a grant. `app.ts` and the
@@ -30,8 +30,8 @@ import { err, ok, type AutonomyFacts, type LoreError, type Result } from "@lore/
 import type { DecisionService, DecisionSubject } from "./decision-service.js";
 import type { DecisionDetail } from "../store/decision-log.js";
 
-/** The registered classes (core classes.ts) of the four self-grantable overrides. */
-export type OverrideClassId = "override-judgment" | "override-attestation" | "ac-exempt" | "verify-new-command";
+/** The registered classes (core classes.ts) of the three self-grantable overrides. */
+export type OverrideClassId = "override-judgment" | "ac-exempt" | "verify-new-command";
 
 /** What an override path asks: the class, the stable subject it is about, and a one-line human summary. */
 export interface OverrideRequest {

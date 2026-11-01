@@ -171,7 +171,7 @@ describe("AC-DCL-5 static scan — only corpus-service.ts and store/* call a sto
       ["SpecKindService", /new SpecKindService\(store, corpusService\)/g],
       ["StateBindingService", /new StateBindingService\(store, corpusService\)/g],
       ["AcService", /new AcService\(store, recordLockService, \{ citeGate: citeGateRaw \}, corpusService\)/g],
-      ["PlanIntegrationBranchService", /new PlanIntegrationBranchService\(store, corpusService\)/g],
+      ["PlanIntegrationBranchService", /new PlanIntegrationBranchService\(store, corpusService(?:, [^)]*\)?)?\)/g],
       ["state-binding occupancy port", /buildStateBindingOccupancyPort\(corpusService\)/g],
     ];
     for (const [name, pattern] of wired) {
@@ -477,15 +477,18 @@ const slugFor = (prefix: string): string => `${prefix}-dcl5-${(uniq += 1)}`;
 
 const SCENARIOS: readonly Scenario[] = [
   {
+    // reason: this module's lifecycle write is evidence, not the claim: a claim of a code task names its branch (AC-DCS1-14) and so
+    // always carries declared intent, which the foreign-corpus rule lets through; a claim naming no branch is refused earlier by
+    // `work-needs-branch`, never by that rule. Evidence on a task with no branch lease is what the rule refuses from a linked worktree.
     module: "task-workflow",
     kind: "working-state",
-    auditAction: "claim",
+    auditAction: "evidence",
     seed: async (w) => {
       const plan = await mustCreate(w.seedCorpus, { parent_id: await ensureRequirementsDocId(w.seedCorpus), type: "plan", title: slugFor("plan"), content: "body" });
       const task = await mustCreate(w.seedCorpus, {
-        type: "task", title: slugFor("task"), parent_id: plan.id, content: "body", extra: { plan_id: plan.id },
+        type: "task", title: slugFor("task"), parent_id: plan.id, content: "body", extra: { kind: "code", plan_id: plan.id },
       });
-      return { docIds: [task.id], run: async () => failureText(await w.svc.taskWorkflow.claim(task.id, { by: CALLER, harnessRun: runOfName(CALLER) })) };
+      return { docIds: [task.id], run: async () => failureText(await w.svc.taskWorkflow.addEvidence(task.id, { ...EVIDENCE })) };
     },
   },
   {

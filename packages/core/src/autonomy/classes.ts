@@ -107,7 +107,7 @@ function normal(declaredRecoverability: Recoverability, threshold: number, prior
 /**
  * Seeded class table. The human-always set is EXACTLY {governance-loosen, push-force, archive-ref-prune} (BR-1370):
  * a force push, a pruned archive ref and a loosened governance value cannot be taken back (one-way doors).
- * reason: override-judgment, override-attestation and ac-exempt are `milestone` classes: a Wilson bound over their 0.5
+ * reason: override-judgment and ac-exempt are `milestone` classes: a Wilson bound over their 0.5
  * prior never reached the auto threshold, so they escalated forever; they now record a `milestone` decision that the
  * milestone review resolves, with no pending human decision. `report-issue` is not a class: it never asked decide().
  */
@@ -116,7 +116,6 @@ export const OPERATION_CLASS_REGISTRY: OperationClassRegistry = {
   "worktree-remove": normal("loss-free-by-proof", 0.8, 0.97),
   "process-reap": normal("loss-free-by-proof", 0.85, 0.97),
   "override-judgment": milestone,
-  "override-attestation": milestone,
   "ac-exempt": milestone,
   "verify-new-command": normal("reversible", 0.8, 0.95),
   "run-end-stale": normal("reversible", 0.8, 0.97),

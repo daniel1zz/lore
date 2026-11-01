@@ -1,7 +1,10 @@
 /**
  * IntegrateLossLedger — the persisted "this branch keeps losing the race for main" record behind `lore status`.
  *
- * Purpose: `lore integrate` makes at most 3 attempts per call; a branch that keeps exiting 75 must stay visible, never
+ * RETIRED for new landings (AC-DCS2-5): landings are serialized in a merge queue, so nothing loses a race and no entry is written
+ * any more; the history already stored stays readable, and a landed branch's old entry is still cleared. `recordLoss` remains only
+ * so that history can be seeded and read.
+ * Purpose (history): `lore integrate` once made at most 3 attempts per call; a branch that kept exiting 75 stayed visible, never
  * silent (adr-main-advances-only-by-lore-integrate-per-session, "Retry bound"). One JSON file per branch under
  * `<corpus dir>/integrate-losses/` (the corpus directory beside `lore.db`, resolved through the corpus root, so a
  * session worktree that reaches the corpus through the git common dir writes the SAME ledger every session reads —

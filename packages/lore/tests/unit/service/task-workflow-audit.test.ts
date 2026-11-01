@@ -52,7 +52,7 @@ async function createTask(cs: CorpusService, planId: string, title = "Audit Work
     title,
     parent_id: planId,
     content: "body",
-    extra: { plan_id: planId },
+    extra: { plan_id: planId, kind: "code" },
   } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create task: ${JSON.stringify(result.error)}`);
   return result.value.id;
@@ -86,7 +86,7 @@ describe("HAPPY — claim appends exactly one audit entry with the expected shap
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     expect(claimResult.ok).toBe(true);
     if (!claimResult.ok) return;
     const newVersion = claimResult.value.version;
@@ -110,7 +110,7 @@ describe("HAPPY — release appends one audit entry with action 'release' and de
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     const releaseResult = await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(releaseResult.ok).toBe(true);
     if (!releaseResult.ok) return;
@@ -175,8 +175,8 @@ describe("BOUNDARY — claim with --steal records the previous holder in audit.d
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
-    const stolen = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob"), steal: true });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
+    const stolen = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob"), worktree: "wt-bob", steal: true });
     expect(stolen.ok).toBe(true);
 
     const auditResult = await store.queryAudit({ doc_id: taskId, action: "claim" });
@@ -197,13 +197,13 @@ describe("NEGATIVE — a rejected claim (CLAIM_CONFLICT) appends zero audit entr
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     const beforeResult = await store.queryAudit({ doc_id: taskId });
     expect(beforeResult.ok).toBe(true);
     if (!beforeResult.ok) return;
     const beforeCount = beforeResult.value.length;
 
-    const conflicting = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob") });
+    const conflicting = await taskWorkflowService.claim(taskId, { by: "bob", harnessRun: runOfName("bob"), worktree: "wt-bob" });
     expect(conflicting.ok).toBe(false);
     if (conflicting.ok) return;
     expect(conflicting.error.code).toBe("CLAIM_CONFLICT");
@@ -219,7 +219,7 @@ describe("NEGATIVE — a rejected claim (CLAIM_CONFLICT) appends zero audit entr
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     const beforeResult = await store.queryAudit({ doc_id: taskId });
     expect(beforeResult.ok).toBe(true);
     if (!beforeResult.ok) return;
@@ -290,7 +290,7 @@ describe("STATE — claim → evidence → release produces exactly 3 audit entr
     expect(afterCreate.value).toHaveLength(1);
     expect(afterCreate.value[0]?.action).toBe("create");
 
-    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice") });
+    await taskWorkflowService.claim(taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: "wt-alice" });
     await taskWorkflowService.addEvidence(taskId, evidence());
     await taskWorkflowService.release(taskId, { by: "alice", harnessRun: runOfName("alice") });
 

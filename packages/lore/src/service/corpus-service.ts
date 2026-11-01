@@ -405,12 +405,14 @@ function jsonDeepEqual(a: unknown, b: unknown): boolean {
 function findDedicatedExtraKeyViolation(
   existing: DocRecord,
   incomingExtra: Record<string, unknown>,
-): { key: string; writer: string } | null {
+): { key: string; writer: string; refusal?: string } | null {
   const guarded = DEDICATED_EXTRA_KEYS[existing.type];
   if (guarded === undefined) return null;
   for (const entry of guarded) {
     // reason: DC2-8 — a sub_type-scoped key (knowledge `uat`) guards only docs of that sub_type.
     if (entry.subType !== undefined && existing.extra["sub_type"] !== entry.subType) continue;
+    // reason: AC-DCS1-4 — a status-scoped key (a task's `kind`) is writable while the doc is in that status.
+    if (entry.unlessStatus !== undefined && existing.status === entry.unlessStatus) continue;
     // reason: a `within` entry guards one field of a nested object (`milestone_review.traced_decisions`), not the whole object.
     const fieldOf = (extra: Record<string, unknown>): unknown => {
       if (entry.within === undefined) return extra[entry.key];
@@ -418,7 +420,11 @@ function findDedicatedExtraKeyViolation(
       return typeof outer === "object" && outer !== null ? (outer as Record<string, unknown>)[entry.key] : undefined;
     };
     if (!jsonDeepEqual(fieldOf(existing.extra), fieldOf(incomingExtra))) {
-      return { key: entry.within === undefined ? entry.key : `${entry.within}.${entry.key}`, writer: entry.writer };
+      return {
+        key: entry.within === undefined ? entry.key : `${entry.within}.${entry.key}`,
+        writer: entry.writer,
+        ...(entry.refusal !== undefined ? { refusal: entry.refusal } : {}),
+      };
     }
   }
   return null;
@@ -3676,6 +3682,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
           code: "VALIDATION_ERROR",
           field: `extra.${violation.key}`,
           message:
+            (violation.refusal !== undefined ? `${violation.refusal}: ` : "") +
             `extra.${violation.key} on a ${existing.type} doc is owned by \`${violation.writer}\` — ` +
             `\`lore set\` replaces \`extra\` wholesale and must not drop, replace or reorder it. ` +
             `Use \`${violation.writer}\` instead, or pass the current value byte-equal.`,

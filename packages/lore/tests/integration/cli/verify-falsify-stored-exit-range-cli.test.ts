@@ -150,7 +150,7 @@ describe("spec-evidence-labels-and-reds-are-honest#AC-EH-5 (f) — lore verify -
     );
     const taskSlug = extractSlug(
       mustRun(
-        ["create", "task", "--title", "Stored Range Task", "--parent", planSlug, "--plan-id", planSlug, "--ac-scope", acId, "--no-ai", "--content", "body"],
+        ["create", "task", "--kind", "code", "--title", "Stored Range Task", "--parent", planSlug, "--plan-id", planSlug, "--ac-scope", acId, "--no-ai", "--content", "body"],
         tmpDir,
       ),
     );

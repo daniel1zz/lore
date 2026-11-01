@@ -172,6 +172,8 @@ function createTask(dir: string, planSlug: string, title: string, acScope: reado
     "task",
     "--title",
     title,
+    "--kind",
+    "code",
     "--parent",
     planSlug,
     "--plan-id",

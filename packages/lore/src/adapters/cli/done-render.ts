@@ -43,14 +43,12 @@ export function formatDoneMessage(result: DoneResult): string {
   const archived = `${slug} archived (v${result.task.version}): ${path}`;
   // issue #106: one `worktree: ...` line per claim-recorded worktree (removed / kept <reason> / not-measured).
   const worktreeLines = (result.worktree_outcomes ?? []).map(formatWorktreeOutcomeLine);
-  // task-done-floor-accepts-an-anchored-test-file-the-task-deleted: a test file accepted WITHOUT a run says so.
-  const removedLines = (result.removed_test_anchors ?? []).map((path) => `test file ${path}: removed by this task (no run needed)`);
-  // a declared ac_scope id satisfied by supersession (D15) says so, naming the superseding criterion.
-  const supersededLines = (result.superseded_scope ?? []).map(
-    (entry) =>
-      `ac_scope ${entry.ac_id}: satisfied by supersession (superseded by ${entry.superseded_by.spec}:${entry.superseded_by.ac}: ${entry.superseded_by.reason})`,
+  // AC-DCS1-30: a test-file oracle the landing deleted leaves the evaluation set; the line names the file, the reason and the landed commit.
+  const removedLines = (result.removed_oracles ?? []).map(
+    (entry) => `oracle ${entry.id}: removed from the evaluation (${entry.path} ${entry.reason}; landed ${entry.landed_commit.slice(0, 12)})`,
   );
-  return [archived, ...supersededLines, ...removedLines, ...worktreeLines].join("\n");
+  const releaseLines = result.claim_release_failure !== undefined ? [`claim not released: ${result.claim_release_failure}`] : [];
+  return [archived, ...removedLines, ...releaseLines, ...worktreeLines].join("\n");
 }
 
 /**

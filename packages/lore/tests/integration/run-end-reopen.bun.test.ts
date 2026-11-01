@@ -104,7 +104,8 @@ describe("registering an ended run reopens it (spec-run-only-write-identity-and-
     expect(endRun(corpus.dir, run).exitCode).toBe(0);
     commitAll(wt);
 
-    expect(claimAs(corpus.dir, task, rival).exitCode).toBe(0);
+    const taken = claimAs(corpus.dir, task, rival);
+    expect(taken.exitCode, taken.stderr + taken.stdout).toBe(0);
 
     expect(getClaim(corpus.dir, task)?.harness_run).toBe(rival);
   });

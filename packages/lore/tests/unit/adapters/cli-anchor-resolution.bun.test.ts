@@ -126,6 +126,8 @@ async function createTask(cwd: string, title: string, planSlug: string, anchors:
       title,
       "--plan-id",
       planSlug,
+      "--kind",
+      "code",
       "--content",
       "body",
       "--no-ai",

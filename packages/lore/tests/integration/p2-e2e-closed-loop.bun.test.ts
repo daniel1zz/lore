@@ -135,6 +135,8 @@ async function createFullChain(dir: string): Promise<{
     [
       "create",
       "task",
+      "--kind",
+      "code",
       "--title",
       "P2 E2E Task",
       "--parent",

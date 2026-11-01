@@ -125,7 +125,7 @@ beforeAll(async () => {
   await mustRun(["create", "plan", "--title", "EI Plan", "--parent", SPEC, "--no-ai", "--content", "body"], dir);
   await mustRun(
     [
-      "create", "task", "--title", "EI Task", "--parent", PLAN, "--plan-id", PLAN, "--no-ai", "--content", "body",
+      "create", "task", "--kind", "code", "--title", "EI Task", "--parent", PLAN, "--plan-id", PLAN, "--no-ai", "--content", "body",
       "--ac-scope", "AC-EI-A", "--ac-scope", "AC-EI-B", "--ac-scope", "AC-EI-C", "--ac-scope", "AC-EI-D", "--ac-scope", "AC-EI-E",
     ],
     dir,

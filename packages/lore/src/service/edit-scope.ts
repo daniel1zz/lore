@@ -25,7 +25,7 @@
 import { posix, relative, resolve, sep } from "node:path";
 import {
   anchorsOverlap,
-  extractFileAnchors,
+  effectiveWriteSet,
   extractHeldClaim,
   normalizeFileAnchors,
   ok,
@@ -42,7 +42,10 @@ import type { buildAnchorGateContext } from "./checkpoint-registry.js";
 /** One open claim of a working copy, as `lore anchor scope --json` prints it. */
 export interface EditScopeClaim {
   readonly task: string;
+  /** What the hook treats as covered: the claim's write set (kept under this name for the hook's reader). */
   readonly anchors: readonly string[];
+  /** The claim's write set: the files it declared (at claim and at edit time), else the task's approved anchors. */
+  readonly write_set: readonly string[];
   /** The holding run (`harness_run`); `null` = the claim carries no attested run. */
   readonly holder_run: string | null;
 }
@@ -86,6 +89,8 @@ export interface EditScopeDeps {
     nowIso: string,
   ): Promise<Result<ReturnType<typeof buildAnchorGateContext>, LoreError>>;
   addAnchors(slug: string, anchors: string[], opts: { by: string; source?: string }): Promise<Result<DocRecord, LoreError>>;
+  /** Appends paths to the held claim's write set (`TaskWorkflowService.addToWriteSet`): the edit-time declare, never an anchor write. */
+  addToWriteSet(slug: string, paths: readonly string[], opts: { by: string; source?: string }): Promise<Result<DocRecord, LoreError>>;
   ignoreProbe: IgnoreProbeFn;
   /**
    * The repo-relative files a claim's working copy has really touched (uncommitted changes plus commits since the
@@ -211,7 +216,10 @@ export async function readEditScope(
       const live = await deps.claimIsLive(task.value, now, endedRuns);
       if (!live.ok) return live;
       if (!live.value) continue;
-      claims.push({ task: row.slug, anchors: row.file_anchors, holder_run: row.holder_run, working_copy: row.working_copy ?? null });
+      // reason: AC-DCS1-12 — a claim's scope is its WRITE SET (declared files, else the approved anchors), read from the task
+      // document already in hand, so a declared path is covered and a sibling's declarations are held.
+      const writeSet = effectiveWriteSet(task.value);
+      claims.push({ task: row.slug, anchors: writeSet, write_set: writeSet, holder_run: row.holder_run, working_copy: row.working_copy ?? null });
     }
     return ok({ working_copy: null, claims, not_measured: [] });
   }
@@ -223,7 +231,8 @@ export async function readEditScope(
     const doc = await deps.getTask(claimed.slug);
     if (!doc.ok) return doc;
     const held = extractHeldClaim(doc.value);
-    claims.push({ task: claimed.slug, anchors: [...extractFileAnchors(doc.value)], holder_run: held?.harness_run ?? null });
+    const writeSet = effectiveWriteSet(doc.value);
+    claims.push({ task: claimed.slug, anchors: writeSet, write_set: writeSet, holder_run: held?.harness_run ?? null });
   }
   return ok({ working_copy: workingCopy, claims, not_measured: open.value.not_measured });
 }
@@ -390,7 +399,10 @@ export async function declareEditPath(deps: EditScopeDeps, input: DeclareEditPat
     });
   }
 
-  const written = await deps.addAnchors(input.task, [rel], { by: input.by, ...(input.source !== undefined ? { source: input.source } : {}) });
+  const written = await deps.addToWriteSet(input.task, [rel], {
+    by: input.by,
+    ...(input.source !== undefined ? { source: input.source } : {}),
+  });
   if (!written.ok) return written;
   return ok({ kind: "declared", task: input.task, path: rel, version: written.value.version });
 }

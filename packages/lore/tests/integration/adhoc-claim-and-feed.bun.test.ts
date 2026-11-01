@@ -162,7 +162,7 @@ async function createAdhocTask(
       type: "task",
       title,
       content: `# ${title}`,
-      extra: { adhoc: true, ...(anchors !== undefined ? { file_anchors: anchors } : {}) },
+      extra: { kind: "code", adhoc: true,...(anchors !== undefined ? { file_anchors: anchors } : {}) },
     } as CreateDocInput);
     if (!taskResult.ok) throw new Error(`adhoc task create failed: ${JSON.stringify(taskResult.error)}`);
     return { taskId: taskResult.value.id, taskSlug: taskResult.value.slug };
@@ -186,7 +186,7 @@ async function createPlanParentedTask(): Promise<{ taskId: string; taskSlug: str
       title: "Adhoc Fix Regression Task",
       parent_id: planResult.value.id,
       content: "# Task",
-      extra: { plan_id: planResult.value.id },
+      extra: { kind: "code", plan_id: planResult.value.id },
     } as CreateDocInput);
     if (!taskResult.ok) throw new Error(`task create failed: ${JSON.stringify(taskResult.error)}`);
     return { taskId: taskResult.value.id, taskSlug: taskResult.value.slug };

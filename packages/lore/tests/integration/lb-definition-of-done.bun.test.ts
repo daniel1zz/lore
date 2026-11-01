@@ -16,13 +16,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { extractFileAnchors, isTestFileAnchor, type DocRecord } from "@lore/core";
+import { makeCleanTreeRepo } from "../helpers/clean-tree-repo";
 import { patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import {
   definitionOfDone,
   findMissingUnfilteredTestFileRuns,
-  readRedFirstDeclared,
-  requiresNoNewTestsDeclaration,
 } from "../../src/service/task-workflow-service.js";
 
 const TEST_TIMEOUT_MS = 120_000;
@@ -60,20 +59,36 @@ interface DodJson {
   readonly verify_acs: string[];
 }
 
-async function claimJson(task: string): Promise<{ dod: DodJson; stdout: string }> {
-  const stdout = await must(["claim", task, "--worktree", `lb-dod-${task}`, "--json"]);
-  const parsed = JSON.parse(stdout) as { ok: boolean; data: { definition_of_done?: DodJson } };
-  expect(parsed.data.definition_of_done, stdout).toBeDefined();
-  return { dod: parsed.data.definition_of_done as DodJson, stdout };
+interface StoredContract {
+  readonly kind: string;
+  readonly red_required: boolean;
+  readonly red_waiver_reason?: string;
+  readonly oracles: { id: string; command?: string }[];
 }
+
+/** `lore claim --json` of an APPROVED task: it prints the contract fixed at approve (AC-DCS1-1), not a recomputation. */
+async function claimJson(task: string): Promise<{ contract: StoredContract; stdout: string }> {
+  const stdout = await must(["claim", task, "--worktree", `lb-dod-${task}`, "--json"]);
+  const parsed = JSON.parse(stdout) as { ok: boolean; data: { done_contract?: StoredContract; definition_of_done?: DodJson } };
+  expect(parsed.data.done_contract, stdout).toBeDefined();
+  // the recomputed definition is only the fallback of a task approved before contracts existed
+  expect(parsed.data.definition_of_done).toBeUndefined();
+  return { contract: parsed.data.done_contract as StoredContract, stdout };
+}
+
+const testFilesOf = (contract: StoredContract): string[] => contract.oracles.filter((o) => o.id.startsWith("test:")).map((o) => o.id.slice("test:".length));
+const acIdsOf = (contract: StoredContract): string[] => contract.oracles.filter((o) => o.id.startsWith("ac:")).map((o) => o.id.slice("ac:".length));
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-lb-dod-"));
+  // reason: approve compiles the contract at a commit of the repository, so the corpus lives in one
+  makeCleanTreeRepo(dir);
   await must(["init"]);
   patchLoreConfig(
     dir,
     [
-      "workflow:", "  gates:",
+      "workflow:", "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"',
+      "  gates:",
       "    spec-create:", "      enabled: false",
       "    spec-promote:", "      enabled: false",
       "    plan-promote:", "      enabled: false",
@@ -88,13 +103,13 @@ beforeAll(async () => {
   plan = slugOf(await must(["create", "plan", "--title", "DoD plan", "--parent", spec, "--no-ai", "--content", "body"]));
   taskT = slugOf(
     await must([
-      "create", "task", "--title", "T", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body",
+      "create", "task", "--kind", "code", "--title", "T", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body",
       "--anchor", "tests/a.test.ts", "--anchor", "tests/b.test.ts", "--anchor", "src/c.ts", "--anchor", "src/d.ts#Foo",
       "--ac-scope", "AC-X-1", "--ac-scope", "AC-X-2",
     ]),
   );
   taskU = slugOf(
-    await must(["create", "task", "--title", "U", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body", "--anchor", "src/d.ts"]),
+    await must(["create", "task", "--kind", "code", "--title", "U", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body", "--anchor", "src/d.ts"]),
   );
 }, TEST_TIMEOUT_MS);
 
@@ -104,63 +119,65 @@ afterAll(() => {
 
 describe("AC-LB-5 claim prints the definition of done", () => {
   it(
-    "names exactly the anchored test files, red_required true and the script-mode ACs; src/c.ts and the human AC are absent",
+    "approved without a waiver, the claim prints the stored contract: exactly the anchored test files, the script-mode ACs and typecheck, red_required true; src/c.ts and the human AC are absent",
     async () => {
-      const { dod } = await claimJson(taskT);
-      expect(dod.unfiltered_pass_files).toEqual(["tests/a.test.ts", "tests/b.test.ts"]);
-      expect(dod.unfiltered_pass_files).not.toContain("src/c.ts");
+      await must(["approve", taskT]);
+      const { contract } = await claimJson(taskT);
+      expect(testFilesOf(contract)).toEqual(["tests/a.test.ts", "tests/b.test.ts"]);
+      expect(testFilesOf(contract)).not.toContain("src/c.ts");
       // a symbol-scoped task anchor (path#Symbol) is accepted, stored as written, and is not a test file
-      expect(dod.unfiltered_pass_files).not.toContain("src/d.ts#Foo");
-      expect(dod.unfiltered_pass_files.some((f) => f.includes("#"))).toBe(false);
+      expect(contract.oracles.some((o) => o.id.includes("#") || o.id.includes("src/d.ts"))).toBe(false);
       const got = await must(["get", taskT, "--json"]);
       expect(got).toContain("src/d.ts#Foo");
-      expect(dod.red_required).toBe(true);
-      expect(dod.verify_acs).toEqual(["AC-X-1"]);
+      expect(contract.red_required).toBe(true);
+      expect(contract.red_waiver_reason).toBeUndefined();
+      expect(acIdsOf(contract)).toEqual(["AC-X-1"]); // the human AC-X-2 gives no oracle
+      expect(contract.oracles.map((o) => o.id)).toContain("typecheck");
     },
     TEST_TIMEOUT_MS,
   );
 
   it(
-    "prints empty lists and red_required false for a task with no ac_scope and no test anchors",
+    "approved with a red waiver, a task with no ac_scope and no test anchors prints red_required false and typecheck as its only oracle",
     async () => {
-      const { dod } = await claimJson(taskU);
-      expect(dod).toEqual({ unfiltered_pass_files: [], red_required: false, verify_acs: [] });
+      await must(["approve", taskU, "--red-waiver", "this fixture task needs no red run"]);
+      const { contract } = await claimJson(taskU);
+      expect(contract.oracles.map((o) => o.id)).toEqual(["typecheck"]);
+      expect(contract.red_required).toBe(false);
+      expect(contract.red_waiver_reason).toBe("this fixture task needs no red run");
     },
     TEST_TIMEOUT_MS,
   );
 
   it(
-    "the human claim output and `lore feed task-start` carry the same definition",
+    "the human claim output prints the same contract",
     async () => {
       const human = await must(["claim", taskT, "--worktree", `lb-dod-${taskT}`]);
-      expect(human).toContain("Definition of done");
-      expect(human).toContain("tests/a.test.ts");
-      expect(human).toContain("tests/b.test.ts");
-      expect(human).toContain("AC-X-1");
+      expect(human).toContain("Done contract");
+      expect(human).toContain("test:tests/a.test.ts");
+      expect(human).toContain("test:tests/b.test.ts");
+      expect(human).toContain("ac:AC-X-1");
+      expect(human).toContain("a runner-produced red run on record: yes");
       expect(human).not.toContain("src/c.ts");
-
-      const feed = JSON.parse(await must(["feed", "task-start", taskT, "--json"])) as {
-        data?: { definition_of_done?: DodJson };
-        definition_of_done?: DodJson;
-      };
-      const fed = feed.data?.definition_of_done ?? feed.definition_of_done;
-      expect(fed).toEqual({ unfiltered_pass_files: ["tests/a.test.ts", "tests/b.test.ts"], red_required: true, verify_acs: ["AC-X-1"] });
     },
     TEST_TIMEOUT_MS,
   );
 
   it(
-    "the same lists come from the lore done floor predicates, fed the same task",
+    "the contract's lists are the ones the recomputed definition of done derives from the same task (the compile reads that function)",
     async () => {
       const criteria = (JSON.parse(await must(["ac", "list", spec, "--json"])) as { data: { criteria: never[] } }).data.criteria;
       for (const slug of [taskT, taskU]) {
         const doc = (JSON.parse(await must(["get", slug, "--json"])) as { data: { doc: DocRecord } }).data.doc;
         const dod = definitionOfDone(doc, criteria);
-        // floor 3 (unfiltered-test-file): with no evidence every anchored test file is still missing
+        const contract = doc.extra["done_contract"] as StoredContract;
+        expect(testFilesOf(contract)).toEqual(dod.unfiltered_pass_files);
+        expect(acIdsOf(contract)).toEqual(dod.verify_acs);
         expect(dod.unfiltered_pass_files).toEqual(findMissingUnfilteredTestFileRuns(doc, [], undefined));
         expect(dod.unfiltered_pass_files).toEqual([...new Set(extractFileAnchors(doc).filter(isTestFileAnchor))]);
-        // floors 2 and 4 (red-first / no-new-tests): red is owed iff either floor arms with no evidence
-        expect(dod.red_required).toBe(readRedFirstDeclared(doc) || requiresNoNewTestsDeclaration(doc, []));
+        // a code task's default is the red run; the waiver given at approve is the only thing that lowers the stored value
+        expect(dod.red_required).toBe(doc.extra["kind"] === "code");
+        expect(contract.red_required).toBe(slug === taskT);
       }
     },
     TEST_TIMEOUT_MS,

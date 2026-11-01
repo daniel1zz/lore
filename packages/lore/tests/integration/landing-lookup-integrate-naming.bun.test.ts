@@ -34,7 +34,9 @@ import { detectWorktreeBranch } from "../../src/adapters/real-git-port.js";
 import { createRealWorktreeProbe } from "../../src/service/worktree-cleanup.js";
 import { IntegrateService, type IntegrateGit } from "../../src/service/integrate-service.js";
 import { IntegrateLossLedger } from "../../src/service/integrate-loss-ledger.js";
+import { immediateIntegrateQueue } from "../helpers/immediate-integrate-queue";
 import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledger.js";
+import { findFirstParentCommitContaining } from "../../src/adapters/cli/assess-regression-git.js";
 import { actedStore } from "../live-invocation.js";
 import { installShippedGuard } from "./support/main-guard-repo.js";
 import { runOfName } from "../helpers/test-run-identity.js";
@@ -128,22 +130,29 @@ async function fixture(recordsBranch: boolean): Promise<Fixture> {
   const plan = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Landing name plan", content: "body" } as CreateDocInput);
   if (!plan.ok) throw new Error("plan");
   const task = await cs.create({
-    type: "task", title: "Landing name task", parent_id: plan.value.id, content: "body", extra: { plan_id: plan.value.id },
+    type: "task", title: "Landing name task", parent_id: plan.value.id, content: "body",
+    extra: {
+      kind: "code",
+      plan_id: plan.value.id,
+      // the contract `lore approve` compiles, stored straight into this in-memory corpus (no git config here to compile from): a code
+      // task with no oracle of its own, red run waived, so `lore done` asks only for a landing and one counted pass
+      done_contract: {
+        compiled_at_commit: run(repo, "rev-list", "--max-parents=0", "main"),
+        kind: "code",
+        base_branch: "main",
+        oracles: [],
+        red_required: false,
+        red_waiver_reason: "the red run is not the subject of this test",
+        landing_route: "main",
+        new_symbols: [],
+        added_oracles: [],
+      },
+    },
   } as CreateDocInput);
   if (!task.ok) throw new Error("task");
   const claim = await svc.claim(task.value.id, { by: "alice", harnessRun: runOfName("alice"), worktree: realWorktree });
   if (!claim.ok) throw new Error(`claim ${JSON.stringify(claim.error)}`);
   claiming = false;
-  // reason: the landing predicate counts a pass recorded AFTER the latest claim and bound to a clean commit on main (head_sha).
-  const ev = await svc.recordVerifiedEvidence(
-    task.value.id,
-    {
-      oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_by: "runner", capture_source: "runner",
-      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, head_sha: run(repo, "rev-parse", "main"), worktree_dirty: false },
-    },
-    new Date(Date.now() + 1000).toISOString(),
-  );
-  if (!ev.ok) throw new Error(`evidence ${JSON.stringify(ev.error)}`);
   // reason: BR-1353 — a first claim starts from main, so the branch's own work is committed AFTER the claim.
   writeFileSync(join(realWorktree, "own-file.txt"), "own\n");
   run(realWorktree, "add", "own-file.txt");
@@ -160,10 +169,13 @@ function integrateService(f: Fixture, withRecorder: boolean): IntegrateService {
     runFloor: () => ({ status: 0, output: "" }),
     corpus: { take: () => ok({ takenAt: "t" }), remove: () => ok(undefined) },
     ledger: new IntegrateLossLedger(ledgerDir),
+    queue: immediateIntegrateQueue(),
     attempts: new IntegrateAttemptLedger(ledgerDir),
     projectRoot: f.repo,
     worktreesRoot: join(f.repo, ".claude", "worktrees"),
     log: () => undefined,
+    // D44: where an already-integrated branch entered main is measured from main's first-parent history
+    firstParentContaining: (commit, ref) => findFirstParentCommitContaining(f.repo, GIT_ENV, commit, ref),
     ...(withRecorder ? { landings: { record: (landing) => f.svc.recordLanding(landing) } } : {}),
   });
 }
@@ -176,6 +188,17 @@ async function landAndFinish(f: Fixture, withRecorder: boolean) {
   expect(run(f.repo, "log", "-1", "--format=%s", "main").startsWith(`merge(${BRANCH})`)).toBe(true);
   const afterLand = await f.store.find(f.taskId);
   const landing = afterLand.ok && afterLand.value !== null ? afterLand.value.extra["landing"] : "unreadable";
+  // the pass `lore done` counts under the done-contract model (AC-DCS1-27 (b)): it names the landing it was recorded for (what
+  // `lore integrate` stamps on the rows it records); the task's contract holds no oracle, so one counted pass is all it asks for
+  const ev = await f.svc.recordVerifiedEvidence(
+    f.taskId,
+    {
+      oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_by: "runner", capture_source: "runner",
+      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, recorded_at_landing: mergeSha },
+    },
+    new Date(Date.now() + 1000).toISOString(),
+  );
+  if (!ev.ok) throw new Error(`evidence ${JSON.stringify(ev.error)}`);
   const done = await f.svc.done(f.taskId, { by: "alice", harnessRun: runOfName("alice") });
   return { mergeSha, landing, done };
 }
@@ -192,16 +215,18 @@ describe("LAND-NAME: the landing lookup matches the branch name `lore integrate`
     expect(done.value.task.extra["commit_range"]).toMatchObject({ state: "recorded", head_source: "landing", landing_commit: mergeSha });
   }, 60_000);
 
-  it("LAND-NAME (b): no landing record, path-only claim -> done archives by reachability (kind commits); nothing is backfilled from merge(<branch>)", async () => {
+  // reason: the retired half archived by reachability alone (kind commits) when integrate recorded no landing. `lore done` now judges a
+  // code task's evidence against its landing record (AC-DCS1-27): with none there is no landed commit to bind a pass to, so it is
+  // refused (evidence-unmeasurable) and nothing is backfilled from merge(<branch>).
+  it("LAND-NAME (b): no landing record, path-only claim -> done is refused, no landing record is backfilled from merge(<branch>)", async () => {
     const f = await fixture(false);
     const { landing, done } = await landAndFinish(f, false);
     expect(landing).toBeUndefined(); // integrate recorded nothing (no recorder wired)
-    expect(done.ok).toBe(true);
-    if (!done.ok) return;
-    // the branch tip is on main (merge commit), so the one predicate lands it; the record is the measured one only
-    const stored = done.value.task.extra["landing"] as Record<string, unknown>;
-    expect(stored["kind"]).toBe("commits");
-    expect(stored["branch"]).toBeUndefined();
+    expect(done.ok).toBe(false);
+    expect(!done.ok && "message" in done.error ? done.error.message : "").toContain("no landing record");
+    const task = await f.store.find(f.taskId);
+    expect(task.ok && task.value !== null ? task.value.extra["landing"] : "unreadable").toBeUndefined();
+    expect(task.ok && task.value !== null ? task.value.status : "unreadable").not.toBe("archived");
   }, 60_000);
 
   it("LAND-NAME (c): control, the claim recorded its branch (auto-capture) -> same outcome", async () => {
@@ -215,9 +240,14 @@ describe("LAND-NAME: the landing lookup matches the branch name `lore integrate`
 
   it("NEGATIVE: landing a branch no claim's worktree is on records nothing", async () => {
     const f = await fixture(false);
-    run(f.repo, "branch", "other-branch", "main");
+    // a branch with a commit of its own (a branch sitting on main's root commit cannot be placed in main's history, D44)
+    run(f.repo, "checkout", "-q", "-b", "other-branch", "main");
+    writeFileSync(join(f.repo, "other.txt"), "other\n");
+    run(f.repo, "add", "other.txt");
+    run(f.repo, "commit", "-q", "-m", "feat: other");
+    run(f.repo, "checkout", "-q", "--detach", "main");
     const landed = await integrateService(f, true).integrate({ branch: "other-branch", sessionId: "s2", floorCommand: "true" });
-    expect(landed.ok).toBe(true);
+    expect(landed.ok, JSON.stringify(landed)).toBe(true);
     const task = await f.store.find(f.taskId);
     expect(task.ok && task.value !== null ? task.value.extra["landing"] : "unreadable").toBeUndefined();
   }, 60_000);

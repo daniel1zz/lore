@@ -208,6 +208,8 @@ function createTask(dir: string, planSlug: string, title: string, acScope: reado
   const args = [
     "create",
     "task",
+    "--kind",
+    "code",
     "--title",
     title,
     "--parent",

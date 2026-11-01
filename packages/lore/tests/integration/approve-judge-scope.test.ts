@@ -1,4 +1,5 @@
 // @reads packages/lore/src/service/review-service.ts
+// @spawns-external git the shared done-contract constants live in a helper that builds git repositories
 // @reads packages/lore/src/ai/review-template.ts
 // @reads assets/project/lore-config-template.yaml
 // @reads packages/core/src/config.ts
@@ -22,6 +23,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { makeCleanTreeRepo } from "../helpers/clean-tree-repo";
+import { FIXTURE_DONE_CONTRACT_CONFIG } from "../helpers/landed-code-task";
+import { patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 
 const TIMEOUT_MS = 120_000;
@@ -48,7 +52,11 @@ let prd: string;
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "approve-judge-scope-"));
+  // reason: approving a task compiles its done contract at a commit of the repository (AC-DCS1-1), which needs the three
+  // `workflow.done_contract` commands; the compile is not this file's subject, so the fixture only supplies what it needs.
+  makeCleanTreeRepo(dir);
   await must(["init"]);
+  patchLoreConfig(dir, { workflow: { done_contract: { ...FIXTURE_DONE_CONTRACT_CONFIG } } });
   prd = slugOf(await must(["create", "prd", "--title", "Judge scope product", "--no-ai", "--content", "# P\n\nA product.\n"]));
 }, TIMEOUT_MS);
 
@@ -76,7 +84,7 @@ describe("AC-LG-6: judge only spec and adr", () => {
     const planRun = await lore(["approve", plan]);
     expect(planRun.stderr + planRun.stdout).not.toContain("review-judgment");
     const task = slugOf(
-      await must(["create", "task", "--title", "Judge scope task", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"]),
+      await must(["create", "task", "--kind", "code", "--title", "Judge scope task", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"]),
     );
     const taskRun = await lore(["approve", task]);
     expect(taskRun.stderr + taskRun.stdout).not.toContain("review-judgment");

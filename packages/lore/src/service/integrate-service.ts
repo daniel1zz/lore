@@ -17,16 +17,19 @@
  *   anchors of the files the branch renamed (BR-1355), then `deps.completion.complete` runs the done walk for every task
  *   of the branch (BR-1356); each refusal is printed with its floor id and the command that satisfies it.
  * Public surface: IntegrateService.integrate, LandingRecorder, AnchorFollower, LandingCompleter, TaskCompletion, OwnDiffJudge, IntegrateOutcome, integrateExitCode, IntegrateRequest,
- *   IntegrateDeps, IntegrateGit, FloorRunner, CorpusSnapshotter, INTEGRATE_MAX_ATTEMPTS, INTEGRATE_EXIT_LOST_RACES, INTEGRATE_MARKER_ENV,
+ *   IntegrateDeps, IntegrateGit, FloorRunner, CorpusSnapshotter, INTEGRATE_EXIT_BUSY, INTEGRATE_MARKER_ENV,
  *   integrationWorktreePath, SchemaMigration, runSchemaMigration, describeSchemaMigration.
  * Invariants:
  *   - Main moves ONLY by the CAS of an attempt whose merge passed the floor; every other outcome leaves main
  *     untouched and the integration worktree reset to the main it saw (nothing half-done: a conflict aborts the merge
  *     and resets, a failing floor resets, a lost race resets).
- *   - At most INTEGRATE_MAX_ATTEMPTS (3) attempts per call; each lost CAS proves another integration landed, so the
- *     system progresses (lock-free). The third loss is outcome `lost_races` (exit 75), recorded in the loss ledger.
+ *   - Landings are serialized FIFO in the repository's merge queue (integrate-queue.ts, AC-DCS2-5): the call takes a ticket,
+ *     awaits its turn, then makes ONE attempt on the main that is now current, so the oracles run on the exact tree that becomes main
+ *     and nothing retries. The compare-and-swap stays only as an assertion: a main that is not where the merge started
+ *     (an update the hook should have refused) is outcome `main_moved` (exit 4, naming both commits, no retry). A wait past
+ *     `workflow.integrate.queue_wait_seconds` is outcome `queue_timeout` (exit 75).
  *   - Re-running after a crash past the CAS is a no-op: `merge-base --is-ancestor <tip> main` is checked at the start
- *     of every attempt (`already_integrated`), and clears the branch's stale loss entry.
+ *     of the attempt (`already_integrated`), and clears the branch's stale entry of the retired loss ledger (history only).
  *   - The floor command is project config with NO default: absent -> err(VALIDATION_ERROR) before anything is touched.
  *   - The CAS runs with `LORE_INTEGRATE=1` in its environment: the marker a reference-transaction hook (INT-T2)
  *     uses to tell this verb's update of main from any other.
@@ -37,6 +40,9 @@
  *   - One run at a time per integration worktree: after the worktree exists and before any merge or snapshot the run
  *     takes the worktree's lease (IntegrationLease: an OS lock tied to the process, so a killed run frees it with no
  *     cleanup). A second run of the same session gets outcome `busy` (exit 75) naming the holder's pid, branch and start.
+ *     The lease is taken BEFORE the queue ticket, so a second run in one worktree is refused at once instead of queueing behind itself.
+ *   - Everything that reads main or the remote (fetch, tip resolution, the own-diff judgment, the oracle selection) runs after the
+ *     turn begins, so it judges the main this landing will merge onto.
  * Side-effect class: IO (git subprocesses through the injected IntegrateGit, the floor through FloorRunner, the loss
  *   ledger's files, creation of one worktree directory, the lease).
  *
@@ -91,17 +97,17 @@ import { join } from "node:path";
 import { err, ok, prefixRunExport, type LoreError, type Result, type RunId } from "@lore/core";
 import { z } from "zod";
 import type { IntegrateLossLedger } from "./integrate-loss-ledger.js";
+import { IntegrateQueueTimeoutError, IntegrateQueueUnreadableError, type IntegrateQueuePort, type QueueHolder } from "./integrate-queue.js";
 import type { AttemptRecord, IntegrateAttemptLedger } from "./integrate-attempt-ledger.js";
 import type { BoundProseRow, OwnDiffRename, OwnDiffVerdict } from "./own-diff-judgment.js";
 import type { LandingFact, LandingRequest } from "./task-commit-range.js";
+import { decideStampOutcome, probeGitState } from "./git-state-stamp.js";
+import type { LandingOracles, LandingTask, OracleOutcome, OracleProof, OracleSettings } from "./integrate-oracle-service.js";
 import { EMBEDDED_ASSETS_MANIFEST } from "../generated/assets-manifest.js";
 import { GIT_UPGRADE_HINT, MIN_GIT_FOR_MAIN_REF_HOOK, parseGitVersion } from "../flows/setup-project-flow.js";
 
-/** Attempts (merge + floor + CAS) one call makes before it gives up with exit 75. */
-export const INTEGRATE_MAX_ATTEMPTS = 3;
-
-/** Exit code of `lost_races`: EX_TEMPFAIL — the call is safe to re-run. */
-export const INTEGRATE_EXIT_LOST_RACES = 75;
+/** Exit code of the "busy, try later" class (U9): a queue timeout and a second run in one integration worktree. EX_TEMPFAIL, no verdict on the work. */
+export const INTEGRATE_EXIT_BUSY = 75;
 
 /** The environment marker present on the CAS (and only on it); the main-ref hook of INT-T2 keys on it. */
 export const INTEGRATE_MARKER_ENV = "LORE_INTEGRATE";
@@ -276,10 +282,19 @@ export interface IntegrateDeps {
   readonly reviewBatch?: ReviewBatchStarter;
   /** The own-diff judgment run before the floor. Absent in a bare construction: the branch is not judged. */
   readonly ownDiff?: OwnDiffJudge;
+  /**
+   * Selects the landing tasks, runs the union of their contract oracles on the merged tree before main moves, and records the rows
+   * after (AC-DCS2-1 to AC-DCS2-4). Absent in a bare construction: no oracle runs and no row is recorded. When present, the request
+   * must carry {@link IntegrateRequest.oracleSettings}.
+   */
+  readonly oracles?: LandingOracles;
   /** Floor corpus: the floor reads a snapshot of the shared corpus inside the integration worktree, never the live one. */
   readonly corpus: CorpusSnapshotter;
   readonly runFloor: FloorRunner;
+  /** The retired loss ledger: read-only history; a landed branch's old entry is cleared, nothing new is written (AC-DCS2-5). */
   readonly ledger: IntegrateLossLedger;
+  /** The FIFO merge queue every landing takes its turn in (AC-DCS2-5). */
+  readonly queue: IntegrateQueuePort;
   /** Per-attempt phase durations, kept per branch and NOT cleared on landing (see integrate-attempt-ledger.ts). */
   readonly attempts: IntegrateAttemptLedger;
   /**
@@ -291,6 +306,12 @@ export interface IntegrateDeps {
   readonly clock?: () => number;
   /** The main checkout's root: the repo whose refs main lives in (git commands run here). */
   readonly projectRoot: string;
+  /**
+   * The oldest commit of `ref`'s first-parent history that contains `commit` (the merge that brought it in), `undefined` when none:
+   * the adapters' `findFirstParentCommitContaining`, injected. Used only for a branch found ALREADY in main (D44). Absent in a bare
+   * construction: landing such a branch is then refused, never guessed.
+   */
+  readonly firstParentContaining?: (commit: string, ref: string) => Result<string | undefined, LoreError>;
   /** Directory under which integration worktrees are created (`<main checkout>/.claude/worktrees`). */
   readonly worktreesRoot: string;
   /** Progress lines (attempts, lost races); the CLI wires stdout. */
@@ -317,6 +338,11 @@ export interface IntegrateRequest {
   readonly harnessRun?: string | undefined;
   /** Merge commit message; default `merge(<branch>): <tip subject>`. */
   readonly message?: string;
+  /**
+   * The integrate-time oracle settings of the CURRENT config (install command, per-oracle timeout, floor-covered ids) and who the rows
+   * are recorded for. Required whenever the service was built with `oracles`; absent then = refused before anything moves (never a default).
+   */
+  readonly oracleSettings?: OracleSettings;
 }
 
 /**
@@ -353,23 +379,18 @@ export type SharedViewRebuild =
   | { readonly state: "skipped"; readonly reason: string };
 
 export type IntegrateOutcome =
-  | { readonly kind: "landed"; readonly branch: string; readonly sha: string; readonly base: string; readonly attempts: number; readonly worktree: string; readonly shared_view: SharedViewRefresh; readonly rebuild: SharedViewRebuild; readonly schema: SchemaMigration }
+  | { readonly kind: "landed"; readonly branch: string; readonly sha: string; readonly base: string; readonly worktree: string; readonly shared_view: SharedViewRefresh; readonly rebuild: SharedViewRebuild; readonly schema: SchemaMigration }
   | { readonly kind: "already_integrated"; readonly branch: string; readonly main: string; readonly shared_view: SharedViewRefresh; readonly rebuild: SharedViewRebuild; readonly schema: SchemaMigration }
-  | { readonly kind: "snapshot_migrate_failed"; readonly branch: string; readonly attempts: number; readonly snapshot: string; readonly exit_status: number; readonly output_tail: string; readonly command: string }
-  | { readonly kind: "floor_failed"; readonly branch: string; readonly attempts: number; readonly exit_status: number; readonly output_tail: string }
+  | { readonly kind: "snapshot_migrate_failed"; readonly branch: string; readonly snapshot: string; readonly exit_status: number; readonly output_tail: string; readonly command: string }
+  | { readonly kind: "floor_failed"; readonly branch: string; readonly exit_status: number; readonly output_tail: string }
   | { readonly kind: "conflict"; readonly branch: string; readonly paths: readonly string[] }
   | { readonly kind: "busy"; readonly branch: string; readonly worktree: string; readonly holder: LeaseHolder | undefined }
-  | {
-      readonly kind: "lost_races";
-      readonly branch: string;
-      readonly attempts: number;
-      /** `<sha12> <subject>` of every integration that moved main during this call, in order. */
-      readonly moved_by: readonly string[];
-      /** The branch's consecutive losses across calls (what `lore status` lists). */
-      readonly consecutive_losses: number;
-    };
+  /** `integrate-queue-timeout` (U9, exit 75): the queue head did not finish within `workflow.integrate.queue_wait_seconds`. */
+  | { readonly kind: "queue_timeout"; readonly branch: string; readonly holder: QueueHolder | undefined; readonly waited_seconds: number; readonly limit_seconds: number }
+  /** `integrate-main-moved` (U8/U9, exit 4): main is not where the merge started; main moves only through integrate, so this is a bypassed guard. */
+  | { readonly kind: "main_moved"; readonly branch: string; readonly expected: string; readonly actual: string; readonly moved_by: readonly string[] };
 
-/** Process exit code of an outcome: 0 landed / already integrated, 1 floor failed, 4 conflict, 75 lost races. */
+/** Process exit code of an outcome: 0 landed / already integrated, 1 floor failed, 4 conflict or main moved, 75 busy or queue timeout. */
 export function integrateExitCode(outcome: IntegrateOutcome): number {
   switch (outcome.kind) {
     case "landed":
@@ -380,10 +401,11 @@ export function integrateExitCode(outcome: IntegrateOutcome): number {
     case "snapshot_migrate_failed":
       return 1;
     case "conflict":
+    case "main_moved":
       return 4;
-    case "lost_races":
+    case "queue_timeout":
     case "busy":
-      return INTEGRATE_EXIT_LOST_RACES;
+      return INTEGRATE_EXIT_BUSY;
     default: {
       const unreachable: never = outcome;
       return unreachable;
@@ -408,18 +430,21 @@ function short(sha: string): string {
 }
 
 /** The phase line printed (and recorded) per attempt: `-` marks a phase the attempt never reached. */
-export function renderAttemptPhases(record: AttemptRecord, max: number): string {
+export function renderAttemptPhases(record: AttemptRecord): string {
   const ms = (v: number | null): string => (v === null ? "-" : `${v}ms`);
   const floor =
     record.floor === null ? "-" : `${record.floor.total_ms}ms (${record.floor.steps.map((st) => `${st.step} ${st.ms}ms`).join(", ")})`;
   return (
-    `integrate: attempt ${record.attempt}/${max} phases: merge ${record.merge_ms}ms | corpus-snapshot ${ms(record.corpus_snapshot_ms)} | ` +
+    `integrate: attempt ${record.attempt} phases: merge ${record.merge_ms}ms | corpus-snapshot ${ms(record.corpus_snapshot_ms)} | ` +
     `floor ${floor} | cas ${ms(record.cas_ms)} | total ${record.total_ms}ms -> ${record.outcome}`
   );
 }
 
 export class IntegrateService {
   constructor(private readonly deps: IntegrateDeps) {}
+
+  /** The settings of the one call this instance serves (set by `integrate`, read by `recordOracleRows`); an instance is single-use per command. */
+  private oracleSettings: OracleSettings | undefined;
 
   /**
    * Lands `request.branch` on main, or reports exactly why it did not. While another run of the same session is live
@@ -444,6 +469,14 @@ export class IntegrateService {
         rule: "BR-1272",
       });
     }
+    if (this.deps.oracles !== undefined && request.oracleSettings === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "oracleSettings",
+        message: "lore integrate was built to run the landing's contract oracles but the request carries no oracle settings (install command, timeout, floor_covers): nothing was integrated",
+      });
+    }
+    this.oracleSettings = request.oracleSettings;
     const migrating = request.migrateCommand !== undefined && request.migrateCommand.trim() !== "";
     if (migrating && !isChildRunId(request.harnessRun)) {
       // reason: the migrate child is a write made by the caller's party; with no attested run to hand it, it would be refused
@@ -460,36 +493,90 @@ export class IntegrateService {
     // moves refs/remotes/*; the guard check only reads, so a refused run leaves every ref as it found it.
     const guarded = this.requireMainRefGuard();
     if (!guarded.ok) return guarded;
-    const fetched = this.fetchRemoteTracking(request.branch);
-    if (!fetched.ok) return fetched;
-    const tipResult = this.resolveCommit(request.branch);
-    if (!tipResult.ok) return tipResult;
-    const tip = tipResult.value;
+    // reason: read-only refusals stay ahead of every side effect (the worktree, the lease, the ticket): remotes that cannot be listed, and a
+    // local branch that does not exist. A remote-tracking argument is resolved only after the fetch, inside the turn.
+    const remote = this.remoteOf(request.branch);
+    if (!remote.ok) return remote;
+    if (remote.value === undefined) {
+      const known = this.resolveCommit(request.branch);
+      if (!known.ok) return known;
+    }
 
-    // reason: BR-1346/BR-1347/BR-1348 — judged once, before anything is touched (no worktree, no lease): a refusal leaves
-    // main and every working tree byte-unchanged. An already-integrated branch has no own change to judge.
-    const footprint = await this.judgeOwnDiff(request.branch, tip);
-    if (!footprint.ok) return footprint;
+    // reason: a worktree that already exists can be leased before the queue ticket, so a second run of one session is refused at
+    // once instead of queueing behind itself. A worktree that does not exist yet has no other holder and is created only AFTER the
+    // own-diff judgment (inside the turn), so a refused run never leaves a worktree behind (BR-1346..1348, AC-DJ-1..3).
+    const existing = this.findWorktree(request.sessionId);
+    if (!existing.ok) return existing;
+    const floorCommand = request.floorCommand;
+    if (existing.value === undefined) return await this.landInTurn(request, floorCommand, undefined);
+    return await this.withLease(request, existing.value, (wt) => this.landInTurn(request, floorCommand, wt));
+  }
 
-    const worktree = this.ensureWorktree(request.sessionId);
-    if (!worktree.ok) return worktree;
-    const wt = worktree.value;
-
-    // one run at a time per integration worktree: a second run would re-take the corpus snapshot under the first floor
-    const gitDir = git(wt, ["rev-parse", "--path-format=absolute", "--git-dir"]);
+  /**
+   * Holds the integration worktree's lease around `body`: outcome `busy` (exit 75) when another run holds it, the lease released
+   * however `body` ends. One run at a time per integration worktree: a second run would re-take the corpus snapshot under the first floor.
+   */
+  private async withLease(request: IntegrateRequest, wt: string, body: (wt: string) => Promise<Result<IntegrateOutcome, LoreError>>): Promise<Result<IntegrateOutcome, LoreError>> {
+    const clock = this.deps.clock ?? Date.now;
+    const gitDir = this.deps.git(wt, ["rev-parse", "--path-format=absolute", "--git-dir"]);
     if (gitDir.status !== 0) return err(gitFailure("locating the git dir of the integration worktree", gitDir));
     const granted = this.deps.lease.acquire(gitDir.stdout.trim(), { pid: this.deps.pid ?? process.pid, branch: request.branch, started_at: new Date(clock()).toISOString() });
     if (!granted.ok) return granted;
     if (granted.value.kind === "busy") return ok({ kind: "busy", branch: request.branch, worktree: wt, holder: granted.value.holder });
     try {
-      return await this.landOn(request, request.floorCommand, tip, wt, footprint.value);
+      return await body(wt);
     } finally {
       /** @lore-site BR-1312 */
       granted.value.release();
     }
   }
 
-  /** The attempt loop, run while this process holds the integration worktree's lease. */
+  /**
+   * Takes a ticket in the merge queue, waits for the turn, then lands. Everything that reads main or the remote runs inside the
+   * turn: the fetch, the tip, the own-diff judgment (BR-1346..1348: before any merge or snapshot, a refusal leaves main and every
+   * tree unchanged) and the one attempt.
+   */
+  private async landInTurn(request: IntegrateRequest, floorCommand: string, leasedWorktree: string | undefined): Promise<Result<IntegrateOutcome, LoreError>> {
+    const ticket = await this.queue.take({ session: request.sessionId, branch: request.branch }).catch((cause: unknown) => cause as Error);
+    if (ticket instanceof Error) return this.queueFailure(request.branch, ticket);
+    try {
+      try {
+        await this.queue.waitForTurn(ticket);
+      } catch (cause) {
+        return this.queueFailure(request.branch, cause);
+      }
+      const fetched = this.fetchRemoteTracking(request.branch);
+      if (!fetched.ok) return fetched;
+      const tipResult = this.resolveCommit(request.branch);
+      if (!tipResult.ok) return tipResult;
+      const tip = tipResult.value;
+      const footprint = await this.judgeOwnDiff(request.branch, tip);
+      if (!footprint.ok) return footprint;
+      const land = (wt: string) => this.landOn(request, floorCommand, tip, wt, footprint.value);
+      if (leasedWorktree !== undefined) return await land(leasedWorktree);
+      // reason: the first worktree of a session is created only now, after every refusal that can precede it.
+      const created = this.ensureWorktree(request.sessionId);
+      if (!created.ok) return created;
+      return await this.withLease(request, created.value, land);
+    } finally {
+      this.deps.queue.release(ticket);
+    }
+  }
+
+  /** The queue's two failures as values: a timeout is outcome `queue_timeout` (exit 75); an unreadable queue is a loud error. */
+  private queueFailure(branch: string, cause: unknown): Result<IntegrateOutcome, LoreError> {
+    if (cause instanceof IntegrateQueueTimeoutError) {
+      return ok({ kind: "queue_timeout", branch, holder: cause.holder, waited_seconds: cause.waitedSeconds, limit_seconds: cause.limitSeconds });
+    }
+    if (cause instanceof IntegrateQueueUnreadableError) return err({ code: "STORE_ERROR", message: cause.message });
+    throw cause;
+  }
+
+  private get queue(): IntegrateQueuePort {
+    return this.deps.queue;
+  }
+
+  /** The one attempt, run while this process holds the integration worktree's lease AND the head of the merge queue. */
   private async landOn(
     request: IntegrateRequest,
     floorCommand: string,
@@ -504,122 +591,182 @@ export class IntegrateService {
     if (!remoteOfBranch.ok) return remoteOfBranch;
     const fromRemote = remoteOfBranch.value !== undefined;
     const message = request.message ?? this.defaultMessage(request.branch, tip);
-    const movedBy: string[] = [];
-    let lastConsecutiveLosses = 0;
+    const oraclePort = this.deps.oracles;
+    const settings = this.oracleSettings;
+    // reason: the turn is ours (landInTurn awaited it), so main is where this landing will merge onto and nothing but a bypassed guard moves it.
+    const base = this.resolveCommit(TARGET_REF);
+    if (!base.ok) return base;
+    const alreadyInMain = git(projectRoot, ["merge-base", "--is-ancestor", tip, base.value]).status === 0;
+    // reason: D44 — a branch already in main is placed on main's history first: the commit that brought it in and its first parent are
+    // the landing's range, and "main before the landing" for the selection below is that first parent, never main's tip.
+    const placed = alreadyInMain ? this.placeLandingOnMain(tip) : undefined;
+    if (placed !== undefined && !placed.ok) return await this.placementRefusal(request.branch, tip, base.value, placed.error);
+    const mainBeforeLanding = placed === undefined ? base.value : placed.value.main_before;
+    // reason: ONE selection rule per landing (AC-DCS2-1), read before any attempt: it depends on refs and claims, not on the merge.
+    let selection: readonly LandingTask[] = [];
+    if (oraclePort !== undefined) {
+      const selected = await oraclePort.select(request.branch, tip, mainBeforeLanding);
+      if (!selected.ok) return selected;
+      selection = selected.value;
+      if (selection.length === 0) log(`integrate: the landing of ${request.branch} names no task whose oracles integrate runs`);
+    }
+    // reason: with the oracle port wired the landing is recorded on exactly the selected tasks (a task whose work tip the branch does not
+    // contain, a draft, a check and a corpus task are not landed by this branch).
+    const onlySelected = oraclePort === undefined ? {} : { only: selection.map((task) => task.slug) };
 
-    for (let attempt = 1; attempt <= INTEGRATE_MAX_ATTEMPTS; attempt += 1) {
-      const base = this.resolveCommit(TARGET_REF);
-      if (!base.ok) return base;
-      if (git(projectRoot, ["merge-base", "--is-ancestor", tip, base.value]).status === 0) {
-        // reason: BR-1336 — an already-integrated branch still records a landing on every claimant that holds none for
-        // this head (the recorder skips tasks that already carry one). Main did not move, so main_before == main_after
-        // and the branch head itself is the landed commit: it is an ancestor of main.
-        // reason: BR-1336 — nothing reconstructs a landing from main's history: the branch head is the landed commit and
-        // the recorder takes the range start from each task's own claim base (`base_from_claim`).
-        const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: base.value, landing_commit: tip, base_from_claim: true });
-        await this.completeLanding(claimants, [], { branch: request.branch, landing_commit: tip });
-        const cleared = ledger.clear(request.branch);
-        if (!cleared.ok) return cleared;
-        const view = this.refreshSharedView();
-        const rebuild = this.rebuildSharedView(view, request.postRefreshCommand);
-        return ok({ kind: "already_integrated", branch: request.branch, main: base.value, shared_view: view, rebuild, schema: this.migrateLiveCorpus(view, rebuild, request.migrateCommand, request.harnessRun) });
+    if (placed !== undefined && placed.ok) {
+      // reason: AC-DCS2-1 — a branch already in main has no merge to prove: the union runs once on main's tip T, the rows bind to T, and
+      // only the tasks whose rows were recorded in THIS run are walked to done (an older hand-recorded row never archives one).
+      let proven: OracleProof | undefined;
+      if (oraclePort !== undefined && settings !== undefined && selection.length > 0) {
+        const onTip = this.resetWorktree(wt, base.value);
+        if (!onTip.ok) return onTip;
+        const run = await oraclePort.prove({ branch: request.branch, tip, tasks: selection, worktree: wt, commit: base.value, base: base.value, floor: undefined, settings, runCommand: this.deps.runFloor, log, clock, nowIso: new Date(clock()).toISOString() });
+        if (!run.ok) return run;
+        proven = run.value;
+        // reason: D44 — the rows ran on T (head_sha) but belong to the landing that brought the branch in (recorded_at_landing).
+        await this.recordOracleRows(proven.tasks, base.value, proven.outcomes, placed.value.landing_commit);
       }
-      log(`integrate: ${request.branch} attempt ${attempt}/${INTEGRATE_MAX_ATTEMPTS} on ${short(base.value)}`);
-      const attemptStart = clock();
-      const startedAt = new Date(attemptStart).toISOString();
-      const finish = (phases: Pick<AttemptRecord, "outcome" | "merge_ms" | "corpus_snapshot_ms" | "floor" | "cas_ms">): void =>
-        this.recordAttempt(request.branch, { attempt, base: base.value, started_at: startedAt, total_ms: clock() - attemptStart, ...phases });
+      // reason: BR-1336 — an already-integrated branch still records a landing on every selected task that holds none for this head
+      // (the recorder skips tasks that already carry one). Main did not move by this call, so main_after is main's tip.
+      // reason: D44 (AC-DCS2-2, BR-1496, BR-1508) — the landing is the commit that really brought the branch into main (the earliest
+      // first-parent commit containing the tip) and its range starts at that commit's first parent, never main's tip: the milestone
+      // review attributes ranges and regressions by landing_commit. The oracle rows stay bound to T, the tip they ran on.
+      const landedAt = placed.value.landing_commit;
+      const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: placed.value.main_before, main_after: base.value, landing_commit: landedAt, ...onlySelected });
+      const provenSlugs = new Set((proven?.tasks ?? []).map((task) => task.slug));
+      const walked = oraclePort === undefined ? claimants : claimants.filter((slug) => provenSlugs.has(slug));
+      // reason: the shared checkout moves to main BEFORE the done walk, so the walk's `git branch -d` finds the branch merged into HEAD.
+      const view = this.refreshSharedView();
+      await this.completeLanding(walked, [], { branch: request.branch, landing_commit: landedAt });
+      const cleared = ledger.clear(request.branch);
+      if (!cleared.ok) return cleared;
+      const rebuild = this.rebuildSharedView(view, request.postRefreshCommand);
+      return ok({ kind: "already_integrated", branch: request.branch, main: base.value, shared_view: view, rebuild, schema: this.migrateLiveCorpus(view, rebuild, request.migrateCommand, request.harnessRun) });
+    }
+    log(`integrate: ${request.branch} on ${short(base.value)}`);
+    const attemptStart = clock();
+    const startedAt = new Date(attemptStart).toISOString();
+    const finish = (phases: Pick<AttemptRecord, "outcome" | "merge_ms" | "corpus_snapshot_ms" | "floor" | "cas_ms">): void =>
+      this.recordAttempt(request.branch, { attempt: 1, base: base.value, started_at: startedAt, total_ms: clock() - attemptStart, ...phases });
 
-      const reset = this.resetWorktree(wt, base.value);
-      if (!reset.ok) return reset;
-      // an upstream ref may fast-forward (the remote's commits land as they are); a local branch always gets its own merge commit
-      const mergeStart = clock();
-      const merged = git(wt, ["merge", fromRemote ? "--ff" : "--no-ff", "-m", message, tip], { GIT_MERGE_AUTOEDIT: "no" });
-      const mergeMs = clock() - mergeStart;
-      if (merged.status !== 0) {
-        const conflicted = this.afterFailedMerge(request.branch, wt, base.value, merged);
-        if (conflicted.ok) finish({ outcome: "conflict", merge_ms: mergeMs, corpus_snapshot_ms: null, floor: null, cas_ms: null });
-        return conflicted;
-      }
-
-      const snapshotStart = clock();
-      const snapshot = this.deps.corpus.take(wt);
-      const snapshotMs = clock() - snapshotStart;
-      if (!snapshot.ok) return snapshot;
-      log(`integrate: floor runs against a corpus snapshot taken ${snapshot.value.takenAt}`);
-      if (request.migrateCommand !== undefined && request.migrateCommand.trim() !== "") {
-        // reason: since 5f0259a1 opening an older corpus refuses; the branch binary must upgrade the SNAPSHOT explicitly (cwd = the
-        // integration worktree, whose own .lore/lore.db is the snapshot) before the floor opens it. Never run against the live corpus.
-        const snapshotDir = join(wt, ".lore");
-        const migrated = runSchemaMigration(this.deps.runFloor, request.migrateCommand, wt, snapshotDir, request.harnessRun);
-        if (migrated.state === "failed") {
-          const dropped = this.deps.corpus.remove(wt);
-          if (!dropped.ok) return dropped;
-          const back = this.resetWorktree(wt, base.value);
-          if (!back.ok) return back;
-          finish({ outcome: "snapshot_migrate_failed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: null, cas_ms: null });
-          return ok({ kind: "snapshot_migrate_failed", branch: request.branch, attempts: attempt, snapshot: snapshotDir, exit_status: migrated.exit_status, output_tail: migrated.output_tail, command: migrated.command });
-        }
-        log(`integrate: snapshot ${describeSchemaMigration(migrated)}`);
-      } else {
-        log("integrate: snapshot migrate skipped (workflow.integrate.migrate_command is not set)");
-      }
-      const floorStart = clock();
-      /** @lore-site BR-1275 */
-      const floor = this.deps.runFloor(floorCommand, wt);
-      const floorTotalMs = clock() - floorStart;
-      const floorTimings = {
-        total_ms: floorTotalMs,
-        steps: floor.steps !== undefined && floor.steps.length > 0 ? floor.steps.map((st) => ({ step: st.step, exit: st.exit, ms: st.ms })) : [{ step: FLOOR_UNTIMED_STEP, exit: floor.status, ms: floorTotalMs }],
-      };
-      // the snapshot is removed whatever the floor said: it is never written back and never outlives its run
-      const dropped = this.deps.corpus.remove(wt);
-      if (!dropped.ok) return dropped;
-      if (floor.status !== 0) {
-        const back = this.resetWorktree(wt, base.value);
-        if (!back.ok) return back;
-        finish({ outcome: "floor_failed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: null });
-        return ok({ kind: "floor_failed", branch: request.branch, attempts: attempt, exit_status: floor.status, output_tail: floor.output.slice(-FLOOR_TAIL_CHARS) });
-      }
-
-      const head = git(wt, ["rev-parse", "HEAD"]);
-      if (head.status !== 0) return err(gitFailure("rev-parse HEAD in the integration worktree", head));
-      const merge = head.stdout.trim();
-      const casStart = clock();
-      const swapped = git(projectRoot, ["update-ref", TARGET_REF, merge, base.value], { [INTEGRATE_MARKER_ENV]: "1" });
-      const casMs = clock() - casStart;
-      if (swapped.status === 0) {
-        finish({ outcome: "landed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: casMs });
-        const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: merge, landing_commit: merge, ...footprint });
-        await this.completeLanding(claimants, judged.renames, { branch: request.branch, landing_commit: merge });
-        const cleared = ledger.clear(request.branch);
-        if (!cleared.ok) return cleared;
-        const view = this.refreshSharedView();
-        const rebuild = this.rebuildSharedView(view, request.postRefreshCommand);
-        const schema = this.migrateLiveCorpus(view, rebuild, request.migrateCommand, request.harnessRun);
-        // reason: BR-1379 — last step, after the rebuild and the schema migration, so the detached batch runs main's binary
-        // against the migrated corpus. It only reads progress and spawns; the landing never waits for a review.
-        await this.startReviewBatch();
-        return ok({ kind: "landed", branch: request.branch, sha: merge, base: base.value, attempts: attempt, worktree: wt, shared_view: view, rebuild, schema });
-      }
-
-      const now = this.resolveCommit(TARGET_REF);
-      if (!now.ok) return now;
-      if (now.value === base.value) return err(gitFailure(`advancing ${TARGET_NAME} (main did not move, so this is not a lost race)`, swapped));
-      const moved = this.describeMoves(base.value, now.value);
-      movedBy.push(...moved);
-      finish({ outcome: "lost_race", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: casMs });
-      const recorded = ledger.recordLoss(request.branch, tip, moved);
-      if (!recorded.ok) return recorded;
-      lastConsecutiveLosses = recorded.value.losses;
-      log(`integrate: ${request.branch} lost race ${attempt}/${INTEGRATE_MAX_ATTEMPTS}: main moved by ${moved.join(", ")}`);
+    const reset = this.resetWorktree(wt, base.value);
+    if (!reset.ok) return reset;
+    // an upstream ref may fast-forward (the remote's commits land as they are); a local branch always gets its own merge commit
+    const mergeStart = clock();
+    const merged = git(wt, ["merge", fromRemote ? "--ff" : "--no-ff", "-m", message, tip], { GIT_MERGE_AUTOEDIT: "no" });
+    const mergeMs = clock() - mergeStart;
+    if (merged.status !== 0) {
+      const conflicted = this.afterFailedMerge(request.branch, wt, base.value, merged);
+      if (conflicted.ok) finish({ outcome: "conflict", merge_ms: mergeMs, corpus_snapshot_ms: null, floor: null, cas_ms: null });
+      return conflicted;
     }
 
-    const final = this.resolveCommit(TARGET_REF);
-    if (!final.ok) return final;
-    const back = this.resetWorktree(wt, final.value);
+    this.logPhase("merge", mergeMs);
+    // reason: AC-DCS2-3 — the floor's own state reading (before its corpus snapshot exists, after it is gone) stamps the rows of the
+    // oracle ids `floor_covers` names, so such a row certifies the same clean merged tree an oracle run of its own would.
+    const floorBefore = oraclePort !== undefined ? probeGitState(wt) : undefined;
+    const snapshotStart = clock();
+    const snapshot = this.deps.corpus.take(wt);
+    const snapshotMs = clock() - snapshotStart;
+    if (!snapshot.ok) return snapshot;
+    log(`integrate: floor runs against a corpus snapshot taken ${snapshot.value.takenAt}`);
+    if (request.migrateCommand !== undefined && request.migrateCommand.trim() !== "") {
+      // reason: since 5f0259a1 opening an older corpus refuses; the branch binary must upgrade the SNAPSHOT explicitly (cwd = the
+      // integration worktree, whose own .lore/lore.db is the snapshot) before the floor opens it. Never run against the live corpus.
+      const snapshotDir = join(wt, ".lore");
+      const migrated = runSchemaMigration(this.deps.runFloor, request.migrateCommand, wt, snapshotDir, request.harnessRun);
+      if (migrated.state === "failed") {
+        const dropped = this.deps.corpus.remove(wt);
+        if (!dropped.ok) return dropped;
+        const back = this.resetWorktree(wt, base.value);
+        if (!back.ok) return back;
+        finish({ outcome: "snapshot_migrate_failed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: null, cas_ms: null });
+        return ok({ kind: "snapshot_migrate_failed", branch: request.branch, snapshot: snapshotDir, exit_status: migrated.exit_status, output_tail: migrated.output_tail, command: migrated.command });
+      }
+      log(`integrate: snapshot ${describeSchemaMigration(migrated)}`);
+    } else {
+      log("integrate: snapshot migrate skipped (workflow.integrate.migrate_command is not set)");
+    }
+    const floorStart = clock();
+    /** @lore-site BR-1275 */
+    const floor = this.deps.runFloor(floorCommand, wt);
+    const floorTotalMs = clock() - floorStart;
+    const floorTimings = {
+      total_ms: floorTotalMs,
+      steps: floor.steps !== undefined && floor.steps.length > 0 ? floor.steps.map((st) => ({ step: st.step, exit: st.exit, ms: st.ms })) : [{ step: FLOOR_UNTIMED_STEP, exit: floor.status, ms: floorTotalMs }],
+    };
+    // the snapshot is removed whatever the floor said: it is never written back and never outlives its run
+    const dropped = this.deps.corpus.remove(wt);
+    if (!dropped.ok) return dropped;
+    this.logPhase("floor", floorTotalMs);
+    const floorAfter = oraclePort !== undefined ? probeGitState(wt) : undefined;
+    if (floor.status !== 0) {
+      const back = this.resetWorktree(wt, base.value);
+      if (!back.ok) return back;
+      finish({ outcome: "floor_failed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: null });
+      return ok({ kind: "floor_failed", branch: request.branch, exit_status: floor.status, output_tail: floor.output.slice(-FLOOR_TAIL_CHARS) });
+    }
+
+    const head = git(wt, ["rev-parse", "HEAD"]);
+    if (head.status !== 0) return err(gitFailure("rev-parse HEAD in the integration worktree", head));
+    const merge = head.stdout.trim();
+    // reason: AC-DCS2-2 — the oracles run on the exact tree that becomes main, after the floor and BEFORE main moves: a refusal here
+    // leaves main, the integration worktree (reset to the main it saw) and every task untouched.
+    let proof: OracleProof | undefined;
+    if (oraclePort !== undefined && settings !== undefined && selection.length > 0) {
+      const run = await oraclePort.prove({
+        branch: request.branch,
+        tip,
+        tasks: selection,
+        worktree: wt,
+        commit: merge,
+        base: base.value,
+        floor: { durationMs: floorTotalMs, stamp: decideStampOutcome(floorBefore, floorAfter) },
+        settings,
+        runCommand: this.deps.runFloor,
+        log,
+        clock,
+        nowIso: new Date(clock()).toISOString(),
+      });
+      if (!run.ok) {
+        const back = this.resetWorktree(wt, base.value);
+        if (!back.ok) return back;
+        finish({ outcome: "oracle_failed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: null });
+        return run;
+      }
+      proof = run.value;
+    }
+    const tasks: readonly LandingTask[] = proof === undefined ? [] : proof.tasks;
+    const outcomes: readonly OracleOutcome[] = proof === undefined ? [] : proof.outcomes;
+    // reason: the compare-and-swap is an ASSERTION now (U8/U9): serialization means nothing but a bypassed guard can have moved main.
+    const casStart = clock();
+    const swapped = git(projectRoot, ["update-ref", TARGET_REF, merge, base.value], { [INTEGRATE_MARKER_ENV]: "1" });
+    const casMs = clock() - casStart;
+    if (swapped.status === 0) {
+      finish({ outcome: "landed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: casMs });
+      await this.recordOracleRows(tasks, merge, outcomes);
+      const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: merge, landing_commit: merge, ...footprint, ...onlySelected });
+      // reason: the shared checkout moves to main BEFORE the done walk, so the walk's `git branch -d` finds the branch merged into HEAD.
+      const view = this.refreshSharedView();
+      await this.completeLanding(claimants, judged.renames, { branch: request.branch, landing_commit: merge });
+      const cleared = ledger.clear(request.branch);
+      if (!cleared.ok) return cleared;
+      const rebuild = this.rebuildSharedView(view, request.postRefreshCommand);
+      const schema = this.migrateLiveCorpus(view, rebuild, request.migrateCommand, request.harnessRun);
+      // reason: BR-1379 — last step, after the rebuild and the schema migration, so the detached batch runs main's binary
+      // against the migrated corpus. It only reads progress and spawns; the landing never waits for a review.
+      await this.startReviewBatch();
+      return ok({ kind: "landed", branch: request.branch, sha: merge, base: base.value, worktree: wt, shared_view: view, rebuild, schema });
+    }
+
+    const now = this.resolveCommit(TARGET_REF);
+    if (!now.ok) return now;
+    if (now.value === base.value) return err(gitFailure(`advancing ${TARGET_NAME} (main did not move, so this is not a moved main)`, swapped));
+    finish({ outcome: "main_moved", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: casMs });
+    const back = this.resetWorktree(wt, now.value);
     if (!back.ok) return back;
-    return ok({ kind: "lost_races", branch: request.branch, attempts: INTEGRATE_MAX_ATTEMPTS, moved_by: movedBy, consecutive_losses: lastConsecutiveLosses });
+    return ok({ kind: "main_moved", branch: request.branch, expected: base.value, actual: now.value, moved_by: this.describeMoves(base.value, now.value) });
   }
 
   /**
@@ -641,6 +788,26 @@ export class IntegrateService {
     if (!verdict.ok) return verdict;
     for (const line of renderBoundProseLines(verdict.value.bound_prose)) this.deps.log(line);
     return ok({ footprint: { outside_anchors: [...verdict.value.outside_anchors] }, renames: verdict.value.renames });
+  }
+
+  /** Prints one phase duration: `phase <name> <seconds>s` (AC-DCS2-3). */
+  private logPhase(name: string, ms: number): void {
+    this.deps.log(`phase ${name} ${(ms / 1000).toFixed(3)}s`);
+  }
+
+  /**
+   * Records the rows of the proven oracles on `tasks`, bound to `commit` (the commit that became main, or main's tip for an
+   * already-integrated branch), through the oracle port. Never fails the integration (main has already moved): a task whose rows could
+   * not be written is a WARNING line from the port, so the missing evidence is visible and `lore done` refuses it by its floor.
+   */
+  private async recordOracleRows(tasks: readonly LandingTask[], commit: string, outcomes: readonly OracleOutcome[], landingCommit: string = commit): Promise<void> {
+    const port = this.deps.oracles;
+    const settings = this.oracleSettings;
+    if (port === undefined || settings === undefined || outcomes.length === 0) return;
+    const clock = this.deps.clock ?? Date.now;
+    const started = clock();
+    await port.record({ tasks, commit, landingCommit, outcomes, by: settings.by, nowIso: new Date(started).toISOString(), log: this.deps.log });
+    this.logPhase("recording", clock() - started);
   }
 
   /**
@@ -681,7 +848,10 @@ export class IntegrateService {
       }
     }
     if (completion === undefined || tasks.length === 0) return;
-    for (const done of await completion.complete(tasks)) {
+    const walkStart = (this.deps.clock ?? Date.now)();
+    const completions = await completion.complete(tasks);
+    this.logPhase("done-walk", (this.deps.clock ?? Date.now)() - walkStart);
+    for (const done of completions) {
       if (done.outcome === "archived") {
         log(`integrate: ${done.task} archived by the landing (every done floor is met)`);
         continue;
@@ -710,7 +880,7 @@ export class IntegrateService {
    * moved): a record that cannot be written is logged loudly, not swallowed.
    */
   private recordAttempt(branch: string, record: AttemptRecord): void {
-    this.deps.log(renderAttemptPhases(record, INTEGRATE_MAX_ATTEMPTS));
+    this.deps.log(renderAttemptPhases(record));
     const written = this.deps.attempts.recordAttempt(branch, record);
     if (!written.ok) this.deps.log(`integrate: WARNING: attempt ${record.attempt} phase durations were not recorded: ${written.error.code}${"message" in written.error ? ` ${written.error.message}` : ""}`);
   }
@@ -853,6 +1023,42 @@ export class IntegrateService {
     return undefined;
   }
 
+  /**
+   * Where a branch already in main landed (D44): the earliest commit of main's first-parent history that contains `tip` (the tip itself
+   * when it lies on that history, a fast-forward) and that commit's first parent. A tip that cannot be placed is an error, never a guess.
+   */
+  private placeLandingOnMain(tip: string): Result<{ readonly landing_commit: string; readonly main_before: string }, LoreError> {
+    const { git, projectRoot, firstParentContaining } = this.deps;
+    const chain = git(projectRoot, ["rev-list", "--first-parent", TARGET_REF]);
+    if (chain.status !== 0) return err(gitFailure(`reading the first-parent history of ${TARGET_NAME}`, chain));
+    let landingCommit: string | undefined;
+    if (chain.stdout.split("\n").includes(tip)) landingCommit = tip;
+    else {
+      if (firstParentContaining === undefined) return err({ code: "STORE_ERROR", message: `integrate: no first-parent placement is wired, so where ${short(tip)} entered ${TARGET_NAME} cannot be measured` });
+      const found = firstParentContaining(tip, TARGET_REF);
+      if (!found.ok) return found;
+      landingCommit = found.value;
+    }
+    if (landingCommit === undefined) return err({ code: "STORE_ERROR", message: `integrate: no first-parent commit of ${TARGET_NAME} contains ${short(tip)}` });
+    const parent = git(projectRoot, ["rev-parse", "--verify", "-q", `${landingCommit}^1`]);
+    if (parent.status !== 0 || parent.stdout.trim() === "") {
+      return err({ code: "STORE_ERROR", message: `integrate: the landing commit ${short(landingCommit)} of ${short(tip)} has no first parent, so its range start cannot be measured` });
+    }
+    return ok({ landing_commit: landingCommit, main_before: parent.stdout.trim() });
+  }
+
+  /** A placement failure, naming every task the landing would have judged (those claimed on the branch) so nothing is skipped silently. */
+  private async placementRefusal(branch: string, tip: string, main: string, cause: LoreError): Promise<Result<never, LoreError>> {
+    const named: string[] = [];
+    if (this.deps.oracles !== undefined) {
+      const claimed = await this.deps.oracles.select(branch, tip, main);
+      if (claimed.ok) named.push(...claimed.value.map((task) => task.slug));
+    }
+    const reason = "message" in cause && typeof cause.message === "string" ? cause.message : cause.code;
+    const tasks = named.length === 0 ? "" : `; tasks whose landing range has no measurable start: ${named.join(", ")}`;
+    return err({ code: "STORE_ERROR", message: `${reason}${tasks}` });
+  }
+
   /** `rev` as a full commit sha, or a refusal naming the rev. */
   private resolveCommit(rev: string): Result<string, LoreError> {
     /** @lore-site BR-1272 */
@@ -868,21 +1074,30 @@ export class IntegrateService {
     return subject === "" ? `merge(${branch})` : `merge(${branch}): ${subject}`;
   }
 
+  /** Query: the session's integration worktree when it exists on disk (`undefined` when not yet created); never creates anything. */
+  private findWorktree(sessionId: string): Result<string | undefined, LoreError> {
+    const { git, projectRoot, worktreesRoot } = this.deps;
+    const path = integrationWorktreePath(worktreesRoot, sessionId);
+    if (!existsSync(path)) return ok(undefined);
+    const registered = git(projectRoot, ["worktree", "list", "--porcelain"]);
+    if (registered.status !== 0) return err(gitFailure("git worktree list", registered));
+    const known = registered.stdout.split("\n").filter((l) => l.startsWith("worktree ")).map((l) => l.slice("worktree ".length));
+    const canonical = realpathSync(path);
+    if (known.some((k) => k === path || k === canonical)) return ok(path);
+    return err({ code: "STORE_ERROR", message: `integrate: ${path} exists but is not a worktree of this repository; remove it or use another session id`, rule: "BR-1278" });
+  }
+
   /** Creates the session's detached integration worktree on first use, reuses it afterwards. */
   private ensureWorktree(sessionId: string): Result<string, LoreError> {
     const { git, projectRoot, worktreesRoot } = this.deps;
     const path = integrationWorktreePath(worktreesRoot, sessionId);
+    const found = this.findWorktree(sessionId);
+    if (!found.ok) return found;
+    if (found.value !== undefined) return ok(found.value);
+    // registered-but-deleted (a cleaned-up directory): drop the stale registration before adding again
     const registered = git(projectRoot, ["worktree", "list", "--porcelain"]);
     if (registered.status !== 0) return err(gitFailure("git worktree list", registered));
-    const known = registered.stdout.split("\n").filter((l) => l.startsWith("worktree ")).map((l) => l.slice("worktree ".length));
-    const onDisk = existsSync(path);
-    const canonical = onDisk ? realpathSync(path) : path;
-    if (onDisk) {
-      if (known.some((k) => k === path || k === canonical)) return ok(path);
-      return err({ code: "STORE_ERROR", message: `integrate: ${path} exists but is not a worktree of this repository; remove it or use another session id`, rule: "BR-1278" });
-    }
-    // registered-but-deleted (a cleaned-up directory): drop the stale registration before adding again
-    if (known.includes(path)) git(projectRoot, ["worktree", "prune"]);
+    if (registered.stdout.split("\n").some((l) => l === `worktree ${path}`)) git(projectRoot, ["worktree", "prune"]);
     const base = this.resolveCommit(TARGET_REF);
     if (!base.ok) return base;
     const added = git(projectRoot, ["worktree", "add", "-q", "--detach", path, base.value]);

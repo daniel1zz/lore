@@ -1,19 +1,24 @@
 // @spawns packages/lore/src/index.ts
 // @reads assets/project/reference-transaction
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * @spec_ref spec-defect-clusters-round-1-done-floors-judge-real-runs-on  AC-DCL-1 (cases a-h), D1;
  *   business rules BR-199, BR-212, BR-146; reports #171 #174 #188 #49 #51 + three local reports.
  *
  * Every route that archives a task (`lore done`, `lore set --status archived`, plan close) applies the same
- * floors; a floor counts only rows a runner produced (`lore verify` attestation or `--capture`), and only
- * work whose landing `lore integrate` recorded is archived (BR-1291). Each case asserts the EXACT exit code and the refusing rule's
- * name (`[floor: <id>]` in the refusal text).
+ * floors, judged by the contract compiled at `lore approve` (AC-DCS1-7); a floor counts only rows a runner produced
+ * (`lore verify` attestation or `--capture`) bound to the code the task landed, and only work whose landing `lore integrate` recorded is
+ * archived (BR-1291). Each case asserts the EXACT exit code and the refusing rule's name (`[floor: <id>]` in the refusal text).
  *
- * Fixture (CLI subprocess `bun run src/index.ts`, throwaway git repo + corpus — never the repo's own `.lore/`).
+ * Fixture (CLI subprocess `bun run src/index.ts`, throwaway git repo + corpus — never the repo's own `.lore/`). A task is taken
+ * through the stages the contract demands with `support/land-task.ts`: approved, claimed on a branch, committed on, landed on main
+ * (a merge commit and the landing record) and, unless the case is about its absence, holding a runner pass for every contract oracle.
+ * The retired steps: `lore red-first <task>` (the red run is the contract's default now, waived only at approve) and a pass captured
+ * on a task that was never approved.
  *
  * Coverage: (a) unlanded branch -> exit 4 not-landed / landed through lore integrate -> archives (NEGATIVE + HAPPY); (b) `set --status archived`
- * with no attested pass -> the same refusal `done` gives (NEGATIVE + REGRESSION); (c) attested e2e pass satisfies a
- * test-file anchor (HAPPY) while a pass naming another file does not (NEGATIVE); (d) self-reported expected-fail
+ * with no attested pass -> the same refusal `done` gives (NEGATIVE + REGRESSION); (c) a pass running the anchor's contract command
+ * satisfies a test-file anchor (HAPPY) while a pass naming another command does not (NEGATIVE); (d) self-reported expected-fail
  * does not satisfy red-first, `--capture` does (NEGATIVE + HAPPY); (e) latest attested fail beats an earlier pass
  * (STATE); (f) claim on archived/deprecated -> exit 4 (BOUNDARY); (g) every floor text names `lore verify` and
  * `lore evidence ... --capture` (ERROR text); (h) plan close leaves a floor-failing member task unarchived and
@@ -28,6 +33,8 @@ import { tmpdir } from "os";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
 import { installShippedGuard } from "./support/main-guard-repo.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
+import { landTask, recordContractPasses, type TaskWorld } from "./support/land-task.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -74,11 +81,14 @@ function statusOf(slug: string, cwd: string): string {
   return payload.data.doc.status;
 }
 
-/** Plan-close gate off + judgment off: the suite approves a plan only to reach the floors it tests. */
+/** Plan-close gate off + judgment off, and the commands approve compiles a code task's contract from (the test-file template runs the file whole). */
 function relaxPlanGates(dir: string): void {
   patchLoreConfig(
     dir,
-    ["workflow:", "  gates:", '    "plan-close":', "      enabled: false", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"', ""].join("\n"),
+    [
+      "workflow:", "  gates:", '    "plan-close":', "      enabled: false", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"',
+      "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "bun test {file}"', "",
+    ].join("\n"),
   );
 }
 
@@ -90,26 +100,43 @@ function expectNamesBothRunnerRoutes(text: string): void {
 }
 
 let dir: string;
+let wtRoot: string;
 let planSlug: string;
 let taskCounter = 0;
+let landingCounter = 0;
 
 function createTask(title: string, extra: string[] = []): string {
   taskCounter += 1;
   return parseSlug(
     mustRun(
-      ["create", "task", "--title", `${title} ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai", ...extra],
+      ["create", "task", "--kind", "code", "--title", `${title} ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai", ...extra],
       dir,
     ),
   );
 }
 
-/** A runner-attested pass: `--capture` spawns the command and attests its exit code. */
-function capturePass(task: string, extra: string[] = []): void {
-  mustRun(["evidence", task, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture", ...extra], dir);
+function worldOf(): TaskWorld {
+  return { dir, git: (args) => git([...args], dir).trim(), lore: (args) => runLore([...args], dir) };
+}
+
+/**
+ * Takes the draft `task` through the stages of the contract: approve (red run waived unless `redWaiver` is false), claim on a branch of
+ * its own, commit, landing on main and (unless `recordPasses` is false) a runner pass for every contract oracle.
+ */
+async function land(task: string, options: { readonly recordPasses?: boolean; readonly redWaiver?: string | false } = {}): Promise<void> {
+  landingCounter += 1;
+  const branch = `dcl-${landingCounter}`;
+  await landTask(worldOf(), { slug: task, branch, worktree: join(wtRoot, branch), claimValue: "branch", session: "dcl", ...options });
+}
+
+/** A runner-attested pass of `command`, captured at the shared checkout (a clean detached view of main after a landing). */
+function capturePass(task: string, command: string, extra: string[] = []): void {
+  mustRun(["evidence", task, "--oracle", "test", "--command", command, "--result", "pass", "--capture", ...extra], dir);
 }
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "lore-done-floors-landed-"));
+  wtRoot = mkdtempSync(join(tmpdir(), "lore-done-floors-wt-"));
   makeCleanTreeRepo(dir);
   mustRun(["init"], dir);
   appendFileSync(join(dir, ".git", "info", "exclude"), ".claude/\n"); // `lore integrate` keeps its worktree there
@@ -122,6 +149,7 @@ beforeEach(() => {
 afterEach(() => {
   try {
     rmSync(dir, { recursive: true, force: true });
+    rmSync(wtRoot, { recursive: true, force: true });
   } catch {
     // best-effort
   }
@@ -130,11 +158,11 @@ afterEach(() => {
 describe("AC-DCL-1 (a) — lore done archives only landed work", () => {
   it("(a) refuses with exit 4 [floor: not-landed] naming the branch until lore integrate lands it, then archives", () => {
     const task = createTask("Unlanded");
+    mustRun(["approve", task, "--red-waiver", "the red run is not the subject of this test"], dir);
     git(["branch", "feat-unmerged", "main"], dir);
     git(["checkout", "-q", "--detach", "main"], dir);
     installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
     mustRun(["claim", task, "--worktree", "feat-unmerged"], dir);
-    capturePass(task);
     // the work comes AFTER the claim: the claim's start is the branch tip at claim time
     git(["checkout", "-q", "feat-unmerged"], dir);
     writeFileSync(join(dir, "feature.txt"), "work\n");
@@ -149,7 +177,7 @@ describe("AC-DCL-1 (a) — lore done archives only landed work", () => {
     expect(refused.text).toContain("feat-unmerged");
     expect(statusOf(task, dir)).not.toBe("archived");
 
-    // a hand merge records no landing: the branch's content on main is not what `lore done` reads (BR-1291)
+    // the landing is made by integrate, which runs the contract oracles itself and records their rows (AC-DCS2-1)
     mustRun(["integrate", "feat-unmerged", "--session", "done-floors-session"], dir);
     const landed = runLore(["done", task], dir);
 
@@ -159,8 +187,9 @@ describe("AC-DCL-1 (a) — lore done archives only landed work", () => {
 });
 
 describe("AC-DCL-1 (b) — set --status archived is no route around the floors", () => {
-  it("(b) exits 4 [floor: attested-pass] with the refusal `lore done` gives, writes nothing; an attested task archives", () => {
+  it("(b) exits 4 [floor: attested-pass] with the refusal `lore done` gives, writes nothing; an attested task archives", async () => {
     const bare = createTask("Bare");
+    await land(bare, { recordPasses: false });
 
     const viaSet = runLore(["set", bare, "--status", "archived"], dir);
     const viaDone = runLore(["done", bare], dir);
@@ -169,17 +198,17 @@ describe("AC-DCL-1 (b) — set --status archived is no route around the floors",
     expect(viaSet.text).toContain("[floor: attested-pass]");
     expect(viaDone.exitCode).toBe(4);
     expect(viaDone.text).toContain("[floor: attested-pass]");
-    expect(statusOf(bare, dir)).toBe("draft");
+    expect(statusOf(bare, dir)).not.toBe("archived");
 
     const attested = createTask("Attested");
-    capturePass(attested);
+    await land(attested);
     const archivedViaSet = runLore(["set", attested, "--status", "archived"], dir);
     expect(archivedViaSet.exitCode).toBe(0);
     expect(statusOf(attested, dir)).toBe("archived");
   }, 300_000);
 });
 
-describe("AC-DCL-1 (c) — an attested e2e pass satisfies a test-file anchor (#188)", () => {
+describe("AC-DCL-1 (c) — a pass running the anchor's contract command satisfies a test-file anchor (#188)", () => {
   const ANCHOR = "tests/anchor-case.test.ts";
 
   function addAnchorTestFile(): void {
@@ -192,17 +221,17 @@ describe("AC-DCL-1 (c) — an attested e2e pass satisfies a test-file anchor (#1
     git(["commit", "-q", "-m", "add anchor test"], dir);
   }
 
-  it("(c) archives (exit 0) on an attested oracle:e2e pass running the anchor unfiltered; a pass naming another file refuses exit 4 [floor: unfiltered-test-file]", () => {
+  it("(c) archives (exit 0) on an attested pass of the contract's whole-file command; a pass naming another command refuses exit 4 [floor: unfiltered-test-file]", async () => {
     addAnchorTestFile();
     const satisfied = createTask("Anchor e2e", ["--anchor", ANCHOR]);
-    capturePass(satisfied, []);
-    mustRun(["evidence", satisfied, "--oracle", "e2e", "--command", `bun test ${ANCHOR}`, "--result", "pass", "--capture"], dir);
+    await land(satisfied);
     const ok = runLore(["done", satisfied], dir);
-    expect(ok.exitCode).toBe(0);
+    expect(ok.exitCode, ok.text).toBe(0);
     expect(statusOf(satisfied, dir)).toBe("archived");
 
     const unsatisfied = createTask("Anchor other", ["--anchor", ANCHOR]);
-    capturePass(unsatisfied);
+    await land(unsatisfied, { recordPasses: false });
+    capturePass(unsatisfied, "echo typecheck-ok"); // the typecheck oracle: the attested-pass floor is met
     mustRun(["evidence", unsatisfied, "--oracle", "e2e", "--command", "echo 'bun test tests/other.test.ts'", "--result", "pass", "--capture"], dir);
     const refused = runLore(["done", unsatisfied], dir);
     expect(refused.exitCode).toBe(4);
@@ -213,10 +242,10 @@ describe("AC-DCL-1 (c) — an attested e2e pass satisfies a test-file anchor (#1
 });
 
 describe("AC-DCL-1 (d) — red-first counts only runner-produced red rows", () => {
-  it("(d) a self-reported expected-fail row refuses exit 4 [floor: red-first]; a --capture one satisfies it", () => {
+  it("(d) a self-reported expected-fail row refuses exit 4 [floor: red-first]; a --capture one satisfies it", async () => {
+    // the red run is the contract's default (approve without a waiver); `lore red-first` is retired
     const selfReported = createTask("Red self");
-    mustRun(["red-first", selfReported], dir);
-    capturePass(selfReported);
+    await land(selfReported, { redWaiver: false });
     mustRun(
       ["evidence", selfReported, "--oracle", "test", "--command", "bun test x", "--result", "expected-fail", "--output-tail", "1 fail: typed by hand"],
       dir,
@@ -227,33 +256,43 @@ describe("AC-DCL-1 (d) — red-first counts only runner-produced red rows", () =
     expectNamesBothRunnerRoutes(refused.text);
 
     const captured = createTask("Red captured");
-    mustRun(["red-first", captured], dir);
-    capturePass(captured);
+    await land(captured, { redWaiver: false });
     mustRun(["evidence", captured, "--oracle", "test", "--command", "echo '1 fail' && echo 'Ran 3 tests across 1 files' && false", "--result", "expected-fail", "--capture"], dir);
     const ok = runLore(["done", captured], dir);
-    expect(ok.exitCode).toBe(0);
+    expect(ok.exitCode, ok.text).toBe(0);
     expect(statusOf(captured, dir)).toBe("archived");
   }, 300_000);
 });
 
 describe("AC-DCL-1 (e) — per criterion the latest attested result decides", () => {
-  it("(e) an attested fail recorded after an attested pass refuses exit 4 [floor: latest-attested-fail] naming the criterion", () => {
-    const spec = parseSlug(mustRun(["create", "spec", "--title", "Latest Spec", "--content", "## Overview\nx", "--no-ai"], dir));
-    mustRun(["ac", "add", spec, "AC-LATEST-1", "--statement", "A criterion.", "--mode", "script", "--oracle", "other", "--command", "true"], dir);
-    const plan = parseSlug(mustRun(["create", "plan", "--title", "Latest Plan", "--parent", spec, "--content", "x", "--no-ai"], dir));
-    const task = parseSlug(
-      mustRun(["create", "task", "--title", "Latest Task", "--parent", plan, "--plan-id", plan, "--ac-scope", "AC-LATEST-1", "--content", "x", "--no-ai"], dir),
+  const RED = "echo '1 fail' && echo 'Ran 3 tests across 1 files' && false";
+
+  function createTaskUnder(plan: string, title: string, acScope: string): string {
+    return parseSlug(
+      mustRun(["create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--ac-scope", acScope, "--content", "x", "--no-ai"], dir),
     );
-    mustRun(["evidence", task, "--oracle", "test", "--command", "echo '1 fail' && echo 'Ran 3 tests across 1 files' && false", "--result", "expected-fail", "--ac", "AC-LATEST-1", "--capture"], dir);
-    mustRun(["evidence", task, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--ac", "AC-LATEST-1", "--capture"], dir);
+  }
+
+  it("(e) an attested fail recorded after an attested pass refuses exit 4 [floor: latest-attested-fail] naming the criterion", async () => {
+    const spec = parseSlug(mustRun(["create", "spec", "--title", "Latest Spec", "--content", "## Overview\nx", "--no-ai"], dir));
+    mustRun(["ac", "add", spec, "AC-LATEST-1", "--statement", "A criterion.", "--mode", "script", "--oracle", "test", "--command", "true"], dir);
+    // the claim passes the real task-claim gate: the plan's ancestor spec is approved (judgment is off in this corpus)
+    citeSpecViaCli(loreRunnerFor(runLore, dir), dir, undefined, spec, "AC-LATEST-1");
+    mustRun(["approve", spec], dir);
+    const plan = parseSlug(mustRun(["create", "plan", "--title", "Latest Plan", "--parent", spec, "--content", "x", "--no-ai"], dir));
+    const task = createTaskUnder(plan, "Latest Task", "AC-LATEST-1");
+    await land(task, { recordPasses: false });
+    mustRun(["evidence", task, "--oracle", "test", "--command", RED, "--result", "expected-fail", "--ac", "AC-LATEST-1", "--capture"], dir);
+    await recordContractPasses(worldOf(), task, "dcl");
 
     const whilePassing = runLore(["done", task], dir);
-    expect(whilePassing.exitCode).toBe(0);
+    expect(whilePassing.exitCode, whilePassing.text).toBe(0);
 
     const regressed = createTaskUnder(plan, "Latest Regressed", "AC-LATEST-1");
-    mustRun(["evidence", regressed, "--oracle", "test", "--command", "echo '1 fail' && echo 'Ran 3 tests across 1 files' && false", "--result", "expected-fail", "--ac", "AC-LATEST-1", "--capture"], dir);
-    mustRun(["evidence", regressed, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--ac", "AC-LATEST-1", "--capture"], dir);
-    mustRun(["evidence", regressed, "--oracle", "test", "--command", "echo '1 fail' && echo 'Ran 3 tests across 1 files' && false", "--result", "fail", "--ac", "AC-LATEST-1", "--capture"], dir);
+    await land(regressed, { recordPasses: false });
+    mustRun(["evidence", regressed, "--oracle", "test", "--command", RED, "--result", "expected-fail", "--ac", "AC-LATEST-1", "--capture"], dir);
+    await recordContractPasses(worldOf(), regressed, "dcl");
+    mustRun(["evidence", regressed, "--oracle", "test", "--command", RED, "--result", "fail", "--ac", "AC-LATEST-1", "--capture"], dir);
 
     const refused = runLore(["done", regressed], dir);
 
@@ -265,16 +304,10 @@ describe("AC-DCL-1 (e) — per criterion the latest attested result decides", ()
   }, 300_000);
 });
 
-function createTaskUnder(plan: string, title: string, acScope: string): string {
-  return parseSlug(
-    mustRun(["create", "task", "--title", title, "--parent", plan, "--plan-id", plan, "--ac-scope", acScope, "--content", "x", "--no-ai"], dir),
-  );
-}
-
 describe("AC-DCL-1 (f) — a terminal task refuses claim", () => {
-  it("(f) lore claim on an archived task exits 4", () => {
+  it("(f) lore claim on an archived task exits 4", async () => {
     const task = createTask("Terminal");
-    capturePass(task);
+    await land(task);
     mustRun(["done", task], dir);
 
     const claim = runLore(["claim", task], dir);
@@ -297,16 +330,16 @@ describe("AC-DCL-1 (f) — a terminal task refuses claim", () => {
 });
 
 describe("AC-DCL-1 (g) — every floor refusal names both runner routes", () => {
-  it("(g) attested-pass and red-first/no-new-tests refusals name lore verify and lore evidence --capture", () => {
+  it("(g) attested-pass and red-first refusals name lore verify and lore evidence --capture", async () => {
     const bare = createTask("Text bare");
+    await land(bare, { recordPasses: false });
     const attestedPass = runLore(["done", bare], dir);
     expect(attestedPass.exitCode).toBe(4);
     expect(attestedPass.text).toContain("[floor: attested-pass]");
     expectNamesBothRunnerRoutes(attestedPass.text);
 
     const redFirst = createTask("Text red");
-    mustRun(["red-first", redFirst], dir);
-    capturePass(redFirst);
+    await land(redFirst, { redWaiver: false });
     const noRed = runLore(["done", redFirst], dir);
     expect(noRed.exitCode).toBe(4);
     expect(noRed.text).toContain("[floor: red-first]");
@@ -315,14 +348,18 @@ describe("AC-DCL-1 (g) — every floor refusal names both runner routes", () => 
 });
 
 describe("AC-DCL-1 (h) — plan close is no route around the floors (BR-1072)", () => {
-  it("(h) closing the plan archives the attested member, leaves the floor-failing one unarchived and names it", () => {
+  it("(h) closing the plan archives the attested member, leaves the floor-failing one unarchived and names it", async () => {
     const good = createTask("Close good");
-    capturePass(good);
+    await land(good);
     const bad = createTask("Close bad");
+    await land(bad, { recordPasses: false });
+    // a freshly claimed member is skipped as such, whatever its floors say: the claims are released so the floors decide
+    mustRun(["release", good], dir);
+    mustRun(["release", bad], dir);
 
     const close = runLore(["set", planSlug, "--status", "archived"], dir);
 
-    expect(close.exitCode).toBe(0);
+    expect(close.exitCode, close.text).toBe(0);
     expect(statusOf(good, dir)).toBe("archived");
     expect(statusOf(bad, dir)).not.toBe("archived");
     expect(close.text).toContain(bad);

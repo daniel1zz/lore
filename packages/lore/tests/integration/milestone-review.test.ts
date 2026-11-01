@@ -26,6 +26,7 @@ import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { retirementAssessFields } from "../../src/service/retired-ac-service.js";
 import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 import { DECIDED_FLAGS } from "../helpers/decision-flags.js";
+import { withFileAnswers } from "../helpers/milestone-judgment-fixture.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -119,7 +120,7 @@ function makePlan(title: string, opts: { corpusOnly?: boolean } = {}): { plan: s
   const anchorArgs = opts.corpusOnly === true ? [] : ["--anchor", "src/shell-runner.ts"];
   const task = slugOf(
     runLore(
-      ["create", "task", "--title", `Work ${title} ${counter}`, "--parent", plan, "--plan-id", plan, "--content", "x", ...anchorArgs, "--no-ai"],
+      ["create", "task", "--kind", opts.corpusOnly === true ? "corpus" : "code", "--title", `Work ${title} ${counter}`, "--parent", plan, "--plan-id", plan, "--content", "x", ...anchorArgs, "--no-ai"],
       tmpDir,
     ).stdout,
   );
@@ -632,7 +633,8 @@ describe("milestone review gates close", () => {
       getPlanBundle: async () => core.ok({ plan, tasks: [task] } as never),
       getCitedRuleStates: async () => core.ok([]),
       listDecisionLog: async () => core.ok([]),
-      judge: async () => core.ok(judgeAnswer()),
+      // reason: BR-1535 — a call over a diff answers per file as well; the scripted answer gains one passing entry per file asked.
+      judge: async (prompt) => core.ok(withFileAnswers(prompt, judgeAnswer())),
       createReviewDoc: async (input) => {
         stored.push((input.extra as { milestone_review: (typeof stored)[number] }).milestone_review);
         return core.ok({ id: "R1", slug: "review-1" } as never);
@@ -907,7 +909,7 @@ describe("milestone review gates close", () => {
     const { plan, task } = makePlan("Retire reject");
     // a claimed task stays a locked record, so the retiring run claims a second task of the plan and `task` stays editable
     const retiringTask = slugOf(
-      runLore(["create", "task", "--title", "Retiring work", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"], tmpDir).stdout,
+      runLore(["create", "task", "--kind", "code", "--title", "Retiring work", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"], tmpDir).stdout,
     );
     addPass(retiringTask);
     const specs = retireTwoAcs(retiringTask);

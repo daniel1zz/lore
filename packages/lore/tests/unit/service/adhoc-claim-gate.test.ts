@@ -87,7 +87,7 @@ async function createAdhocTask(cs: CorpusService, title: string, anchors?: strin
     type: "task",
     title,
     content: `# ${title}`,
-    extra: { adhoc: true, ...(anchors !== undefined ? { file_anchors: anchors } : {}) },
+    extra: { adhoc: true, kind: "code", ...(anchors !== undefined ? { file_anchors: anchors } : {}) },
   } as CreateDocInput);
   return task.id;
 }
@@ -100,7 +100,7 @@ async function createPlanParentedTask(cs: CorpusService, anchors?: string[]): Pr
     title: "Real Plan Task",
     parent_id: plan.id,
     content: "# Task",
-    extra: { plan_id: plan.id, ...(anchors !== undefined ? { file_anchors: anchors } : {}) },
+    extra: { plan_id: plan.id, kind: "code", ...(anchors !== undefined ? { file_anchors: anchors } : {}) },
   } as CreateDocInput);
   return task.id;
 }

@@ -30,8 +30,10 @@ import { createRealWorktreeProbe } from "../../src/service/worktree-cleanup.js";
 import { readTaskLanding } from "../../src/service/task-commit-range.js";
 import { IntegrateService, type IntegrateGit } from "../../src/service/integrate-service.js";
 import { IntegrateLossLedger } from "../../src/service/integrate-loss-ledger.js";
+import { immediateIntegrateQueue } from "../helpers/immediate-integrate-queue";
 import { IntegrateAttemptLedger } from "../../src/service/integrate-attempt-ledger.js";
 import { deriveLandingDiffForPlan } from "../../src/adapters/cli/assess-commit-derivation.js";
+import { findFirstParentCommitContaining } from "../../src/adapters/cli/assess-regression-git.js";
 import { actedStore } from "../live-invocation.js";
 import { installShippedGuard } from "./support/main-guard-repo.js";
 import { runOfName } from "../helpers/test-run-identity.js";
@@ -88,15 +90,19 @@ interface Fixture {
 }
 
 /**
- * A runner-attested pass the landing predicate counts: recorded AFTER the latest claim and bound to a clean commit on main
- * (`head_sha`). Evidence from before a re-claim, or bound to nothing, does not count.
+ * A runner-attested pass `lore done` counts under the done-contract model (AC-DCS1-27 (b)): it names the landing it was recorded for
+ * (`recorded_at_landing`, what `lore integrate` stamps on the rows it records). The task's stored contract holds no oracle, so one
+ * counted pass is all its evidence floors ask for. A pass recorded before the landing exists names no landing and does not count.
  */
-async function recordCountingPass(svc: TaskWorkflowService, taskId: string, headSha: string): Promise<void> {
-  const ev = await svc.recordVerifiedEvidence(
-    taskId,
+async function recordLandingPass(f: { readonly svc: TaskWorkflowService; readonly taskId: string; readonly store: ReturnType<typeof actedStore> }): Promise<void> {
+  const task = await f.store.find(f.taskId as never);
+  const landing = task.ok && task.value !== null ? (task.value.extra["landing"] as { landing_commit?: string } | undefined) : undefined;
+  if (landing?.landing_commit === undefined) throw new Error("the task holds no landing to attach a pass to");
+  const ev = await f.svc.recordVerifiedEvidence(
+    f.taskId,
     {
       oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_by: "runner", capture_source: "runner",
-      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, head_sha: headSha, worktree_dirty: false },
+      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, recorded_at_landing: landing.landing_commit },
     },
     new Date(Date.now() + 1000).toISOString(),
   );
@@ -134,12 +140,28 @@ async function fixture(probeOverride?: Partial<ReturnType<typeof createRealWorkt
   const plan = await cs.create({ parent_id: await ensureRequirementsDocId(cs), type: "plan", title: "Landing plan", content: "body" } as CreateDocInput);
   if (!plan.ok) throw new Error("plan");
   const task = await cs.create({
-    type: "task", title: "Landing task", parent_id: plan.value.id, content: "body", extra: { plan_id: plan.value.id },
+    type: "task", title: "Landing task", parent_id: plan.value.id, content: "body",
+    extra: {
+      kind: "code",
+      plan_id: plan.value.id,
+      // the contract `lore approve` compiles, stored straight into this in-memory corpus (no git config here to compile from): a code
+      // task with no oracle of its own, red run waived, so `lore done` asks only for a landing and one counted pass
+      done_contract: {
+        compiled_at_commit: run(repo, "rev-list", "--max-parents=0", "main"),
+        kind: "code",
+        base_branch: "main",
+        oracles: [],
+        red_required: false,
+        red_waiver_reason: "the red run is not the subject of this test",
+        landing_route: "main",
+        new_symbols: [],
+        added_oracles: [],
+      },
+    },
   } as CreateDocInput);
   if (!task.ok) throw new Error("task");
   const claim = await svc.claim(task.value.id, { by: "alice", harnessRun: runOfName("alice"), worktree: "feat-landing" });
   if (!claim.ok) throw new Error(`claim ${JSON.stringify(claim.error)}`);
-  await recordCountingPass(svc, task.value.id, run(repo, "rev-parse", "main"));
   // the branch's own work comes AFTER the claim, so the claim's recorded base_sha (the branch tip at claim time) precedes it
   run(repo, "checkout", "-q", "feat-landing");
   const ownCommit = commit(repo, "own-landing-file.txt", "feat: the branch's own work");
@@ -156,10 +178,13 @@ function integrateService(f: Fixture, withRecorder: boolean): IntegrateService {
     runFloor: () => ({ status: 0, output: "" }),
     corpus: { take: () => ok({ takenAt: "t" }), remove: () => ok(undefined) },
     ledger: new IntegrateLossLedger(ledgerDir),
+    queue: immediateIntegrateQueue(),
     attempts: new IntegrateAttemptLedger(ledgerDir),
     projectRoot: f.repo,
     worktreesRoot: join(f.repo, ".claude", "worktrees"),
     log: () => undefined,
+    // D44: where an already-integrated branch entered main is measured from main's first-parent history
+    firstParentContaining: (commit, ref) => findFirstParentCommitContaining(f.repo, GIT_ENV, commit, ref),
     ...(withRecorder ? { landings: { record: (landing) => f.svc.recordLanding(landing) } } : {}),
   });
 }
@@ -167,7 +192,7 @@ function integrateService(f: Fixture, withRecorder: boolean): IntegrateService {
 /** The orchestrator's evidence repair: release, then re-claim from a fresh DETACHED worktree of main. */
 let hideNextPathProbe = false;
 
-async function reclaimFromDetachedMain(f: Fixture): Promise<void> {
+async function reclaimFromDetachedMain(f: Fixture, attest = true): Promise<void> {
   const holder = mkdtempSync(join(tmpdir(), "lore-landing-evid-"));
   dirs.push(holder);
   const detached = join(holder, "evid");
@@ -178,8 +203,8 @@ async function reclaimFromDetachedMain(f: Fixture): Promise<void> {
   const reclaimed = await f.svc.claim(f.taskId, { by: "alice", harnessRun: runOfName("alice"), worktree: realpathSync(detached) });
   hideNextPathProbe = false;
   if (!reclaimed.ok) throw new Error(`reclaim ${JSON.stringify(reclaimed.error)}`);
-  // reason: only a pass recorded after the LATEST claim counts, so the evidence repair re-attests on the re-claim.
-  await recordCountingPass(f.svc, f.taskId, run(f.repo, "rev-parse", "main"));
+  // the evidence repair re-attests on the re-claim: a pass naming the task's landing
+  if (attest) await recordLandingPass(f);
 }
 
 describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re-claim cannot replace it", () => {
@@ -208,10 +233,11 @@ describe("AC-LAND-1: a task's commit range is recorded at landing, so a later re
     const f = await fixture();
     // landed WITHOUT a landing recorder: only the `merge(feat-landing)` commit on main remains; the range is never backfilled from it
     await integrateService(f, false).integrate({ branch: "feat-landing", sessionId: "s2", floorCommand: "true" });
-    await reclaimFromDetachedMain(f);
+    await reclaimFromDetachedMain(f, false); // no landing exists yet, so there is none to attest
 
     const again = await integrateService(f, true).integrate({ branch: "feat-landing", sessionId: "s2b", floorCommand: "true" });
-    expect(again.ok && again.value.kind).toBe("already_integrated");
+    expect(again.ok && again.value.kind, JSON.stringify(again)).toBe("already_integrated");
+    await recordLandingPass(f);
     const done = await f.svc.done(f.taskId, { by: "alice", harnessRun: runOfName("alice") });
     expect(done.ok).toBe(true);
     if (!done.ok) return;
