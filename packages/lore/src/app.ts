@@ -98,6 +98,7 @@ import type { RadiusDiffPort } from "./service/stamp-binding-reader.js";
 import { RunService } from "./service/run-service.js";
 import { WorktreeRemovalService, type WorktreeRemovalRunStore } from "./service/worktree-removal-service.js";
 import { DecisionService } from "./service/decision-service.js";
+import { ReviewRoundCap } from "./service/review-round-cap-service.js";
 import { createOverrideDecisionPort, type OverrideDecisionPort } from "./service/override-decision.js";
 import { createRealWorktreeProbe } from "./service/worktree-cleanup.js";
 import { createReadSessionHeartbeat, createWriteSessionHeartbeat } from "./adapters/session-heartbeat-port.js";
@@ -109,7 +110,6 @@ import { ensureVerifiedIdentity, resolveWriteActorFor, withVerifiedWriteContext 
 import { LandService, type LandPorts } from "./service/land-service.js";
 import { PlanIntegrationBranchService, createPlanBranchGit } from "./service/plan-integration-branch-service.js";
 import { MilestoneReviewService } from "./service/milestone-review-service.js";
-import { MAIN_CHECKED_ACTION, MAIN_RED_ACTION, MAIN_RED_GREEN_ACTION, type MainRedLedgerPort } from "./service/milestone-review.js";
 import { SuiteResultService } from "./service/suite-result-service.js";
 import { randomUUID } from "node:crypto";
 import { RetiredAcService } from "./service/retired-ac-service.js";
@@ -128,6 +128,8 @@ import { VerificationProjectionService } from "./service/verification-projection
 import { SessionService } from "./service/session-service.js";
 import { ValidityService } from "./service/validity-service.js";
 import { DriftCheckService } from "./service/drift-check-service.js";
+import { TemplateService } from "./service/template-service.js";
+import { TemplateGrowthService } from "./service/template-growth-service.js";
 import { OutlineSectionsRetireMigrationService } from "./service/outline-sections-retire-migration-service.js";
 import { OrdinalMigrationService } from "./service/ordinal-migration-service.js";
 import { SpecParentMigrationService } from "./service/spec-parent-migration-service.js";
@@ -608,7 +610,7 @@ export interface App {
    */
   retiredAcService?: RetiredAcService;
   /** The store's lease verbs, for the post-landing review batch lease (BR-1379); optional like the other late additions. */
-  reviewLeaseStore?: Pick<StoreInterface, "acquireLease" | "renewLease" | "releaseLease" | "readLease">;
+  reviewLeaseStore?: Pick<StoreInterface, "acquireLease" | "takeOverLease" | "renewLease" | "releaseLease" | "readLease">;
   /**
    * SeatService — thin `GitPort` orchestration for the `lore seat` verb family
    * (`enter`/`list`/`resume`/`remove`, SPEC-057). Wired here with the REAL `GitPort`
@@ -698,6 +700,17 @@ export interface App {
    * Optional for the same "hand-built App test stubs stay valid" reason as `traceStatsService`; always wired in production.
    */
   checkStatsService?: CheckStatsService;
+  /**
+   * Resolves, renders, validates and cross-checks templated documents against their template (`lore template show|check`,
+   * and the write path from T6). Optional for the same "hand-built App test stubs stay valid" reason as
+   * `driftCheckService`; always wired in production.
+   */
+  templateService?: TemplateService;
+  /**
+   * The single pending revision of a template and its review (accepted proposals become dimensions). Judgments feed it
+   * through `JudgmentService.record`. Optional for the same hand-built-App reason as `templateService`.
+   */
+  templateGrowthService?: TemplateGrowthService;
   /**
    * SPEC-102 OPTIONAL read/deny-instrumentation port — the SAME instance
    * wired into `CorpusService`/`GateEnforcer` (service-layer deny). Exposed
@@ -1057,6 +1070,8 @@ function buildAppFromSqlite(
   const retiredAcService = buildRetiredAcService(store, recordLockService, corpusService, ruleChangeService);
   wirePlanCloseRetirements(corpusService, retiredAcService);
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
+  // reason: BR-1531 — a judgment-required document's review rounds are capped per approval cycle; both roots wire it.
+  reviewService.setReviewRoundCap(new ReviewRoundCap({ store, judgments: judgmentService, decisions: new DecisionService({ store, executorRun: null }) }));
   // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
   reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
@@ -1124,6 +1139,12 @@ function buildAppFromSqlite(
     // reason: DriftCheckService depends only on StoreInterface — stateless, no AI, no
     // telemetry, same shape as PhaseService/AcService. SPEC-045 §Design Decisions D4.
     driftCheckService: armDecisionGate(new DriftCheckService(store, corpusService), decisionGate),
+    // reason: TemplateService is a read-only reader of corpus template documents (store only), same DI shape as
+    // DriftCheckService; structured-documents T2.
+    templateService: new TemplateService(store),
+    // reason: the review that turns a template's accepted proposals into dimensions edits the template document, so it takes the
+    // composed CorpusService (the one write route); stateless otherwise. structured-documents T8.
+    templateGrowthService: new TemplateGrowthService(store, new TemplateService(store), corpusService),
     // reason: VerificationProjectionService depends only on StoreInterface plus the
     // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
     // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.
@@ -1202,7 +1223,6 @@ function buildAppFromSqlite(
       judgeMeasured: aiProviderService.judgeMilestoneMeasured.bind(aiProviderService),
       createReviewDoc: corpusService.createMilestoneReviewDoc.bind(corpusService),
       link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
-      mainRedLedger: buildMainRedLedger(store, corpusService),
       recheckDecisions: buildDecisionRechecker(store, ambient),
       judgedDecisionInputs: (bundle) => buildJudgedDecisionInputs({ store }, bundle),
     }),
@@ -1225,7 +1245,7 @@ function buildAppFromSqlite(
     // envPassthroughAll (resolved config) + processEnv (a `process.env` snapshot
     // captured HERE at composition time, mirroring how `repoRoot` is captured from
     // `process.cwd()` — VerifyRunnerService itself never reads `process.env`).
-    suiteResultService: buildSuiteResultService(store),
+    suiteResultService: buildSuiteResultService(store, corpusService),
     verifyRunnerService: new VerifyRunnerService(
       corpusService.getPlanBundle.bind(corpusService),
       taskWorkflowService.recordVerifiedEvidence.bind(taskWorkflowService),
@@ -1505,6 +1525,8 @@ function buildAppFromTurso(
   const retiredAcService = buildRetiredAcService(store, recordLockService, corpusService, ruleChangeService);
   wirePlanCloseRetirements(corpusService, retiredAcService);
   reviewService.setOverrideDecisionPort(overrideDecisionPort);
+  // reason: BR-1531 — a judgment-required document's review rounds are capped per approval cycle; both roots wire it.
+  reviewService.setReviewRoundCap(new ReviewRoundCap({ store, judgments: judgmentService, decisions: new DecisionService({ store, executorRun: null }) }));
   // reason: approving a baseline node refuses a leaf declaring a command the corpus checkout's tree lacks; one port, both roots.
   reviewService.setBaselineDeclarationPort(buildBaselineDeclarationPort(repoRoot));
   // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
@@ -1570,6 +1592,12 @@ function buildAppFromTurso(
     // reason: DriftCheckService depends only on StoreInterface — stateless, no AI, no
     // telemetry, same shape as PhaseService/AcService. SPEC-045 §Design Decisions D4.
     driftCheckService: armDecisionGate(new DriftCheckService(store, corpusService), decisionGate),
+    // reason: TemplateService is a read-only reader of corpus template documents (store only), same DI shape as
+    // DriftCheckService; structured-documents T2.
+    templateService: new TemplateService(store),
+    // reason: the review that turns a template's accepted proposals into dimensions edits the template document, so it takes the
+    // composed CorpusService (the one write route); stateless otherwise. structured-documents T8.
+    templateGrowthService: new TemplateGrowthService(store, new TemplateService(store), corpusService),
     // reason: VerificationProjectionService depends only on StoreInterface plus the
     // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
     // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.
@@ -1645,7 +1673,6 @@ function buildAppFromTurso(
       judgeMeasured: aiProviderService.judgeMilestoneMeasured.bind(aiProviderService),
       createReviewDoc: corpusService.createMilestoneReviewDoc.bind(corpusService),
       link: (fromId, toId, type) => corpusService.link(fromId, toId, type),
-      mainRedLedger: buildMainRedLedger(store, corpusService),
       recheckDecisions: buildDecisionRechecker(store, ambient),
       judgedDecisionInputs: (bundle) => buildJudgedDecisionInputs({ store }, bundle),
     }),
@@ -1666,7 +1693,7 @@ function buildAppFromTurso(
     // CorpusService/TaskWorkflowService/the bun-only executor module directly
     // (SPEC-039 §2 D3). SPEC-039 §M2 additions — see `buildAppFromSqlite`'s
     // identical comment.
-    suiteResultService: buildSuiteResultService(store),
+    suiteResultService: buildSuiteResultService(store, corpusService),
     verifyRunnerService: new VerifyRunnerService(
       corpusService.getPlanBundle.bind(corpusService),
       taskWorkflowService.recordVerifiedEvidence.bind(taskWorkflowService),
@@ -1807,37 +1834,32 @@ function buildDecisionRechecker(store: StoreInterface, ambient: AppAmbient): (bu
  * store) single-flight per commit. Each acquisition adds a random suffix to the holder, so two lookups in this process
  * still exclude each other.
  */
-function buildSuiteResultService(store: StoreInterface): SuiteResultService {
+function buildSuiteResultService(store: StoreInterface, corpusService: CorpusService): SuiteResultService {
   return new SuiteResultService({
     store,
-    leases: new ReviewLeases(store, `app:${String(process.pid)}`),
+    // reason: the takeover audit row goes through the one audit write path (CorpusService.appendAudit), never the store.
+    leases: new ReviewLeases(store, `app:${String(process.pid)}`, Date.now, undefined, undefined, undefined, (request) => corpusService.appendAudit(request)),
     now: () => new Date().toISOString(),
     newId: () => `suite-${randomUUID()}`,
     clockMs: () => performance.now(),
   });
 }
 
-function buildMainRedLedger(store: StoreInterface, corpusService: CorpusService): MainRedLedgerPort {
-  const suiteResults = buildSuiteResultService(store);
-  return {
-    now: () => new Date().toISOString(),
-    listRows: async () => {
-      const rows = [];
-      // reason: BR-1497 — `main-checked` is derived from the stored suite results below; the audit rows of that action
-      // are legacy history (nothing writes them any more) and still fold, so an older corpus keeps its range starts.
-      for (const action of [MAIN_CHECKED_ACTION, MAIN_RED_ACTION, MAIN_RED_GREEN_ACTION]) {
-        const listed = await store.listAuditRowsByAction(action);
-        if (!listed.ok) return listed;
-        rows.push(...listed.value);
-      }
-      const audited = rows.sort((a, b) => a.id - b.id).map((r) => ({ action: r.action, timestamp: r.timestamp, details: r.details ?? {} }));
-      const derived = await suiteResults.listMainCheckedRows();
-      if (!derived.ok) return derived;
-      // reason: a stable sort by time interleaves the derived checks with the audit rows; ties keep audit-first order.
-      return { ok: true as const, value: [...audited, ...derived.value].sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0)) };
-    },
-    appendRow: (row) => corpusService.appendAudit({ action: row.action, sessionId: "main-red", timestamp: row.timestamp, details: { ...row.details } }),
-  };
+/**
+ * Arms template validation and body rendering on the one document write path (BR-1528/BR-1529): the
+ * `CorpusService` gets the `TemplateService` and the create policy from `workflow.structured_documents`.
+ * Both composition roots call it, so no surface is composed with an unvalidated write route.
+ */
+function wireStructuredWrite(app: App, config: LoreConfig | undefined): void {
+  if (app.templateService === undefined) return;
+  // reason: the same TemplateService runs the cross-field checks at approval (AC-ST-3/AC-ST-4); one wiring site, both roots.
+  app.reviewService.setTemplateChecks(app.templateService);
+  app.corpusService.setStructuredWrite({
+    templates: app.templateService,
+    // reason: inlined (same expression as `resolveRequireStructuredCreate`, @lore/core) because this function sits in the
+    // app.ts composition root, whose import block is held by another task's claim; the default is `false` either way.
+    requireStructuredCreate: config?.workflow?.structured_documents?.require_create ?? false,
+  });
 }
 
 /**
@@ -2253,6 +2275,7 @@ function createAppUnscoped(
       // reason: D2 — a SQLite file is persistent, so verify runs in a worker over this same file (read-only).
       buildAuditVerifyRunner({ kind: "sqlite", dbPath }, { anchorRoot: repoRoot }),
     );
+    wireStructuredWrite(sqliteApp, config);
     wireIssueCloseOnArchive(sqliteApp, sqliteStore, config, ambient);
     wireDoneContract(sqliteApp, sqliteStore, config, repoRoot, ambient);
     wirePlanCloseIssues(sqliteApp, config, ambient, dbPath);
@@ -2367,6 +2390,7 @@ function createAppUnscoped(
         // opened without the remote URL (no second thread syncing the embedded replica).
         buildAuditVerifyRunner({ kind: "turso", localPath: dbPath }, { anchorRoot: repoRoot }),
       );
+    wireStructuredWrite(tursoApp, config);
     wireIssueCloseOnArchive(tursoApp, store, config, ambient);
     wireDoneContract(tursoApp, store, config, repoRoot, ambient);
     wirePlanCloseIssues(tursoApp, config, ambient, dbPath);

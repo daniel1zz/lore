@@ -30,6 +30,7 @@
 import type { CheckResult } from "./review-judgment.js";
 import type { DocId, DocRecord, DocType, LinkRecord } from "./types.js";
 import type { TreeBlueprint, TreeNodeSpec } from "./tree-blueprint.js";
+import type { Template } from "./template.js";
 import { isParentlessType, isValidParentType, ROOT_TYPES } from "./doc-type-rules.js";
 import {
   adrExtraSchema,
@@ -41,6 +42,7 @@ import {
 } from "./schemas.js";
 import { phaseExtraSchema } from "./phase.js";
 import { baselineExtraSchema } from "./baseline.js";
+import { templateDocumentExtraSchema } from "./template-document.js";
 
 // ─── Review Bundle ──────────────────────────────────────────────────────────
 
@@ -66,6 +68,26 @@ export interface ReviewBundle {
   links: LinkRecord[];
   brokenLinkTargets?: DocId[];
   blueprint?: TreeBlueprint;
+  /**
+   * Present ONLY for a templated document (`extra.template_ref`): the pinned template the judge answers per dimension
+   * (prompt v9). Absent for a legacy document, which keeps prompt v8.
+   */
+  template?: ReviewTemplateContext;
+}
+
+/**
+ * The template a templated document is judged against, and the proposals already open against it.
+ *
+ * @invariant `ref` is the document's own pin (`slug@version`), and `template` is exactly that approved version.
+ * @invariant `pendingProposals` are the proposals of the template's single pending revision (empty when none), so the
+ *   judge can name an existing one as the same gap instead of proposing a duplicate.
+ */
+export interface ReviewTemplateContext {
+  readonly ref: string;
+  readonly template: Template;
+  /** The document's kind (selects which dimensions apply); absent when the type has none. */
+  readonly kind?: string;
+  readonly pendingProposals: readonly { readonly id: string; readonly question: string; readonly count: number }[];
 }
 
 // ─── Check: schema ──────────────────────────────────────────────────────────
@@ -112,6 +134,10 @@ function safeParseExtraForType(doc: DocRecord): { success: boolean; issues: { pa
     }
     case "baseline": {
       const r = baselineExtraSchema.safeParse(doc.extra);
+      return { success: r.success, issues: r.success ? [] : r.error.issues };
+    }
+    case "template": {
+      const r = templateDocumentExtraSchema.safeParse(doc.extra);
       return { success: r.success, issues: r.success ? [] : r.error.issues };
     }
   }

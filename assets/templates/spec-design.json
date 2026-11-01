@@ -1,0 +1,233 @@
+{
+  "doc_type": "spec",
+  "kind": "design",
+  "version": 2,
+  "fields": {
+    "type": "object",
+    "required": ["goal", "problem_evidence", "scope", "out_of_scope", "visual_direction", "alternatives_considered", "design_decisions"],
+    "properties": {
+      "goal": {
+        "type": "object",
+        "title": "Goal",
+        "x-goal": true,
+        "required": ["statement", "measure"],
+        "properties": {
+          "statement": { "type": "string", "minLength": 1, "description": "What the design lets a person do or understand, in one sentence." },
+          "measure": { "type": "string", "minLength": 1, "description": "The observable outcome (a task completed in N steps, a state readable at a glance, a review that passes), not an adjective." }
+        }
+      },
+      "problem_evidence": {
+        "type": "array",
+        "title": "Problem and evidence",
+        "minItems": 1,
+        "description": "Each claim about the current experience with the source that shows it (a screenshot, a session, an issue, a document slug).",
+        "items": {
+          "type": "object",
+          "required": ["claim", "source"],
+          "properties": {
+            "claim": { "type": "string", "minLength": 1 },
+            "source": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "scope": {
+        "type": "array",
+        "title": "In scope",
+        "x-scope-list": true,
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["id", "text"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "text": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "out_of_scope": {
+        "type": "array",
+        "title": "Out of scope",
+        "x-out-of-scope-list": true,
+        "items": {
+          "type": "object",
+          "required": ["id", "text"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "text": { "type": "string", "minLength": 1 },
+            "why": { "type": "string" }
+          }
+        }
+      },
+      "visual_direction": {
+        "type": "string",
+        "title": "Visual direction",
+        "minLength": 1,
+        "description": "The chosen look and structure: layout, hierarchy, tokens, tone."
+      },
+      "alternatives_considered": {
+        "type": "array",
+        "title": "Alternatives considered",
+        "minItems": 1,
+        "description": "Other visual or interaction options, each shown (link, sketch, or description) with why it lost.",
+        "items": {
+          "type": "object",
+          "required": ["name", "description", "why_not"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "description": { "type": "string", "minLength": 1 },
+            "reference": { "type": "string", "description": "Link, file path or document slug of the picture or prototype." },
+            "why_not": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "states": {
+        "type": "array",
+        "title": "States and screens",
+        "description": "Each state the design must show: empty, loading, error, partial, full.",
+        "items": {
+          "type": "object",
+          "required": ["state", "appearance"],
+          "properties": {
+            "state": { "type": "string", "minLength": 1 },
+            "appearance": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "rules": {
+        "type": "array",
+        "title": "Rules",
+        "description": "Each design rule with an example that agrees with scope and acceptance criteria.",
+        "items": {
+          "type": "object",
+          "required": ["id", "statement"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "statement": { "type": "string", "minLength": 1 },
+            "example": { "type": "string" }
+          }
+        }
+      },
+      "refusals": {
+        "type": "array",
+        "title": "Refusals and exceptions",
+        "x-refusal-list": true,
+        "description": "Every input or state the interface refuses or shows as an error, with message. Each needs an acceptance criterion that triggers it.",
+        "items": {
+          "type": "object",
+          "required": ["id", "input_or_state", "message"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "input_or_state": { "type": "string", "minLength": 1 },
+            "exit_code": { "type": "integer" },
+            "message": { "type": "string", "minLength": 1 },
+            "acs": {
+              "type": "array",
+              "description": "Ids of the acceptance criteria that trigger this refusal (at least one must exist on the spec at promote).",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      },
+      "rule_changes": {
+        "type": "array",
+        "title": "Rule changes",
+        "x-rule-change-list": true,
+        "description": "Existing design rules this changes. Each needs an acceptance criterion that pins the new behaviour.",
+        "items": {
+          "type": "object",
+          "required": ["id", "before", "after"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "before": { "type": "string", "minLength": 1 },
+            "after": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "design_decisions": {
+        "type": "array",
+        "title": "Design decisions",
+        "x-decision-list": true,
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["decision", "chosen", "rejected", "why"],
+          "properties": {
+            "decision": { "type": "string", "minLength": 1 },
+            "chosen": { "type": "string", "minLength": 1 },
+            "rejected": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["option", "why"],
+                "properties": {
+                  "option": { "type": "string", "minLength": 1 },
+                  "why": { "type": "string", "minLength": 1 }
+                }
+              }
+            },
+            "why": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "human_acceptance": {
+        "type": "array",
+        "title": "Acceptance by a human",
+        "description": "What a person must look at or try before this counts as done.",
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "benchmark": {
+        "type": "object",
+        "title": "Benchmark",
+        "properties": {
+          "practice": { "type": "string", "description": "What an established product does for this interaction." },
+          "difference": { "type": "string", "description": "How this design differs and why." }
+        }
+      },
+      "structure": {
+        "type": "array",
+        "title": "Code structure",
+        "description": "Paths the implementation lives in.",
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "related": {
+        "type": "array",
+        "title": "Related documents",
+        "x-ref-list": true,
+        "items": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "dimensions": [
+    { "id": "edge-cases", "question": "What does the design show for deleted or renamed items, for empty or vacuous sets (\"all of zero items\"), and for the first visit versus a repeated one?" },
+    { "id": "refusal-paths", "question": "Which refusals, errors or exceptions does the interface show, and which acceptance criterion triggers each one?", "needs_refs": true },
+    { "id": "concurrency", "question": "What does a person see when two sessions or people change the same thing at once? No answer may rely on exclusivity." },
+    { "id": "unseen-inputs", "question": "Which inputs can the design not observe (config, environment, files loaded by path, other processes), and how does the interface treat them?" },
+    { "id": "rule-consistency", "question": "Do the rule statements and their examples match the scope and the acceptance criteria?", "needs_refs": true },
+    { "id": "end-state", "question": "Does anything here (a stopgap, a transitional screen, a hard-coded list, a fallback) become unnecessary under the end-state design? Where a list is needed, where does its single source live?" },
+    { "id": "failure-visibility", "question": "Does anything fail silently? What does the person see when a step cannot run?" },
+    { "id": "false-green", "question": "For each acceptance criterion, what is the simplest wrong implementation that would still pass, and how does the criterion refuse it?", "needs_refs": true },
+    { "id": "cost", "question": "What is the render, load and token cost under load, and what bounds it?" },
+    { "id": "migration", "question": "How do existing screens, stored data and habits reach the new design?" },
+    { "id": "alternatives-shown", "question": "Which alternatives were shown side by side (not only described), and why did the chosen one win?" },
+    { "id": "accessibility-and-responsive", "question": "How does it work with keyboard and screen reader, in both colour themes, and at phone width?" },
+    { "id": "human-acceptance", "question": "Which part needs a human to judge it, and what do they check?" }
+  ],
+  "checks": ["refs-resolve", "refusal-has-ac", "rule-change-has-ac", "decision-has-rejected", "out-of-scope-not-in-scope", "goal-has-measure"],
+  "render": [
+    { "heading": "Goal", "fields": ["goal"] },
+    { "heading": "Problem and evidence", "fields": ["problem_evidence"] },
+    { "heading": "Scope", "fields": ["scope", "out_of_scope"] },
+    { "heading": "Visual direction", "fields": ["visual_direction"] },
+    { "heading": "Alternatives considered", "fields": ["alternatives_considered"] },
+    { "heading": "States and screens", "fields": ["states"] },
+    { "heading": "Rules", "fields": ["rules"] },
+    { "heading": "Refusals and exceptions", "fields": ["refusals"] },
+    { "heading": "Rule changes", "fields": ["rule_changes"] },
+    { "heading": "Design decisions", "fields": ["design_decisions"] },
+    { "heading": "Acceptance by a human", "fields": ["human_acceptance"] },
+    { "heading": "Benchmark", "fields": ["benchmark"] },
+    { "heading": "Code structure", "fields": ["structure"] },
+    { "heading": "Related documents", "fields": ["related"] }
+  ]
+}

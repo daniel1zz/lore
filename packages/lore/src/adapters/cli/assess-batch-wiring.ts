@@ -12,7 +12,7 @@
  * Side-effect class: IO (git worktrees, the suite, the judge, the issue tracker, corpus writes, stderr warnings).
  */
 
-import { ok, type DocId, type LoreError, type MilestoneFacts, type PlanBundle, type Result } from "@lore/core";
+import { ok, resolveMachineTestSlots, type DocId, type LoreError, type MilestoneFacts, type PlanBundle, type Result } from "@lore/core";
 import type { App } from "../../app.js";
 import { IssueFilingService } from "../../service/issue-filing-service.js";
 import type { SuiteRun } from "../../service/milestone-review-inputs.js";
@@ -27,6 +27,8 @@ import { createGithubIssuePort } from "./assess-file-issues.js";
 import { measurePlanCriteriaAtHead, resolveAssessedCommit, type ListDocsPort } from "./assess-attestation-wiring.js";
 import { deriveLandingDiffForPlan, describeLandingCount, type DiffSourceRecord } from "./assess-commit-derivation.js";
 import { createGitHeadCriteriaRunner } from "./assess-landing-attester.js";
+import { createGitCarryPort } from "./assess-carry-selection.js";
+import { ReviewTestSlots as ReviewTestSlotsImpl, slotCommitSuiteRunner, slotCriterionRerunner, slotStaleRefresher, type ReviewTestSlots } from "../../service/review-test-slots.js";
 import { createGitChangedFilesSince, createGitFileExistsAt, createGitFirstParentCommitContaining, createGitFirstParentHistory } from "./assess-regression-git.js";
 import { createAppCriterionRerunner, createAppStaleRefresher } from "./assess-stale-refresh.js";
 import { createGitCommitSuiteRunner } from "./assess-suite-runner.js";
@@ -72,6 +74,20 @@ function describeDiffSource(source: DiffSourceRecord): string {
   }
 }
 
+/**
+ * The machine's review test slots for one process (BR-1532): every review test run takes one of `workflow.review.machine_test_slots`.
+ * The one construction every review entry (`lore assess`, `lore plan close`) shares.
+ */
+export function createReviewTestSlots(inv: Inv, leases: ReviewLeases, config: Parameters<typeof resolveMachineTestSlots>[0]): ReviewTestSlots {
+  return new ReviewTestSlotsImpl({
+    leases,
+    slots: resolveMachineTestSlots(config),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    clock: Date.now,
+    say: (line) => inv.io.stderr.write(`${line}\n`),
+  });
+}
+
 /** The measured inputs of one review, built once per run (see {@link createAssessWiring}). */
 export interface AssessWiring {
   /** The suite of main's HEAD, measured once per batch (stored results first, BR-1497); `undefined` when `suiteRefs` is empty. */
@@ -89,6 +105,11 @@ export interface AssessWiringInput {
   /** The acting identity recorded on the evidence the measurements write. */
   readonly actor: string;
   readonly reviewService: MilestoneReviewServiceOf;
+  /**
+   * The machine's review test slots (BR-1532): every review test run takes one. The runners and rerunners below are built ONLY through
+   * the `slot*` decorators of this one value, so no review run bypasses it.
+   */
+  readonly slots: ReviewTestSlots;
 }
 
 /**
@@ -98,7 +119,7 @@ export interface AssessWiringInput {
  * @returns the closures; they share the assessed commit and the criteria measured once in the suite's worktree
  */
 export function createAssessWiring(input: AssessWiringInput): AssessWiring {
-  const { app, inv, actor, reviewService } = input;
+  const { app, inv, actor, reviewService, slots } = input;
 
   // reason: main's head as the batch resolved it once (set by `measureSuite`); the regression head recheck reads that commit, never a newer main.
   let assessedCommit: string | undefined;
@@ -116,7 +137,10 @@ export function createAssessWiring(input: AssessWiringInput): AssessWiring {
       listDocsOf(app),
       bundle,
       { commit, ...(worktreeRoot !== undefined ? { worktreeRoot } : {}) },
-      createGitHeadCriteriaRunner(inv.cwd, inv.env, (executionRoot) => createAppCriterionRerunner(app, verifyRunner, { executionRoot, by: actor, nowIso: () => new Date().toISOString() })),
+      createGitHeadCriteriaRunner(inv.cwd, inv.env, (executionRoot) =>
+        slotCriterionRerunner(createAppCriterionRerunner(app, verifyRunner, { executionRoot, by: actor, nowIso: () => new Date().toISOString() }), slots),
+      ),
+      createGitCarryPort(inv.cwd, inv.env),
     );
   };
 
@@ -126,6 +150,10 @@ export function createAssessWiring(input: AssessWiringInput): AssessWiring {
 
   const measureSuite = async (suiteRefs: readonly string[]): Promise<SuiteRun | undefined> => {
     if (suiteRefs.length === 0) return undefined;
+    // reason: BR-1532 — a machine batch measures once per pass; nothing a previous pass measured may be read as this pass's facts.
+    criteriaByPlan.clear();
+    criteriaFallbackReason = undefined;
+    assessedCommit = undefined;
     // reason: stale cited evidence is re-verified in this SAME throwaway main worktree, once per batch, before any
     // plan is judged (Part D); a failed refresh leaves its rules stale, which the snapshot rule reads as n/a.
     const verifyRunner = app.verifyRunnerService;
@@ -133,11 +161,14 @@ export function createAssessWiring(input: AssessWiringInput): AssessWiring {
       verifyRunner === undefined
         ? undefined
         : async (root: string): Promise<void> => {
-            const refresher = createAppStaleRefresher(app, verifyRunner, {
-              executionRoot: root,
-              by: actor,
-              nowIso: () => new Date().toISOString(),
-            });
+            const refresher = slotStaleRefresher(
+              createAppStaleRefresher(app, verifyRunner, {
+                executionRoot: root,
+                by: actor,
+                nowIso: () => new Date().toISOString(),
+              }),
+              slots,
+            );
             const refreshed = await reviewService.refreshStaleCitedRules(suiteRefs, refresher);
             if (!refreshed.ok) {
               inv.io.stderr.write(`Warning: stale cited-rule refresh failed: ${formatErrorFor(inv, refreshed.error)}\n`);
@@ -151,7 +182,7 @@ export function createAssessWiring(input: AssessWiringInput): AssessWiring {
     // already bound to the suite leases (BR-1511). The batch measures nothing per landing (spec D1).
     const suiteResults = app.suiteResultService;
     if (suiteResults === undefined) return { status: "not_measured", reason: "the suite-result store is not wired in this app" };
-    const runner = createGitCommitSuiteRunner(inv.cwd, inv.env);
+    const runner = slotCommitSuiteRunner(createGitCommitSuiteRunner(inv.cwd, inv.env), slots);
     // reason: ONE worktree at the assessed commit serves the stale cited-rule refresh (only when some plan cites a stale
     // rule) and the plans' script criteria (BR-1498, AC-AO-3), so criteria run once per review.
     const stale = refreshStale === undefined ? ok(false) : await reviewService.hasStaleCitations(suiteRefs);
@@ -221,7 +252,7 @@ export function createAssessWiring(input: AssessWiringInput): AssessWiring {
     const rerunCriterion =
       verifyRunner === undefined
         ? undefined
-        : createAppCriterionRerunner(app, verifyRunner, { executionRoot: inv.cwd, by: actor, nowIso: () => new Date().toISOString() });
+        : slotCriterionRerunner(createAppCriterionRerunner(app, verifyRunner, { executionRoot: inv.cwd, by: actor, nowIso: () => new Date().toISOString() }), slots);
     // reason: BR-1496 — regression is measured on the selector's tests for the plan's changed paths at the commit holding its last
     // landing (stored per (commit, file), so a second review runs nothing); red files are rechecked at the assessed head, bisected
     // and confirmed alone. No full suite runs. Without the suite-result store regression stays not-measured, never pass.
@@ -234,7 +265,7 @@ export function createAssessWiring(input: AssessWiringInput): AssessWiring {
       regressionFacts = { regression: [noCodeRegressionRow(derivation.no_code_tasks)], regression_files: [], regression_causes: [], single_file_run_ids: [], failing_fact_files: [] };
     } else if (suiteResults !== undefined) {
       // reason: #535 — one runner per review: its file runs share one prepared worktree per commit, removed in `finally` whatever happened.
-      const regressionRunner = createGitCommitSuiteRunner(inv.cwd, inv.env);
+      const regressionRunner = slotCommitSuiteRunner(createGitCommitSuiteRunner(inv.cwd, inv.env), slots);
       const measured = await (async () => {
         try {
           return await regressionAtHead(derivation.landings, derivation.unlanded_tasks, {

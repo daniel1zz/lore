@@ -12,6 +12,7 @@
  * Side-effect class: `probeGitState` is IO (spawns git); `decideStampOutcome` is pure.
  */
 import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import type { StateStamp } from "@lore/core";
 
 const GIT_PROBE_TIMEOUT_MS = 10_000;
@@ -38,6 +39,28 @@ export function isInsideGitRepository(root: string): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * The worktree root (realpath of `git rev-parse --show-toplevel`) containing `root`, for comparing it with an
+ * oracle-lock holder's recorded worktree (BR-1512).
+ *
+ * @param root - the resolved execution root
+ * @returns the realpath, or `undefined` when git cannot answer (the caller then treats a held lock as held: unknown is never read as elsewhere)
+ * @sideeffect IO — spawns `git rev-parse --show-toplevel` once
+ */
+export function worktreeRootOf(root: string): string | undefined {
+  try {
+    const top = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: GIT_PROBE_TIMEOUT_MS,
+    }).trim();
+    return top === "" ? undefined : realpathSync(top);
+  } catch {
+    return undefined;
   }
 }
 

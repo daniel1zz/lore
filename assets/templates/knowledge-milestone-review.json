@@ -1,0 +1,93 @@
+{
+  "doc_type": "knowledge",
+  "kind": "milestone-review",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["plan_ref", "assessed_commit", "verdict", "findings"],
+    "properties": {
+      "plan_ref": { "type": "string", "minLength": 1, "title": "Plan", "x-ref": true, "description": "Slug of the plan this review binds." },
+      "assessed_commit": { "type": "string", "minLength": 1, "title": "Assessed commit", "description": "Main's head when the review measured." },
+      "verdict": { "type": "string", "title": "Overall verdict", "enum": ["pass", "fail"], "description": "pass iff no dimension is fail; na and not-measured never fail the review by themselves." },
+      "findings": {
+        "type": "array",
+        "title": "Dimension findings",
+        "minItems": 1,
+        "description": "One entry per dimension. A failed dimension may carry SEVERAL root causes, each with its own fingerprint, so one dimension failing for three reasons is three closable causes, not one blended finding.",
+        "items": {
+          "type": "object",
+          "required": ["dimension", "verdict", "reason"],
+          "properties": {
+            "dimension": {
+              "type": "string",
+              "enum": ["correctness_vs_acs", "spec_conformance", "regression", "design_necessity", "snapshot_accuracy", "concurrency_safety", "security"]
+            },
+            "verdict": { "type": "string", "enum": ["pass", "fail", "na", "not-measured"] },
+            "reason": { "type": "string", "minLength": 1 },
+            "reference": { "type": "string", "description": "The external practice, document or commit the judgement rests on; design_necessity passes only with one." },
+            "root_causes": {
+              "type": "array",
+              "description": "Every distinct root cause of a failed dimension.",
+              "items": {
+                "type": "object",
+                "required": ["fingerprint", "cites"],
+                "properties": {
+                  "fingerprint": { "type": "string", "minLength": 1, "description": "Stable identity of the cause: built from its cites (AC id, rule id, file path, symbol), never from wording. For a regression, one per red test file." },
+                  "cites": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+                  "files": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                  "summary": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "attestation_facts": {
+        "type": "array",
+        "title": "Criteria attestation (fact table)",
+        "description": "Script criteria attestation, one row per criterion (the correctness_vs_acs input).",
+        "items": {
+          "type": "object",
+          "required": ["subject", "verdict", "detail"],
+          "properties": {
+            "subject": { "type": "string", "minLength": 1, "description": "<spec>:<ac>" },
+            "verdict": { "type": "string", "enum": ["pass", "fail", "not-measured", "na"] },
+            "detail": { "type": "string", "description": "The attestation id, the failing files, or why it was not measured." }
+          }
+        }
+      },
+      "regression_facts": {
+        "type": "array",
+        "title": "Regression at the assessed commit (fact table)",
+        "description": "One row for the head suite and one per red test file.",
+        "items": {
+          "type": "object",
+          "required": ["subject", "verdict", "detail"],
+          "properties": {
+            "subject": { "type": "string", "minLength": 1, "description": "A landing commit or a test file." },
+            "verdict": { "type": "string", "enum": ["pass", "fail", "not-measured", "na"] },
+            "detail": { "type": "string" },
+            "cause": { "type": "string", "enum": ["unrunnable", "unlanded", "unmappable", "flaky-bisection"], "description": "Why a not-measured row is not measured." }
+          }
+        }
+      },
+      "regression_files": { "type": "array", "title": "Files charged as regressions", "items": { "type": "string", "minLength": 1 } }
+    }
+  },
+  "dimensions": [
+    { "id": "correctness-vs-acs", "question": "Does every acceptance criterion in the plan's task scopes have a passing attestation at the assessed commit?" },
+    { "id": "spec-conformance", "question": "Where does the delivered behaviour differ from the spec, and for each difference which root cause explains it?" },
+    { "id": "regression", "question": "Which test files are red at the assessed commit, and which landing of this plan caused each?" },
+    { "id": "design-necessity", "question": "Which technical choices have no external practice behind them, and what reference supports each one that does?" },
+    { "id": "snapshot-accuracy", "question": "Which rules or documents does the delivered change contradict?" },
+    { "id": "concurrency-safety", "question": "Where can two writers or two runs interleave in this change, and what keeps the result correct?" },
+    { "id": "security", "question": "What untrusted input reaches this change, and where is it validated?" }
+  ],
+  "checks": ["refs-resolve"],
+  "render": [
+    { "heading": "Plan and commit", "fields": ["plan_ref", "assessed_commit", "verdict"] },
+    { "heading": "Dimension findings", "fields": ["findings"] },
+    { "heading": "Criteria attestation", "fields": ["attestation_facts"] },
+    { "heading": "Regression", "fields": ["regression_facts", "regression_files"] }
+  ]
+}

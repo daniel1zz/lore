@@ -512,7 +512,7 @@ export class DecisionService {
    */
   async resolvePending(
     pendingId: number,
-    answer: "accept" | "reject",
+    answer: "accept" | "reject" | "direct",
     reason: string | undefined,
     proof: HumanChannelProof,
   ): Promise<Result<DecisionLogRow, LoreError>> {
@@ -525,7 +525,14 @@ export class DecisionService {
     if (!pending.ok) return pending;
     const target = pending.value.find((p) => p.id === pendingId);
     if (target === undefined) return err(validationError("id", `decision ${pendingId} is not pending`, undefined, "BR-1252"));
-    const verdict = answer === "accept" ? "auto" : "refuse";
+    // reason: BR-1531 — `direct` (record the human's direction, allow one more round) exists only for the review-round-cap
+    // class and must carry the direction text; it is stored as verdict `auto` with `facts.human.answer = "direct"`, which
+    // is what ReviewRoundCap reads. Any other class answers accept or reject only.
+    if (answer === "direct") {
+      if (target.class !== "review-round-cap") return err(validationError("answer", `direct answers only a review-round-cap decision; decision ${pendingId} is class ${target.class}`, undefined, "BR-1531"));
+      if (reason === undefined || reason.trim() === "") return err(validationError("reason", "a direct answer records the human's direction: give it as the reason text", undefined, "BR-1531"));
+    }
+    const verdict = answer === "reject" ? "refuse" : "auto";
     const head = decisionChainHead(rows.value);
     const input: DecisionRecordInput = {
       ts: this.now(),

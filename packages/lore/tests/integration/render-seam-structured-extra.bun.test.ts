@@ -1,5 +1,5 @@
 // @spawns packages/lore/src/index.ts
-// @spawns scripts/seed-write-spec-rule.ts
+// @reads assets/templates/**
 /**
  * The shared `renderDocMarkdown` seam's loss notice REACHES `lore feed` and — the sharp
  * end — a `lore gate` DENIAL pack
@@ -20,10 +20,10 @@
  * load-bearing and least substitutable — the agent is mid-write, acting on the pack
  * alone, with no habit of running a second command. The denial below is driven by a
  * SCHEMA-VALID payload (well-formed `type`/`title`/`parent_id`/`content`/`extra`) whose
- * only defect is a gate PREDICATE violation (no `## ` heading → `MISSING_SKELETON`). An
+ * only defect is a gate PREDICATE violation (it names a parent, which a spec may not). An
  * invalid payload would be stopped by input parsing BEFORE the gate is reached, which
  * reads as a pass while proving nothing — so every denial assertion below is paired with
- * (a) a `MISSING_SKELETON` token proving the GATE, not the parser, refused it, and (b) a
+ * (a) the predicate's own "a spec takes no parent" text proving the GATE, not the parser, refused it, and (b) a
  * HAPPY control on the SAME payload shape that exits 0.
  *
  * ⛔ SLICE-SCOPED ASSERTIONS: the pack renders `## Rule` (the discovered skill doc) and
@@ -59,7 +59,6 @@ import { tmpdir } from "os";
 
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PROJECT_ROOT, "src", "index.ts");
-const SEED_SCRIPT = join(PROJECT_ROOT, "..", "..", "scripts", "seed-write-spec-rule.ts");
 
 /** The notice's two stable LONE tokens — asserted independently, never as one phrase. */
 const NOTICE_MARKER = "structured";
@@ -112,12 +111,22 @@ function ruleSlice(stdout: string): string {
   return end === -1 ? stdout.slice(start) : stdout.slice(start, end);
 }
 
+/**
+ * The liveness control of every "announces nothing" case: in the SAME run a parent carrying structured `extra` DOES
+ * announce, so silence on a plain parent can never be explained by a dead mechanism.
+ */
+function expectMechanismLive(): void {
+  const live = runLore(["feed", "spec-create", "--parent", prdWithExtra], tmpDir);
+  expect(live.exitCode).toBe(0);
+  expect(parentSlice(live.stdout)).toContain(NOTICE_COMMAND_TOKEN);
+}
+
 /** Number of loss notices in `text` — >1 on `lore get` would be the double-announce trap. */
 function noticeCount(text: string): number {
   return text.split(NOTICE_COMMAND_TOKEN).length - 1;
 }
 
-/** A SCHEMA-VALID spec candidate whose only defect is the gate's skeleton predicate. */
+/** A SCHEMA-VALID spec candidate whose only defect is a gate PREDICATE violation (it names a parent, BR-2). */
 function denyPayload(parentIdOrSlug: string): string {
   return JSON.stringify({
     type: "spec",
@@ -163,9 +172,8 @@ beforeAll(() => {
     mustRun(["create", "prd", "--title", "Seam Root Plain", "--no-ai", "--content", "## Overview\n\nPlain body."], tmpDir).stdout,
   );
 
-  // reason: BR-709 — the seed files the rule doc under the corpus's requirements document, so it runs once one exists.
-  const seed = Bun.spawnSync(["bun", "run", SEED_SCRIPT], { cwd: tmpDir, env: { ...process.env, HOME: tmpDir } });
-  if (seed.exitCode !== 0) throw new Error(`seed-write-spec-rule failed: ${seed.stderr.toString()}`);
+  // reason: the rule slice of a spec-create pack is the approved spec template, so the shipped templates are seeded.
+  mustRun(["migrate", "templates", "--apply"], tmpDir);
 
   // REAL dedicated writer → authentic `extra.requirements` on a LEGAL prd parent.
   mustRun(["requirement", "add", prdWithExtra, "R-1", "--statement", "The seam announces withheld structured extra.", "--priority", "P0"], tmpDir);
@@ -238,11 +246,11 @@ describe("lore feed spec-create — HAPPY (the pack announces withheld structure
     expect(slice).not.toContain("The seam announces withheld structured extra.");
   });
 
-  it("the RULE slice announces the skill doc's own structured extra too", () => {
+  it("the RULE slice is the approved spec template (compact rule text, not a document: nothing is withheld, so no notice)", () => {
     const result = runLore(["feed", "spec-create", "--parent", prdWithExtra], tmpDir);
     const slice = ruleSlice(result.stdout);
-    expect(slice).toContain(NOTICE_COMMAND_TOKEN);
-    expect(slice).toContain("skill");
+    expect(slice).toContain("What a spec feature must satisfy (template spec-feature-template@2)");
+    expect(slice).not.toContain(NOTICE_COMMAND_TOKEN);
   });
 
   it("--json carries the same announced pack in its feed field", () => {
@@ -269,7 +277,7 @@ describe("lore feed spec-create — NEGATIVE control (a plain parent announces n
     expect(parent).not.toContain(NOTICE_COMMAND_TOKEN);
     expect(parent).not.toContain(NOTICE_MARKER);
     // Live-mechanism control: an always-appending fix and a dead one are distinguishable here.
-    expect(ruleSlice(result.stdout)).toContain(NOTICE_COMMAND_TOKEN);
+    expectMechanismLive();
   });
 });
 
@@ -281,7 +289,7 @@ describe("lore gate spec-create — HAPPY (the DENIAL pack announces)", () => {
 
     // Proof the GATE refused it, not the input parser: exit 4 + a predicate reason + a pack.
     expect(result.exitCode).toBe(4);
-    expect(result.stdout).toContain("MISSING_SKELETON");
+    expect(result.stdout).toContain("a spec takes no parent");
     expect(result.stdout).toContain("[source:");
     expect(result.stdout).toContain("## Rule");
 
@@ -303,11 +311,11 @@ describe("lore gate spec-create — HAPPY (the DENIAL pack announces)", () => {
   it("NEGATIVE control: the same denial against a plain parent announces nothing on that slice", () => {
     const result = runLore(["gate", "spec-create", "--input-json", denyPayload(prdPlain)], tmpDir);
     expect(result.exitCode).toBe(4);
-    expect(result.stdout).toContain("MISSING_SKELETON");
+    expect(result.stdout).toContain("a spec takes no parent");
     const parent = parentSlice(result.stdout);
     expect(parent).toContain("Plain body.");
     expect(parent).not.toContain(NOTICE_COMMAND_TOKEN);
-    expect(ruleSlice(result.stdout)).toContain(NOTICE_COMMAND_TOKEN);
+    expectMechanismLive();
   });
 });
 
@@ -328,7 +336,7 @@ describe("lore feed / gate — BOUNDARY (a doc longer than the pack's leading-sl
 
     const gate = runLore(["gate", "spec-create", "--input-json", denyPayload(prdLong)], tmpDir);
     expect(gate.exitCode).toBe(4);
-    expect(gate.stdout).toContain("MISSING_SKELETON");
+    expect(gate.stdout).toContain("a spec takes no parent");
     const gateParent = parentSlice(gate.stdout);
     expect(gateParent).toContain("…[truncated]");
     expect(gateParent).toContain(NOTICE_COMMAND_TOKEN);
@@ -348,11 +356,11 @@ describe("lore feed / gate — BOUNDARY (a doc longer than the pack's leading-sl
 // ─── BOUNDARY / ERROR ───────────────────────────────────────────────────────
 
 describe("lore feed spec-create — BOUNDARY / ERROR (no parent slice to announce on)", () => {
-  it("BOUNDARY: no --parent renders no parent slice and still announces on the rule slice", () => {
+  it("BOUNDARY: no --parent renders no parent slice and still carries the template rule slice", () => {
     const result = runLore(["feed", "spec-create"], tmpDir);
     expect(result.exitCode).toBe(0);
     expect(parentSlice(result.stdout)).toBe("");
-    expect(ruleSlice(result.stdout)).toContain(NOTICE_COMMAND_TOKEN);
+    expect(ruleSlice(result.stdout)).toContain("What a spec feature must satisfy");
   });
 
   it("ERROR: an unresolvable --parent degrades to no parent slice, never a fabricated notice", () => {

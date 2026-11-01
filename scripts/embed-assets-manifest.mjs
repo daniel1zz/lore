@@ -96,6 +96,7 @@ export const TOP_LEVEL_KIND_MAP = {
   hooks: "hook",
   project: "project",
   skills: "skill",
+  templates: "template",
 };
 
 /**
@@ -116,6 +117,7 @@ const DEFAULT_OWNERSHIP_BY_KIND = {
   hook: "managed",
   project: "managed",
   skill: "managed",
+  template: "managed",
 };
 
 /**
@@ -187,7 +189,7 @@ export function computeTreeDigest(entries) {
 // ─── Template expansion ────────────────────────────────────────────────────────
 
 /** Kinds that must not carry any `{{lore:` token (copied verbatim, never expanded). */
-const LITERAL_ONLY_KINDS = new Set(["governance", "project", "root"]);
+const LITERAL_ONLY_KINDS = new Set(["governance", "project", "root", "template"]);
 
 /**
  * Returns the bytes the manifest hashes for one asset file.
@@ -312,8 +314,8 @@ export function renderGeneratedFile(manifest) {
  * for the kind -> ownership derivation rules.
  */
 
-/** One of the six vendored top-level \`assets/\` directories, or \`root\` (a file directly in \`assets/\`). */
-export type AssetEntryKind = "skill" | "agent" | "hook" | "governance" | "project" | "context" | "root";
+/** One of the seven vendored top-level \`assets/\` directories, or \`root\` (a file directly in \`assets/\`). */
+export type AssetEntryKind = "skill" | "agent" | "hook" | "governance" | "project" | "context" | "template" | "root";
 
 /** Update-time handling region (SPEC-076 §C1) — see the generator's doc comment. */
 export type AssetOwnership = "managed" | "merged" | "user_once";

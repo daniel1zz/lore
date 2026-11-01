@@ -1,0 +1,63 @@
+{
+  "doc_type": "knowledge",
+  "kind": "handoff",
+  "version": 1,
+  "fields": {
+    "type": "object",
+    "required": ["summary", "decisions", "next_steps"],
+    "properties": {
+      "summary": { "type": "string", "minLength": 1, "title": "Summary", "description": "Where the work stands, so the next session can resume without the transcript." },
+      "plan_ref": { "type": "string", "title": "Plan", "x-ref": true, "description": "Slug of the plan being worked." },
+      "task_refs": { "type": "array", "title": "Tasks", "x-ref-list": true, "items": { "type": "string", "minLength": 1 } },
+      "decisions": {
+        "type": "array",
+        "title": "Decisions made",
+        "items": {
+          "type": "object",
+          "required": ["decision", "why", "confidence"],
+          "properties": {
+            "decision": { "type": "string", "minLength": 1 },
+            "why": { "type": "string", "minLength": 1 },
+            "confidence": { "type": "string", "enum": ["established", "observed", "unconfirmed", "undecided"] }
+          }
+        }
+      },
+      "failing_oracle": {
+        "type": "object",
+        "title": "Failing oracle",
+        "required": ["command", "summary"],
+        "properties": {
+          "command": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1, "description": "What fails and what you already tried." }
+        }
+      },
+      "modified_files": { "type": "array", "title": "Modified files", "items": { "type": "string", "minLength": 1 } },
+      "next_steps": { "type": "array", "title": "Next steps", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "description": "In order; the first is what to do on resuming." },
+      "open_threads": {
+        "type": "array",
+        "title": "Open threads",
+        "items": {
+          "type": "object",
+          "required": ["thread", "blocking"],
+          "properties": {
+            "thread": { "type": "string", "minLength": 1, "description": "A question, a half-finished change, or something you were waiting on." },
+            "blocking": { "type": "boolean", "description": "True when the next step cannot proceed until it is resolved." },
+            "owner": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "dimensions": [
+    { "id": "resume-point", "question": "What is the exact first action on resuming, and what does the next session need open to do it?" },
+    { "id": "unrecorded-state", "question": "What do you know that is in no commit, document or log, and where have you written it down here?" }
+  ],
+  "checks": ["refs-resolve"],
+  "render": [
+    { "heading": "Summary", "fields": ["summary", "plan_ref", "task_refs"] },
+    { "heading": "Decisions made", "fields": ["decisions"] },
+    { "heading": "State", "fields": ["failing_oracle", "modified_files"] },
+    { "heading": "Next steps", "fields": ["next_steps"] },
+    { "heading": "Open threads", "fields": ["open_threads"] }
+  ]
+}

@@ -29,7 +29,7 @@ import { issueLeaseKey, leaseLostError, type LeaseHandle, type ReviewLeases } fr
 
 /** Renews the caller's lease and answers whether it still holds it (false: write nothing, stop). */
 export type Fence = () => Promise<boolean>;
-import { issueTitleOf, rootCauseOf, type FailedFinding, type RootCause } from "./root-cause-fingerprint.js";
+import { issueTitleOf, rootCauseOf, splitFindingByFile, type FailedFinding, type RootCause } from "./root-cause-fingerprint.js";
 
 /** A filed or found issue. */
 export interface IssueRef {
@@ -190,12 +190,14 @@ export class IssueFilingService {
    * @param findings - every failed dimension of the plans under filing
    * @param fence - renews the caller's own lease (a plan lease) and answers whether it still holds it; asked before each
    *   known-defect write, which is not made when it answers false (BR-1511). Absent in bare constructions.
-   * @returns one group per fingerprint, in first-seen order; each group carries its own error when it failed; an error
-   *   when any finding has no root cause (a stored regression review lacking `suite_failing_files`)
+   * @returns one group per fingerprint, in first-seen order (a regression finding is split into one finding per charged file
+   *   first, BR-1513, so one review can file or link several regression issues); each group carries its own error when it
+   *   failed; an error when any finding has no root cause (a failed dimension without a cite)
    */
   async fileFindings(findings: readonly FailedFinding[], fence?: Fence): Promise<Result<FilingGroup[], LoreError>> {
     const byFingerprint = new Map<string, { cause: RootCause; findings: FailedFinding[] }>();
-    for (const finding of findings) {
+    // reason: BR-1513 / D2 — the split happens here, at the finding, never inside the hash: `rootCause` still returns one cause per finding.
+    for (const finding of findings.flatMap(splitFindingByFile)) {
       const caused = this.rootCause(finding);
       if (!caused.ok) return caused;
       const cause = caused.value;

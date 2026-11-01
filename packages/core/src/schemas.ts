@@ -23,6 +23,7 @@ import { WEIGHT_TABLE_KINDS } from "./decision-record.js";
 import { validitySchema } from "./validity.js";
 import { acScopeArraySchema, phaseExtraSchema } from "./phase.js";
 import { baselineExtraSchema } from "./baseline.js";
+import { templateDocumentExtraSchema } from "./template-document.js";
 import { fnv1a32Hex } from "./slug-hash.js";
 import { isSelfDeclaredOrdinalTitle, SELF_DECLARED_ORDINAL_TITLE_REFUSAL } from "./ordinal.js";
 import type { MirrorHumanId } from "./ordinal.js";
@@ -52,6 +53,7 @@ export const docTypeSchema = z.enum([
   "task",
   "phase",
   "baseline",
+  "template",
 ]);
 
 export const docRoleSchema = z.enum([
@@ -769,6 +771,16 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
                 : issue.message,
             path: ["extra", ...issue.path],
           });
+        }
+      }
+    }
+
+    // template: extra.template must satisfy the core meta-schema; ALL issues in one message.
+    if (type === "template") {
+      const templateResult = templateDocumentExtraSchema.safeParse(extra ?? {});
+      if (!templateResult.success) {
+        for (const issue of templateResult.error.issues) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: issue.message, path: ["extra", ...issue.path] });
         }
       }
     }

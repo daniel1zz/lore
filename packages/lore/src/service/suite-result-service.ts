@@ -1,32 +1,27 @@
 /**
  * The suite-result store's service: per-(commit, file) test runs stored once and reused (BR-1497). No review runs the full
  * suite (spec `spec-a-plan-s-close-runs-only-the-tests-its-changes-can-reach`); the stored full-suite results older
- * measurements left behind are only READ (the main red/green ledger).
+ * measurements left behind are only READ (`listResults`).
  *
  * Purpose: make "what did this test file say at commit X" a stored fact: the first run of a (commit, file) stores it, every
- *   later review reads the store and runs nothing; the main red/green state the review records is derived from the stored
- *   suite results, so there is no second record of one run.
- * Public surface: SuiteResultService (runSingleFile, runBatch, rerunFiles, listFileRuns, listResults, listMainCheckedRows),
- *   CommitSuiteRunnerPort, RunBatchOptions, FileRunOutcome, SingleFileRunKind, FileRunKind, singleFileRunKey,
- *   suiteRunOfResult, deriveMainCheckedRows.
+ *   later review reads the store and runs nothing.
+ * Public surface: SuiteResultService (runSingleFile, runBatch, listFileRuns, listResults),
+ *   CommitSuiteRunnerPort, RunBatchOptions, FileRunOutcome, SingleFileRunKind, FileRunKind, singleFileRunKey.
  * Invariants:
- *   - Stored rows are never edited. Per-file re-runs (`rerunFiles`) are separate rows attached to a result id.
+ *   - Stored rows are never edited.
  *   - A file run (`runSingleFile`, `runBatch`) is stored keyed by (commit, file): its `suite_result_id` column holds
  *     {@link singleFileRunKey} (`file-<kind>@<commit>`), not a suite result id, so a commit that never had a full suite
  *     carries file runs and a later review reads them back (BR-1496).
  *   - A single-file run under lease `suite:C:F` (BR-1511): a caller that finds the key held waits, then reads the store and
  *     runs only when no row is stored after the wait.
- *   - Nothing here reads or writes the audit chain: main-red / main-red-green records stay audit rows (BR-1412), the
- *     "main was checked at <commit>" fact is {@link deriveMainCheckedRows} over the stored results.
+ *   - Nothing here reads or writes the audit chain.
  * Side-effect class: stateful (store writes, runner IO through the injected port).
  *
  * @spec_ref spec-the-milestone-review-measures-its-facts-per-landing-and (AC-AF-2, BR-1497, BR-1412)
  */
 
 import { err, ok, type LoreError, type Result } from "@lore/core";
-import type { StoreInterface, SuiteFileRunRecord, SuiteResultRecord } from "../store/store-interface.js";
-import { MAIN_CHECKED_ACTION, classifySuiteForMainRed, type MainRedRow } from "./milestone-review.js";
-import type { SuiteRun } from "./milestone-review-inputs.js";
+import type { FileRunClassification, InconclusiveCause, StoreInterface, SuiteFileRunRecord, SuiteResultRecord } from "../store/store-interface.js";
 import { suiteFileLeaseKey, type ReviewLeases } from "./review-batch-lease.js";
 
 /** One test file re-run at a commit. */
@@ -37,6 +32,38 @@ export interface FileRunOutcome {
   readonly duration_ms: number;
   /** Set when the run did not complete (timeout, process tree not ended): `exit_code` is then a failure, not a test result. */
   readonly incomplete?: string;
+  /**
+   * What the run says about the file (BR-1533), read from the runner's own per-test errors. Absent: derived from `exit_code`
+   * (0 = green, 1 = red), which a stub runner without a report relies on. `inconclusive` wins over `incomplete`: the run is stored.
+   */
+  readonly classification?: FileRunClassification;
+  /** Set with `classification: "inconclusive"`: `timeout` or `no-report` from a runner (the remaining cause is written only by the store migration). */
+  readonly inconclusive_cause?: "timeout" | "no-report";
+}
+
+/** The classification a stored row gets for an outcome: the runner's, else the exit code's. */
+function classificationOfOutcome(outcome: FileRunOutcome): { readonly classification: FileRunClassification; readonly inconclusive_cause: InconclusiveCause | null } {
+  if (outcome.classification === "inconclusive") return { classification: "inconclusive", inconclusive_cause: outcome.inconclusive_cause ?? "timeout" };
+  if (outcome.classification !== undefined) return { classification: outcome.classification, inconclusive_cause: null };
+  return { classification: outcome.exit_code === 0 ? "green" : "red", inconclusive_cause: null };
+}
+
+/**
+ * Whether a stored run decides anything: a `red` or `green` run does, an `inconclusive` one never does (BR-1533).
+ * @param row - a stored file run
+ */
+export function isConclusiveRun(row: SuiteFileRunRecord): boolean {
+  return row.classification !== "inconclusive";
+}
+
+/**
+ * The run that decides a (commit, file) point among the rows stored for it, oldest first: the NEWEST conclusive one; an inconclusive
+ * run newer than a conclusive one changes nothing.
+ * @param rows - the rows of one file under one key, in storage order
+ * @returns the deciding row, or `undefined` when no run there is conclusive
+ */
+export function decidingRun(rows: readonly SuiteFileRunRecord[]): SuiteFileRunRecord | undefined {
+  return rows.filter(isConclusiveRun).at(-1);
 }
 
 /** How one batched invocation is prepared. */
@@ -87,42 +114,6 @@ export interface SuiteResultServiceDeps {
   readonly leases?: ReviewLeases;
 }
 
-/**
- * A stored result as the review's existing suite shape: `measured` carries the commands and failing files,
- * `unrunnable` is `not_measured` with its cause (never a pass).
- */
-export function suiteRunOfResult(result: SuiteResultRecord): SuiteRun {
-  if (result.status === "unrunnable") return { status: "not_measured", reason: result.cause ?? "the suite run did not complete" };
-  return {
-    status: "measured",
-    commit: result.commit_sha,
-    commands: result.commands.map((c) => ({ ...c })),
-    skipped: result.skipped.map((s) => ({ ...s })),
-    failing_test_files: result.failing_test_files.map((f) => ({ file: f.file, imports: [...f.imports] })),
-  };
-}
-
-/**
- * The "main was checked at <commit>: red|green" rows the main-red ledger folds, derived from stored results (oldest
- * first). An `unrunnable` result, and a measured run that proves neither red nor green, checked nothing and yields no row.
- *
- * @param results - stored suite results, oldest first
- */
-export function deriveMainCheckedRows(results: readonly SuiteResultRecord[]): MainRedRow[] {
-  const rows: MainRedRow[] = [];
-  for (const result of results) {
-    if (result.status !== "measured") continue;
-    const state = classifySuiteForMainRed(suiteRunOfResult(result));
-    if (state.state === "unmeasured") continue;
-    rows.push({
-      action: MAIN_CHECKED_ACTION,
-      timestamp: result.measured_at,
-      details: { commit: result.commit_sha, status: state.state, at: result.measured_at },
-    });
-  }
-  return rows;
-}
-
 /** Why a single file was run at a commit: a bisection probe, or the confirmation of one end of a transition (spec D6). */
 export type SingleFileRunKind = "bisect" | "confirm";
 
@@ -164,45 +155,6 @@ export class SuiteResultService {
   constructor(private readonly deps: SuiteResultServiceDeps) {}
 
   /**
-   * Re-runs the named test files at the commit of a stored result and stores one row per file attached to it.
-   *
-   * @param suiteResultId - id of the stored result the re-run belongs to
-   * @param files - repo-relative test files (at least one)
-   * @param runner - runs the files at the result's commit (or at `atCommit`)
-   * @param atCommit - re-run at this commit instead (the landing's `main_before`); the rows are still attached to `suiteResultId` and carry this commit
-   * @returns the stored per-file rows; `err` for an unknown result id, no files, a runner failure or a store failure
-   */
-  async rerunFiles(
-    suiteResultId: string,
-    files: readonly string[],
-    runner: CommitSuiteRunnerPort,
-    atCommit?: string,
-  ): Promise<Result<SuiteFileRunRecord[], LoreError>> {
-    if (files.length === 0) return err({ code: "VALIDATION_ERROR", field: "files", message: "rerunFiles needs at least one test file", rule: "BR-1497" });
-    const found = await this.deps.store.getSuiteResult(suiteResultId);
-    if (!found.ok) return found;
-    if (found.value === null) {
-      return err({ code: "VALIDATION_ERROR", field: "suite_result_id", message: `no stored suite result "${suiteResultId}"`, rule: "BR-1497" });
-    }
-    const commit = atCommit ?? found.value.commit_sha;
-    const ran = await runner.runFiles(commit, files);
-    if (!ran.ok) return ran;
-    const measuredAt = this.deps.now();
-    const rows: SuiteFileRunRecord[] = ran.value.map((o) => ({
-      suite_result_id: suiteResultId,
-      commit_sha: commit,
-      file: o.file,
-      exit_code: o.exit_code,
-      output_tail: o.output_tail,
-      duration_ms: o.duration_ms,
-      measured_at: measuredAt,
-    }));
-    const inserted = await this.deps.store.insertSuiteFileRuns(rows);
-    if (!inserted.ok) return inserted;
-    return ok(rows);
-  }
-
-  /**
    * Runs ONE test file at `commit` and stores the outcome keyed by (commit, file, kind), once: when a row for that key and
    * file is already stored it is returned and nothing runs; when a concurrent review stored one while this run was in
    * flight, the store keeps the first row (migration-045) and that row is returned, not this run's result (#528, BR-1497).
@@ -235,8 +187,9 @@ export class SuiteResultService {
     if (outcome === undefined) {
       return err({ code: "STORE_ERROR", message: `the runner reported no outcome for ${file} at ${commit}` });
     }
-    // reason: a timed-out run says nothing about the file; storing it as a red row would charge a plan for a hang (BR-1496).
-    if (outcome.incomplete !== undefined) {
+    // reason: a run that did not complete for another reason than a timeout (process tree not ended, build failed) says nothing and is not stored.
+    // A timed-out run IS stored, as inconclusive (BR-1533): it keeps the evidence that the point was tried and decides nothing.
+    if (outcome.incomplete !== undefined && outcome.classification !== "inconclusive") {
       return err({ code: "STORE_ERROR", message: `${file} did not complete at ${commit}: ${outcome.incomplete}` });
     }
     // reason: an exit outside {0, 1} (usage error, lock contention) is no test result; stored, it would read as red.
@@ -251,9 +204,12 @@ export class SuiteResultService {
       output_tail: outcome.output_tail,
       duration_ms: outcome.duration_ms,
       measured_at: this.deps.now(),
+      ...classificationOfOutcome(outcome),
     };
     const inserted = await this.deps.store.insertSuiteFileRuns([row]);
     if (!inserted.ok) return inserted;
+    // reason: an inconclusive run is never a deciding row, so there is nothing to read back: the caller gets the row just stored.
+    if (row.classification === "inconclusive") return ok(row);
     // reason: the insert is ignored when a concurrent review stored this (key, file) first; read back the winner so every review sees one outcome.
     const stored = await this.firstStoredFileRun(key, file);
     if (!stored.ok) return stored;
@@ -271,7 +227,7 @@ export class SuiteResultService {
    * @param files - repo-relative test files (at least one)
    * @param runner - must implement `runFilesTogether`
    * @param options - `buildFirst`: the runner builds the compiled binary in the worktree before the tests run (a selected file declares `@spawns dist/lore`)
-   * @returns the first stored row of each file, in the order given; `err` when the runner cannot batch, fails, reports no or an incomplete outcome (nothing stored) or the store fails
+   * @returns the first stored row of each file, in the order given; `err` when the runner cannot batch, fails, or leaves a file without a complete outcome (the files it did finish are stored, the others never) or the store fails
    */
   async runBatch(commit: string, files: readonly string[], runner: CommitSuiteRunnerPort, options: RunBatchOptions = {}): Promise<Result<SuiteFileRunRecord[], LoreError>> {
     if (files.length === 0) return err({ code: "VALIDATION_ERROR", field: "files", message: "runBatch needs at least one test file", rule: "BR-1496" });
@@ -290,10 +246,11 @@ export class SuiteResultService {
     });
   }
 
+  /** The deciding (newest conclusive) stored row of each file under `key`, `null` for a file with none: an inconclusive run is no result. */
   private async storedRowsOf(key: string, files: readonly string[]): Promise<Result<(SuiteFileRunRecord | null)[], LoreError>> {
     const rows = await this.deps.store.listSuiteFileRuns(key);
     if (!rows.ok) return rows;
-    return ok(files.map((file) => rows.value.find((r) => r.file === file) ?? null));
+    return ok(files.map((file) => decidingRun(rows.value.filter((r) => r.file === file)) ?? null));
   }
 
   private async runBatchAndStore(commit: string, files: readonly string[], key: string, runner: CommitSuiteRunnerPort, options: RunBatchOptions): Promise<Result<SuiteFileRunRecord[], LoreError>> {
@@ -309,30 +266,58 @@ export class SuiteResultService {
     if (!ran.ok) return ran;
     const measuredAt = this.deps.now();
     const rows: SuiteFileRunRecord[] = [];
+    let unfinished: LoreError | undefined;
     for (const file of missing) {
       const outcome = ran.value.find((o) => o.file === file);
-      if (outcome === undefined) return err({ code: "STORE_ERROR", message: `the runner reported no outcome for ${file} in the batch at ${commit}` });
-      if (outcome.incomplete !== undefined) return err({ code: "STORE_ERROR", message: `${file} did not complete in the batch at ${commit}: ${outcome.incomplete}` });
-      if (!isTestResultExit(outcome.exit_code)) {
-        return err({ code: "STORE_ERROR", message: `${file} did not run in the batch at ${commit}: ${nonRunCause("bun run test:file", outcome.exit_code, outcome.output_tail)}` });
+      if (outcome === undefined) {
+        unfinished ??= { code: "STORE_ERROR", message: `the runner reported no outcome for ${file} in the batch at ${commit}` };
+        continue;
       }
-      rows.push({ suite_result_id: key, commit_sha: commit, file, exit_code: outcome.exit_code, output_tail: outcome.output_tail, duration_ms: outcome.duration_ms, measured_at: measuredAt });
+      // reason: a timed-out file is stored as inconclusive (BR-1533); only a file that did not complete for another reason stays unstored.
+      if (outcome.incomplete !== undefined && outcome.classification !== "inconclusive") {
+        unfinished ??= { code: "STORE_ERROR", message: `${file} did not complete in the batch at ${commit}: ${outcome.incomplete}` };
+        continue;
+      }
+      if (!isTestResultExit(outcome.exit_code)) {
+        unfinished ??= { code: "STORE_ERROR", message: `${file} did not run in the batch at ${commit}: ${nonRunCause("bun run test:file", outcome.exit_code, outcome.output_tail)}` };
+        continue;
+      }
+      rows.push({
+        suite_result_id: key,
+        commit_sha: commit,
+        file,
+        exit_code: outcome.exit_code,
+        output_tail: outcome.output_tail,
+        duration_ms: outcome.duration_ms,
+        measured_at: measuredAt,
+        ...classificationOfOutcome(outcome),
+      });
     }
-    const inserted = await this.deps.store.insertSuiteFileRuns(rows);
-    if (!inserted.ok) return inserted;
+    // reason: #568 — the files the runner FINISHED are stored even when others in the batch did not (a timed-out chunk keeps what it completed);
+    // the unfinished ones are stored never, so a retry runs exactly them. The call still fails while any file is unfinished.
+    if (rows.length > 0) {
+      const partial = await this.deps.store.insertSuiteFileRuns(rows);
+      if (!partial.ok) return partial;
+    }
+    if (unfinished !== undefined) return err(unfinished);
     // reason: the insert is ignored for a (key, file) a concurrent review stored first; read the winners back so every review sees one outcome.
+    // A file whose run here was inconclusive has no deciding row: it is returned as the inconclusive row just stored.
     const after = await this.storedRowsOf(key, files);
     if (!after.ok) return after;
-    const winners = after.value.filter((row): row is SuiteFileRunRecord => row !== null);
-    if (winners.length !== files.length) return err({ code: "STORE_ERROR", message: `the batch run at ${commit} was not found after it was stored` });
+    const winners: SuiteFileRunRecord[] = [];
+    for (const [index, file] of files.entries()) {
+      const row = after.value[index] ?? rows.find((r) => r.file === file);
+      if (row === undefined) return err({ code: "STORE_ERROR", message: `the batch run at ${commit} was not found after it was stored` });
+      winners.push(row);
+    }
     return ok(winners);
   }
 
-  /** The earliest stored row of `file` under `key`, or null when none is stored. */
+  /** The deciding (newest conclusive) stored row of `file` under `key`, or null when none is stored: an inconclusive run is not a result. */
   private async firstStoredFileRun(key: string, file: string): Promise<Result<SuiteFileRunRecord | null, LoreError>> {
     const rows = await this.deps.store.listSuiteFileRuns(key);
     if (!rows.ok) return rows;
-    return ok(rows.value.find((r) => r.file === file) ?? null);
+    return ok(decidingRun(rows.value.filter((r) => r.file === file)) ?? null);
   }
 
   /** The per-file re-runs stored for a result, in the order they ran. */
@@ -343,12 +328,5 @@ export class SuiteResultService {
   /** Every stored suite result, oldest first (regression at the assessed commit reads the known state of each commit from it). */
   listResults(): Promise<Result<SuiteResultRecord[], LoreError>> {
     return this.deps.store.listSuiteResults();
-  }
-
-  /** The main-checked rows (red or green per measured commit) derived from every stored result, oldest first. */
-  async listMainCheckedRows(): Promise<Result<MainRedRow[], LoreError>> {
-    const all = await this.deps.store.listSuiteResults();
-    if (!all.ok) return all;
-    return ok(deriveMainCheckedRows(all.value));
   }
 }

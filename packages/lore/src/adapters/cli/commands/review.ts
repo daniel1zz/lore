@@ -167,6 +167,10 @@ async function reviewOneDoc(
   idOrSlug: string,
   blueprint: TreeBlueprint | undefined,
 ): Promise<Result<{ docSlug: string; judgment: ReviewJudgment }, LoreError>> {
+  // reason: BR-1531 — the round cap is checked BEFORE the bundle, the deterministic checks and any AI call: a refused third
+  // round costs nothing and records no judgment.
+  const roundAvailable = await app.reviewService.assertReviewRoundAvailable(idOrSlug);
+  if (!roundAvailable.ok) return roundAvailable;
   const bundleResult = await app.corpusService.getReviewBundle(idOrSlug, blueprint);
   if (!bundleResult.ok) return bundleResult;
   const bundle = bundleResult.value;

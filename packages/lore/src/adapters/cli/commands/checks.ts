@@ -23,7 +23,7 @@ import { exitCode, formatErrorFor, formatTable } from "../utils.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import { formatAge } from "../../../service/plan-acceptance-view.js";
-import { buildCompletePlanLister, buildReviewTriggerService, refuseSpawnForRead } from "../review-batch-wiring.js";
+import { buildCompletePlanLister, buildReviewTriggerService, refuseBatchLeaseForRead, refuseSpawnForRead } from "../review-batch-wiring.js";
 import { classifyFeedbackUpstream, resolveGithubIssueListing } from "../report-issue-wiring.js";
 
 export default defineLoreCommand({
@@ -95,7 +95,7 @@ export default defineLoreCommand({
           const stats = await service.stats();
           if (!stats.ok) return fail(stats.error);
           // BR-1379 self-measurement: time from complete to accepted per plan, and the over-24h anomalies.
-          const trigger = buildReviewTriggerService(app, refuseSpawnForRead);
+          const trigger = buildReviewTriggerService(app, refuseSpawnForRead, refuseBatchLeaseForRead);
           if (trigger === undefined) {
             inv.io.stderr.write("Error: this composition cannot classify complete plans (no lease store or decision reader wired).\n");
             return 1;

@@ -16,7 +16,7 @@
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { App } from "../../app.js";
 import type { BatchPlanRow } from "../../service/review-batch-service.js";
-import { buildBatchRunPorts, createAssessFiling, createAssessWiring, createBatchRunner } from "./assess-batch-wiring.js";
+import { buildBatchRunPorts, createAssessFiling, createAssessWiring, createBatchRunner, createReviewTestSlots } from "./assess-batch-wiring.js";
 import type { invocationOf } from "./command-invocation.js";
 import { printLine } from "./output.js";
 import { buildPlanCloseService } from "./plan-close-wiring.js";
@@ -74,7 +74,7 @@ export async function runPlanClose(input: PlanCloseRunInput): Promise<number> {
     inv.io.stderr.write("Error: this composition has no lease store, so review work cannot be leased; nothing was changed\n");
     return 1;
   }
-  const wiring = createAssessWiring({ app, inv, actor, reviewService });
+  const wiring = createAssessWiring({ app, inv, actor, reviewService, slots: createReviewTestSlots(inv, leases, input.config) });
   const filing = createAssessFiling({ app, inv, actor, upstream: classification.kind === "unconfigured" ? undefined : classification.cfg, leases });
   const closeService = buildPlanCloseService({ app, inv, dbPath: input.dbPath, actor });
   if (!closeService.ok) {

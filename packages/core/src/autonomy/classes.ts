@@ -119,6 +119,11 @@ export const OPERATION_CLASS_REGISTRY: OperationClassRegistry = {
   "ac-exempt": milestone,
   "verify-new-command": normal("reversible", 0.8, 0.95),
   "run-end-stale": normal("reversible", 0.8, 0.97),
+  // reason: BR-1531 — the human decision after a judgment-required document's second non-approving review round. It is a
+  // `normal` class declared `irreversible-external` (the hard rule: that recoverability ALWAYS escalates, so every
+  // instance opens a pending decision no score can wave through) and NOT a fourth `human-always` class, because the
+  // human-always set is pinned at exactly three (BR-1370, autonomy-human-set.test.ts). Do not "tidy" it to `human`.
+  "review-round-cap": normal("irreversible-external", 1, 0),
   "governance-loosen": human,
   "push-force": human,
   "archive-ref-prune": human,

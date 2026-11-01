@@ -1,4 +1,3 @@
-// @spawns scripts/seed-write-spec-rule.ts
 // @reads scripts/check-unclaimed-oracle.ts
 // @reads assets/project/lore-config-template.yaml
 // @reads assets/governance/write-spec-rule.md
@@ -31,8 +30,8 @@
  *   ERROR:      `--undo` on a never-invalidated doc → exit 4; a non-knowledge/adr
  *               target (a plan) → exit 4
  *   STATE:      `lore status`'s invalidated-feeding-source warning STRING surfaces for
- *               one pre-armed fixture (seeded via `scripts/seed-write-spec-rule.ts`,
- *               the SAME feeding-skill precedent `gate`/`feed` tests use) — deep
+ *               one pre-armed fixture (an approved `knowledge/skill` doc scoped `applies_to: "spec"`,
+ *               created through a live in-process app) — deep
  *               armed-gate derivation logic is exhaustively tested at the vitest layer
  *               (AC-MH-12, `validity-feed-and-judge.test.ts`); this test only proves
  *               the CLI text-rendering wiring
@@ -61,9 +60,7 @@ import { withSessionIdentity } from "../../helpers/session-actor";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
-// tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
-const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
-const SEED_SCRIPT = join(REPO_ROOT, "scripts", "seed-write-spec-rule.ts");
+import { createLiveApp } from "../../helpers/live-app.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -122,20 +119,28 @@ async function createPlan(tmpDir: string, title: string): Promise<string> {
   return parseJsonSlug(result.stdout);
 }
 
-/** Seeds the write-spec-rule skill doc (feeding source for the spec-create gate)
- *  directly into the throwaway corpus's SQLite file — a SEPARATE bun process from the
- *  compiled binary, mirroring how CI/deploy runs this script (module header). */
+/** Creates and approves a `knowledge/skill` doc scoped `applies_to: "spec"` (a team-authored feeding source) in the
+ *  throwaway corpus, through a live in-process app over the same SQLite file. (The spec-rules document and its seed
+ *  script are retired; a team skill doc is still a discoverable feeding source, which is what this test needs.) */
 async function seedFeedingSkill(tmpDir: string): Promise<{ slug: string }> {
-  // reason: BR-709 — the seed files the rule doc under the corpus's requirements document, so one must exist first.
-  await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir));
-  const dbPath = join(tmpDir, ".lore", "lore.db");
-  // reason: cwd is the corpus, so the test run's known-party spawn rewrite registers the seed's run in THIS corpus.
-  const proc = Bun.spawnSync(["bun", SEED_SCRIPT, dbPath], { cwd: tmpDir });
-  if (proc.exitCode !== 0) {
-    throw new Error(`seed-write-spec-rule failed: ${proc.stderr.toString()}`);
+  // reason: BR-709 — a knowledge doc hangs under the corpus's requirements document, so one must exist first.
+  const parent = await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir));
+  const app = createLiveApp(join(tmpDir, ".lore", "lore.db"));
+  try {
+    const created = await app.corpusService.create({
+      parent_id: parent,
+      type: "knowledge",
+      title: "Spec rules fixture",
+      content: "## Rule\n\nA fixture feeding rule.",
+      extra: { sub_type: "skill", skill: { applies_to: "spec" } },
+    } as never);
+    if (!created.ok) throw new Error(`create feeding skill failed: ${JSON.stringify(created.error)}`);
+    const approved = await app.corpusService.set(created.value.id, { status: "approved" } as never);
+    if (!approved.ok) throw new Error(`approve feeding skill failed: ${JSON.stringify(approved.error)}`);
+    return { slug: created.value.slug };
+  } finally {
+    app.close();
   }
-  const parsed = JSON.parse(proc.stdout.toString()) as { slug: string; outcome: string };
-  return { slug: parsed.slug };
 }
 
 interface JsonDocEnvelope {

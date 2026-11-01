@@ -140,7 +140,7 @@
  * Both subcommands' deterministic decision logic (the predicate checks themselves,
  * plus the failure feeding-pack / message rendering) now lives behind
  * `../../../service/checkpoint-registry.js::checkpointRegistry` — this file only
- * performs the store/IO reads (`resolveParentDoc`, `findFeedingSkill`,
+ * performs the store/IO reads (`resolveParentDoc`, the approved-template rule slice,
  * `AcService.listCriteria`) and dispatches through the registry's `check`/`feed`
  * callbacks. This is a pure refactor: exit codes, stdout feeding-pack text, and stderr
  * judge advisory are all UNCHANGED from the pre-registry inline-predicate shape.
@@ -187,12 +187,7 @@
  *         ("gate plan-close --explain")
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { defineLoreCommand, exitCli } from "../cli-exit.js";
-import { resolveAssetsRoot } from "../setup-args.js";
-import { err, ok } from "@lore/core";
 import { z } from "zod";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatErrorFor, resolveActor } from "../utils.js";
@@ -218,13 +213,10 @@ import {
 } from "@lore/core";
 import type { App } from "../../../app.js";
 import type { AcService } from "../../../service/ac-service.js";
-import type { LoreConfig, LoreError, NewReviewJudgment, Result, SpecKind } from "@lore/core";
+import type { LoreConfig, LoreError, NewReviewJudgment, SpecKind } from "@lore/core";
 import type { RecordGateSkip } from "../../../service/gate-enforcer.js";
-import {
-  renderDocMarkdown,
-  resolveParentDoc,
-  CHECKPOINT_PRODUCED_TYPE,
-} from "../../../flows/feed-flow.js";
+import { renderDocMarkdown, resolveParentDoc } from "../../../flows/feed-flow.js";
+import { resolveRuleSlice, type RuleSlice } from "../../../service/template-rule-slice.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 // reason: this file already imports "../loader.js" (bun:sqlite via createApp), so it
 // is bun-only and never vitest-reachable — no lazy-import indirection needed for
@@ -292,81 +284,16 @@ async function auditGateBypass(checkpoint: GateCheckpoint, inv: Invocation): Pro
 }
 
 /**
- * Looks up `checkpoint` in `flows/feed-flow.ts::CHECKPOINT_PRODUCED_TYPE` — the SINGLE
- * definition site for "which doc type does this checkpoint produce" — throwing if
- * absent. This used to be a second, independently-hardcoded `"spec"` literal
- * constant in this file that could silently desync from the map; deriving it here
- * instead means there is exactly one place that fact can be edited.
- * Fail-loud (no `?? "spec"` fallback): every call site in this file passes a
- * compile-time-known checkpoint id, so this can only fire if a future edit removes an
- * entry the map currently guarantees — the same "can't happen in production, but must
- * never silently default" shape as `requireCheckpoint` below.
+ * The rule a spec-create denial quotes: the approved template of the candidate's spec kind (an unknown or absent kind reads
+ * as `feature`, the create-time default). The spec-rules document, its compiled-in fallback and the file shipped with the
+ * binary are retired (spec-every-document-is-stored-as-structured-fields-validated-by, "One source").
  */
-function requireCheckpointProducedType(checkpoint: string): string {
-  const type = CHECKPOINT_PRODUCED_TYPE[checkpoint];
-  if (type === undefined) {
-    throw new Error(
-      `Internal error: checkpoint "${checkpoint}" has no entry in CHECKPOINT_PRODUCED_TYPE`,
-    );
+async function specCreateRuleSlice(app: App, specKind: string | undefined): Promise<RuleSlice> {
+  if (app.templateService === undefined) {
+    return { source: "template lookup", markdown: "(No rule could be read: TemplateService is not wired on this App.)" };
   }
-  return type;
-}
-
-/**
- * `applies_to` scope this gate discovers its feeding skill by — matches the
- * `extra.skill.applies_to` value `scripts/seed-write-spec-rule.ts` seeds on the
- * "Write-spec rules (gate feeding source)" doc. `CorpusService.findFeedingSkill`
- * discovers ANY approved `knowledge/skill` doc declaring this scope, not just that
- * specific seeded title — discovery is by declared scope, not a hardcoded title
- * literal (IoC vertical-slice tech-spec §4.1/§11, P1 slice-2). Derived from the SSOT
- * map (see `requireCheckpointProducedType`) rather than a second hardcoded literal.
- */
-const SPEC_CREATE_PRODUCED_TYPE = requireCheckpointProducedType("spec-create");
-
-/**
- * The write-spec rule that ships with the binary (BR-1359): the feeding source when no approved
- * `knowledge/skill` doc declares `applies_to: "spec"`. Path relative to the resolved `assets/` root.
- */
-const SHIPPED_RULE_ASSET = join("governance", "write-spec-rule.md");
-
-/** Source label of the shipped rule on the feeding pack's `[source: ...]` line — the fallback is named, never silent. */
-const SHIPPED_RULE_SOURCE = "shipped asset assets/governance/write-spec-rule.md";
-
-// packages/lore/src/adapters/cli/commands/gate.ts -> repo root is 6 levels up (same derivation as governance.ts / init.ts).
-const GATE_MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
-const GATE_REPO_ROOT = join(GATE_MODULE_DIR, "..", "..", "..", "..", "..", "..");
-
-/**
- * Reads the write-spec rule shipped with the binary.
- *
- * @param inv - The invocation (compiled-vs-dev mode and exec path decide where `assets/` lives).
- * @returns The rule markdown, or `VALIDATION_ERROR` naming the missing asset (never an empty or placeholder rule).
- */
-function readShippedWriteSpecRule(inv: Invocation): Result<string, LoreError> {
-  const assetsRoot = resolveAssetsRoot({
-    repoRoot: GATE_REPO_ROOT,
-    isCompiled: inv.isCompiled,
-    execPath: inv.execPath,
-  });
-  const assetPath = join(assetsRoot, SHIPPED_RULE_ASSET);
-  try {
-    return ok(readFileSync(assetPath, "utf8"));
-  } catch (cause) {
-    // reason: STORE_ERROR (exit 1), not VALIDATION_ERROR (exit 4): exit 4 is the gate's "candidate refused" verdict,
-    // and a broken install must not read as one.
-    return err({
-      code: "STORE_ERROR",
-      message:
-        `lore gate spec-create: no approved project rule doc, and the write-spec rule shipped with the binary ` +
-        `(assets/governance/write-spec-rule.md) is missing from this install: cannot read "${assetPath}": ` +
-        `${cause instanceof Error ? cause.message : String(cause)}`,
-    });
-  }
-}
-
-/** Rule slice shown when the rule lookup itself FAILED — never dressed up as "no rule doc" (BR-587). */
-function ruleLookupFailedPlaceholder(reason: string): string {
-  return `(Rule document lookup failed: ${reason}. The rule text could not be read, which is different from no rule existing.)`;
+  const kind = specKind !== undefined && (SPEC_KINDS as readonly string[]).includes(specKind) ? specKind : "feature";
+  return await resolveRuleSlice(app.templateService, "spec", kind);
 }
 
 /**
@@ -745,12 +672,7 @@ async function runSpecCreateGate(
     return 0;
   }
 
-  const ruleLookup = await findFeedingSkill(app, SPEC_CREATE_PRODUCED_TYPE, inv);
-  if (!ruleLookup.ok) {
-    inv.io.stderr.write(formatErrorFor(inv, ruleLookup.error) + "\n");
-    return exitCode(ruleLookup.error);
-  }
-  const rule = ruleLookup.value;
+  const rule = await specCreateRuleSlice(app, input.extra?.spec_kind);
   const parentMarkdown =
     parentDoc !== null ? await renderDocMarkdown(app, parentDoc) : undefined;
 
@@ -1362,51 +1284,3 @@ function formatJudgeAdvisory(judgment: NewReviewJudgment): string {
   return lines.join("\n");
 }
 
-/** One rule-doc lookup outcome: where the slice came from, and the slice itself. */
-interface RuleDocLookup {
-  /** Slug of the discovered skill doc, or {@link SHIPPED_RULE_SOURCE} when the shipped rule was used. */
-  source: string;
-  /** Markdown slice fed to `buildFeedingPack`. */
-  markdown: string;
-}
-
-/**
- * Discovers the approved `knowledge/skill` doc scoped to `appliesTo` via
- * `CorpusService.findFeedingSkill` and returns its markdown (MDX-resolved, mirroring
- * `renderDocMarkdown`) — the "active feeding" rule source for a gate's violation
- * output. A project's own approved doc always wins (BR-1359); with none, the rule shipped
- * with the binary (`assets/governance/write-spec-rule.md`) is read and its source label
- * says so.
- *
- * @param appliesTo - Scope to discover by, e.g. `SPEC_CREATE_PRODUCED_TYPE`.
- * @param inv - The invocation, locating the binary's shipped assets.
- * @returns The lookup; `markdown` carries a lookup-failed note when the discovery or get
- *   call fails (never dressed up as "no rule", BR-587), and an `err` naming the missing asset
- *   when no project doc exists and the shipped rule cannot be read.
- */
-async function findFeedingSkill(
-  app: App,
-  appliesTo: string,
-  inv: Invocation,
-): Promise<Result<RuleDocLookup, LoreError>> {
-  const discoveryResult = await app.corpusService.findFeedingSkill(appliesTo);
-  if (!discoveryResult.ok) {
-    return ok({
-      source: `applies_to:${appliesTo}`,
-      markdown: ruleLookupFailedPlaceholder(JSON.stringify(discoveryResult.error)),
-    });
-  }
-  if (discoveryResult.value === null) {
-    const shipped = readShippedWriteSpecRule(inv);
-    if (!shipped.ok) return shipped;
-    return ok({ source: SHIPPED_RULE_SOURCE, markdown: shipped.value });
-  }
-
-  const match = discoveryResult.value;
-  const getResult = await app.corpusService.get(match.id);
-  if (!getResult.ok) {
-    return ok({ source: match.slug, markdown: ruleLookupFailedPlaceholder(JSON.stringify(getResult.error)) });
-  }
-
-  return ok({ source: match.slug, markdown: await renderDocMarkdown(app, getResult.value.doc) });
-}

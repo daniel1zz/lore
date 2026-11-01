@@ -31,7 +31,9 @@ import type {
   RunId,
   RunRecord,
   SearchHit,
+  MissingDimensionFinding,
   ReviewTruncationEntry,
+  TemplateRevision,
   SupersededCandidate,
   VersionRecord,
 } from "@lore/core";
@@ -304,6 +306,10 @@ export interface JudgmentRow {
   truncated?: number | bigint | null;
   /** JSON `ReviewTruncationEntry[]` or NULL — nullable column since migration-019.ts (F1). */
   truncation?: string | null;
+  /** `slug@version` of the template the judgment was made against, or NULL — nullable column since migration-048.ts. */
+  template_ref?: string | null;
+  /** JSON `MissingDimensionFinding[]` or NULL — nullable column since migration-048.ts. */
+  missing_dimensions?: string | null;
   created_at: string;
   created_by: string;
 }
@@ -430,6 +436,18 @@ export interface SuiteResultRecord {
   readonly measured_at: string;
 }
 
+/**
+ * What a stored file run says about the file (BR-1533): `red` = a test failed for a reason other than a timeout, `green` = it
+ * passed, `inconclusive` = every failure was a test or hook timeout (or the run's own time limit ended): it says nothing.
+ */
+export type FileRunClassification = "red" | "green" | "inconclusive";
+
+/**
+ * Why a run is inconclusive: its tests timed out, the run wrote no readable outcome report (its console says nothing reliable),
+ * or it is an old failing run classified once by migration 047.
+ */
+export type InconclusiveCause = "timeout" | "no-report" | "unclassified";
+
 /** One named test file re-run at a commit, attached to a suite result (`suite_file_runs`). */
 export interface SuiteFileRunRecord {
   readonly suite_result_id: string;
@@ -439,6 +457,10 @@ export interface SuiteFileRunRecord {
   readonly output_tail: string;
   readonly duration_ms: number;
   readonly measured_at: string;
+  /** Always present: migration 047 classified every earlier row, every writer classifies. */
+  readonly classification: FileRunClassification;
+  /** Set exactly when `classification` is `inconclusive`. */
+  readonly inconclusive_cause: InconclusiveCause | null;
 }
 
 /** Raw `suite_results` row. */
@@ -465,6 +487,8 @@ export interface SuiteFileRunRow {
   output_tail: string;
   duration_ms: number | bigint;
   measured_at: string;
+  classification: string;
+  inconclusive_cause: string | null;
 }
 
 /** The JSON texts a store writes for a suite result's three JSON columns. */
@@ -500,15 +524,23 @@ export function rowToSuiteResult(row: SuiteResultRow): SuiteResultRecord {
 /**
  * Whether a `suite_file_runs.suite_result_id` is a single-file key (`file-<kind>@<commit>`, `singleFileRunKey`), whose
  * (key, file) pair is stored once and first-wins (migration-045, #528). Any other id is a real suite result id, under which
- * `rerunFiles` appends every re-run. Must match migration-045's `LIKE 'file-%@%'` predicate.
+ * (the legacy re-runs of the removed `rerunFiles`) every re-run is appended. Must match migration-045's `LIKE 'file-%@%'` predicate.
  */
 export function isSingleFileRunKey(suiteResultId: string): boolean {
   return suiteResultId.startsWith("file-") && suiteResultId.includes("@", "file-".length);
 }
 
-/** Maps a raw `suite_file_runs` row to a record (`Number()` for libsql bigint). */
+/** Maps a raw `suite_file_runs` row to a record (`Number()` for libsql bigint). A classification outside the three values throws (a corrupt row is never read as a result). */
 export function rowToSuiteFileRun(row: SuiteFileRunRow): SuiteFileRunRecord {
+  if (row.classification !== "red" && row.classification !== "green" && row.classification !== "inconclusive") {
+    throw new Error(`suite_file_runs ${row.suite_result_id} ${row.file}: unknown classification "${row.classification}"`);
+  }
+  if (row.inconclusive_cause !== null && row.inconclusive_cause !== "timeout" && row.inconclusive_cause !== "no-report" && row.inconclusive_cause !== "unclassified") {
+    throw new Error(`suite_file_runs ${row.suite_result_id} ${row.file}: unknown inconclusive cause "${row.inconclusive_cause}"`);
+  }
   return {
+    classification: row.classification,
+    inconclusive_cause: row.inconclusive_cause,
     suite_result_id: row.suite_result_id,
     commit_sha: row.commit_sha,
     file: row.file,
@@ -561,6 +593,11 @@ export interface LeaseRecord {
 export type LeaseAcquisition =
   | { readonly acquired: true; readonly tookOver: boolean }
   | { readonly acquired: false; readonly holder: string; readonly expires_at: string };
+
+/** Outcome of `takeOverLease`: taken, or not because the row is no longer the expected holder's (`current` is the row now, `null` when it is gone). */
+export type LeaseTakeover =
+  | { readonly acquired: true }
+  | { readonly acquired: false; readonly current: LeaseRecord | null };
 
 /** One UTC day's read count (`trace_read_counts`, migration-031, BR-1373). */
 export interface ReadDayCount {
@@ -862,6 +899,7 @@ export function rowToAuditChainEntry(row: AuditChainRow): AuditChainEntry {
 export function rowToReviewJudgment(row: JudgmentRow): ReviewJudgment {
   const supersededCandidate = parseJsonOptional<SupersededCandidate>(row.superseded_candidate);
   const truncation = parseJsonOptional<ReviewTruncationEntry[]>(row.truncation);
+  const missingDimensions = parseJsonOptional<MissingDimensionFinding[]>(row.missing_dimensions);
   return {
     id: row.id,
     doc_id: row.doc_id,
@@ -880,9 +918,73 @@ export function rowToReviewJudgment(row: JudgmentRow): ReviewJudgment {
     ...(supersededCandidate !== undefined ? { superseded_candidate: supersededCandidate } : {}),
     ...(row.truncated !== null && row.truncated !== undefined && Number(row.truncated) === 1 ? { truncated: true } : {}),
     ...(truncation !== undefined ? { truncation } : {}),
+    ...(row.template_ref !== null && row.template_ref !== undefined ? { template_ref: row.template_ref } : {}),
+    ...(missingDimensions !== undefined ? { missing_dimensions: missingDimensions } : {}),
     created_at: row.created_at,
     created_by: row.created_by,
   };
+}
+
+/** Raw `template_revisions` row (migration-048.ts). */
+export interface TemplateRevisionRow {
+  id: string;
+  template_slug: string;
+  status: string;
+  base_version: number | bigint;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+}
+
+/** Raw `template_proposals` row (migration-048.ts). */
+export interface TemplateProposalRow {
+  id: string;
+  revision_id: string;
+  question: string;
+  decision: string | null;
+  dimension_id: string | null;
+  drop_reason: string | null;
+}
+
+/** The two columns of a `template_proposal_findings` row that a proposal's sources and count derive from. */
+export interface TemplateProposalFindingRow {
+  proposal_id: string;
+  judgment_id: string;
+}
+
+/**
+ * Assemble stored revision, proposal and finding rows into {@link TemplateRevision}s. `revisions` keeps the order given
+ * (the callers read newest first); a proposal's sources are its findings' judgment ids de-duplicated in finding order and
+ * its `count` is its number of finding rows. `proposals` / `findings` must already be in creation order.
+ */
+export function assembleTemplateRevisions(
+  revisions: readonly TemplateRevisionRow[],
+  proposals: readonly TemplateProposalRow[],
+  findings: readonly TemplateProposalFindingRow[],
+): TemplateRevision[] {
+  return revisions.map((revision) => ({
+    id: revision.id,
+    template_slug: revision.template_slug,
+    status: revision.status as TemplateRevision["status"],
+    base_version: Number(revision.base_version),
+    created_at: revision.created_at,
+    ...(revision.resolved_at !== null ? { resolved_at: revision.resolved_at } : {}),
+    ...(revision.resolved_by !== null ? { resolved_by: revision.resolved_by } : {}),
+    proposals: proposals
+      .filter((proposal) => proposal.revision_id === revision.id)
+      .map((proposal) => {
+        const own = findings.filter((finding) => finding.proposal_id === proposal.id);
+        return {
+          id: proposal.id,
+          question: proposal.question,
+          source_judgment_ids: [...new Set(own.map((finding) => finding.judgment_id))],
+          count: own.length,
+          ...(proposal.decision !== null ? { decision: proposal.decision as "accepted" | "dropped" } : {}),
+          ...(proposal.dimension_id !== null ? { dimension_id: proposal.dimension_id } : {}),
+          ...(proposal.drop_reason !== null ? { drop_reason: proposal.drop_reason } : {}),
+        };
+      }),
+  }));
 }
 
 /** Maps a raw `calibration_records` row to a CalibrationRecord. */

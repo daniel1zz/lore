@@ -31,7 +31,7 @@ export const MILESTONE_DIMENSIONS = [
 
 export type MilestoneDimension = (typeof MILESTONE_DIMENSIONS)[number];
 
-/** Dimensions whose root cause is measured (suite failing set, contradicted rules), never taken from the judge's cites. */
+/** Dimensions whose root cause is measured (the files charged to the plan, contradicted rules), never taken from the judge's cites. */
 export const MEASURED_CAUSE_DIMENSIONS: readonly MilestoneDimension[] = ["regression", "snapshot_accuracy"];
 
 /**
@@ -137,8 +137,12 @@ export function judgmentAnswerSchema(dimensions: readonly JudgedDimension[]) {
  *   - `unmappable`: a landing (or the history) cannot be placed on main, so a transition cannot be attributed; a retry reads the same git.
  *   - `flaky-bisection`: the confirmation runs disagree with the bisection; single-file runs are stored per commit and reused, so a retry
  *     at the same head reads the same stored runs and reaches the same disagreement.
+ *   - `timeout`: the file's runs at a point ended only in test or hook timeouts (inconclusive, BR-1533): no conclusive run decides
+ *     there, the file is never charged, and the next review runs the point again.
+ *   - `no-report`: the file's run wrote no readable outcome report, so nothing reliable says how it went (the console text is never read as a
+ *     result); like `timeout` it is never charged and the next review runs the point again.
  */
-export const NOT_MEASURED_CAUSES = ["unrunnable", "unlanded", "unmappable", "flaky-bisection"] as const;
+export const NOT_MEASURED_CAUSES = ["unrunnable", "unlanded", "unmappable", "flaky-bisection", "timeout", "no-report"] as const;
 export type RegressionNotMeasuredCause = (typeof NOT_MEASURED_CAUSES)[number];
 
 /**
@@ -146,11 +150,11 @@ export type RegressionNotMeasuredCause = (typeof NOT_MEASURED_CAUSES)[number];
  * only "a plan whose gate is not measured because the suite could not complete" is retried).
  *
  * @param causes - the stored `regression_causes` of the review (absent: none recorded)
- * @returns `true` iff some cause is `unrunnable`; every other cause waits for the plan's own landing, a landing touching its
- *   failing facts, or a manual `lore assess`
+ * @returns `true` iff some cause is `unrunnable`, `timeout` or `no-report` (a retry runs the point again, BR-1533); every other cause
+ *   waits for the plan's own landing, a landing touching its failing facts, or a manual `lore assess`
  */
 export function regressionRetryCanChange(causes: readonly RegressionNotMeasuredCause[] | undefined): boolean {
-  return causes?.includes("unrunnable") ?? false;
+  return causes?.some((cause) => cause === "unrunnable" || cause === "timeout" || cause === "no-report") === true;
 }
 
 /** One row of the facts table: a criterion's attestation, or one landing's regression. */
@@ -267,14 +271,12 @@ export type RetiredAcRef = z.infer<typeof retiredAcRefSchema>;
  * re-reviewing (BR-1379: issues are grouped by fingerprint, and a filing error retries only the filing).
  */
 export const reviewCausesSchema = z.object({
-  /** Failing suite test files attributed to the plan (the regression finding's root cause), sorted. */
-  regression_files: z.array(z.string().min(1)).optional(),
   /**
-   * EVERY failing test file of the batch's one suite run, sorted (set with `regression_files`). The root-cause
-   * fingerprint of a failing main suite is this whole set, so plans attributed different subsets share one issue.
-   * Absent on a review stored before this field existed.
+   * The test files that were red at the plan's last landing and that the selection charged to the plan, sorted (BR-1513).
+   * Each file is its own root cause (`file:<path>`, independent of the plan), so a plan charged with several files
+   * files, links, covers, closes and accepts one root cause per file.
    */
-  suite_failing_files: z.array(z.string().min(1)).optional(),
+  regression_files: z.array(z.string().min(1)).optional(),
   /** Cited rule ids whose state is contradicted (the snapshot-accuracy finding's root cause), sorted. */
   contradicted_rules: z.array(z.string().min(1)).optional(),
 });

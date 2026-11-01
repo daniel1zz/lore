@@ -228,6 +228,8 @@ describe("AC-AU-1 seeded registry (spec class table)", () => {
       ["process-reap", "loss-free-by-proof", 0.85, 0.97],
       ["verify-new-command", "reversible", 0.8, 0.95],
       ["run-end-stale", "reversible", 0.8, 0.97],
+      // BR-1531: always escalates (irreversible-external hard rule), so it is a normal class, not a fourth human-always one.
+      ["review-round-cap", "irreversible-external", 1, 0],
     ];
     for (const [id, path, threshold, prior] of normal) {
       const c = r[id];
@@ -239,7 +241,8 @@ describe("AC-AU-1 seeded registry (spec class table)", () => {
         expect(c.usesJudge).toBe(false);
       }
     }
-    expect(Object.keys(r)).toHaveLength(10);
+    // reason: main's count (12) less override-attestation, which this branch retired (D45, asserted above); the merged registry holds 11
+    expect(Object.keys(r)).toHaveLength(11);
   });
 
   it("stash-drop with measured stash facts -> auto at 0.9; override-judgment (milestone class) -> milestone", () => {

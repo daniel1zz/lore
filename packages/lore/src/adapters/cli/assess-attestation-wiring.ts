@@ -19,6 +19,7 @@ import {
   measureCriteriaAtHead,
   planCriterionScopes,
   type AttestationRow,
+  type CarryPort,
   type HeadCriteriaRunnerPort,
 } from "../../service/milestone-attestation-facts.js";
 
@@ -58,6 +59,7 @@ async function readRows(listDocs: ListDocsPort): Promise<Result<AttestationRow[]
  * @param bundle - the plan bundle
  * @param head - the assessed commit and, when the review has one, the suite's throwaway worktree at it
  * @param runner - runs criteria at a commit through `lore verify`
+ * @param carry - when given, a criterion whose stamped pass no change reaches is carried instead of run (#553)
  * @returns the part of `MilestoneFacts` this module owns (`criteria_attestation_ids` are the attestations made at the commit; `failing_fact_files` the files a failing criterion's command names)
  */
 export async function measurePlanCriteriaAtHead(
@@ -65,11 +67,13 @@ export async function measurePlanCriteriaAtHead(
   bundle: PlanBundle,
   head: { readonly commit: string; readonly worktreeRoot?: string },
   runner: HeadCriteriaRunnerPort,
+  carry?: CarryPort,
 ): Promise<Pick<MilestoneFacts, "attestation" | "criteria_attestation_ids" | "ai_criteria" | "failing_fact_files">> {
   const facts = await measureCriteriaAtHead({
     scopes: planCriterionScopes(bundle.spec, bundle.tasks),
     headCommit: head.commit,
     runner,
+    ...(carry !== undefined ? { carry } : {}),
     ...(head.worktreeRoot !== undefined ? { worktreeRoot: head.worktreeRoot } : {}),
     readRows: () => readRows(listDocs),
   });

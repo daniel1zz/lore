@@ -42,6 +42,7 @@ let lastExitCode = 0;
 import type { Invocation } from "@lore/core";
 
 import { ensureRequirementsDocId } from "../helpers/parented-create.js";
+import { buildFeed } from "../../src/flows/feed-flow.js";
 // ─── Command type + importer (mirrors gate-feeding-skill-discovery.bun.test.ts) ────
 
 type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
@@ -149,7 +150,7 @@ describe("P1 asset-discovery + feeding closed loop (e2e, no seed script)", () =>
         parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge",
         title: "My custom spec-writing skill",
         content: "## Overview\n\nThese are my own custom rules for writing specs — not seeded.",
-        extra: { sub_type: "skill", skill: { applies_to: "spec" } },
+        extra: { sub_type: "skill", skill: { applies_to: "spec-promote" } },
       } as CreateDocInput);
       if (!createResult.ok) {
         throw new Error(`self-authored skill create failed: ${JSON.stringify(createResult.error)}`);
@@ -188,19 +189,17 @@ describe("P1 asset-discovery + feeding closed loop (e2e, no seed script)", () =>
     prdSlug = created.slug;
   });
 
-  it("step 3 — a violating spec-create (no parent) is fed by the self-authored skill's slug + custom content", async () => {
-    const result = await runGateSpecCreate({
-      type: "spec",
-      title: "A spec missing its parent",
-      content: "just some prose, no headings at all",
-    });
+  // reason: the spec-create rule is the approved template now (the spec-rules document and its seed script are retired), so
+  // the generic skill-discovery mechanism is proven on a checkpoint that has no template rule: `lore feed spec-promote`
+  // discovers an approved skill doc scoped by the checkpoint's own name.
+  it("step 3 — `lore feed spec-promote` is fed by the self-authored skill's slug + custom content", async () => {
+    const outcome = await withApp((app) => buildFeed(app, "spec-promote"));
 
-    expect(result.exitCode).toBe(4);
-    expect(result.stdout).toContain(`[source: ${selfAuthoredSpecSkillSlug}`);
-    expect(result.stdout).toContain("custom rules");
-    // Not the seed-script placeholder / seeded doc — proves discovery is generic, not
-    // hardwired to `scripts/seed-write-spec-rule.ts`'s one specific title.
-    expect(result.stdout.toLowerCase()).not.toContain("seed-write-spec-rule");
+    expect(outcome.skill?.slug).toBe(selfAuthoredSpecSkillSlug);
+    expect(outcome.feed).toContain(`[source: ${selfAuthoredSpecSkillSlug}`);
+    expect(outcome.feed).toContain("custom rules");
+    // Not a seeded doc — proves discovery is generic, not wired to one specific title.
+    expect(outcome.feed.toLowerCase()).not.toContain("seed-write-spec-rule");
   });
 
   it("step 4 — applies_to isolation: a plan-scoped skill never leaks into the spec gate's feeding pack", async () => {
@@ -222,17 +221,12 @@ describe("P1 asset-discovery + feeding closed loop (e2e, no seed script)", () =>
     });
     planSkillSlug = created.slug;
 
-    const result = await runGateSpecCreate({
-      type: "spec",
-      title: "Another spec missing its parent",
-      content: "still no headings",
-    });
+    const outcome = await withApp((app) => buildFeed(app, "spec-promote"));
 
-    expect(result.exitCode).toBe(4);
-    // Still the spec-scoped self-authored skill, not the newly-created plan-scoped one.
-    expect(result.stdout).toContain(`[source: ${selfAuthoredSpecSkillSlug}`);
-    expect(result.stdout).not.toContain(`[source: ${planSkillSlug}`);
-    expect(result.stdout).not.toContain("Plan-only marker content");
+    // Still the self-authored skill scoped to this checkpoint, not the newly-created plan-scoped one.
+    expect(outcome.feed).toContain(`[source: ${selfAuthoredSpecSkillSlug}`);
+    expect(outcome.feed).not.toContain(`[source: ${planSkillSlug}`);
+    expect(outcome.feed).not.toContain("Plan-only marker content");
   });
 
   it("step 5 — a compliant spec-create (legal prd parent + valid spec_kind + skeleton) passes", async () => {

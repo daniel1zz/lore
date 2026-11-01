@@ -68,7 +68,7 @@ import type { IntegrateQueue } from "../../../service/integrate-queue.js";
 import { OwnDiffJudgment } from "../../../service/own-diff-judgment.js";
 import { ORACLE_TIMEOUT_DEFAULT_SECONDS } from "../../../service/integrate-oracle-service.js";
 import { findFirstParentCommitContaining } from "../assess-regression-git.js";
-import { buildReviewTriggerService, spawnDetachedReviewBatch } from "../review-batch-wiring.js";
+import { buildReviewLeases, buildReviewTriggerService, spawnDetachedReviewBatch } from "../review-batch-wiring.js";
 import { loadCoChangeRules } from "../../../service/co-change-review.js";
 import {
   IntegrateService,
@@ -326,8 +326,12 @@ export async function runIntegrate(opts: IntegrateRunOptions): Promise<number> {
   const log = (line: string): void => {
     inv.io.stdout.write(`${line}\n`);
   };
-  const reviewBatch = buildReviewTriggerService(app, () =>
+  // reason: BR-1532 — the landing takes `batch:<machine>` itself and hands it to the batch it spawns (REVIEW_BATCH_HANDOFF_ENV).
+  const batchLeases = buildReviewLeases(app, `${resolveActor(inv)}:integrate:${String(process.pid)}`);
+  // reason: a composition with no lease store cannot take the batch lease, so it starts no review batch (same as a missing decision reader).
+  const reviewBatch = batchLeases === undefined ? undefined : buildReviewTriggerService(app, (handoff) =>
     spawnDetachedReviewBatch({
+      handoff,
       cwd: projectRoot,
       corpusDir,
       execPath: inv.execPath,
@@ -337,6 +341,7 @@ export async function runIntegrate(opts: IntegrateRunOptions): Promise<number> {
       runService: app.runService,
       caller: { claimedRun: inv.identity.harnessRun, verified: verifiedIdentity ?? { ok: true, value: undefined } },
     }),
+    batchLeases,
   );
   const service = new IntegrateService({
     git: runGit,

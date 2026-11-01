@@ -28,6 +28,7 @@ import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/ser
 import { coverFailedDimensions } from "../../src/service/milestone-review-inputs.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint } from "../../src/service/milestone-review.js";
 import { ReviewLeases, planLeaseKey } from "../../src/service/review-batch-lease.js";
+import { refuseBatchLeaseForRead } from "../../src/adapters/cli/review-batch-wiring.js";
 import { noDecisionLog } from "../helpers/gate-acceptance-log.js";
 import { ReviewBatchRunner, ReviewTriggerService, type BatchErrorRecord, type BatchRunPorts } from "../../src/service/review-batch-service.js";
 import type { MilestoneReviewResult } from "../../src/service/milestone-review-service.js";
@@ -120,6 +121,7 @@ class World {
       pendingDecisionSubjects: async () => ok(new Set<string>()),
       issueCoverage: async (_planId, failed) => ok(coverFailedDimensions(failed, [])),
       spawnBatch: () => ok({ pid: undefined }),
+      batchLease: refuseBatchLeaseForRead,
     });
   }
 
@@ -161,7 +163,7 @@ class World {
       overall: Object.values(this.shape.verdicts).includes("fail") ? "fail" : "pass",
       dimensions,
       decisions: [],
-      ...(regressionFails ? { causes: { regression_files: [RED_FILE], suite_failing_files: [RED_FILE] } } : {}),
+      ...(regressionFails ? { causes: { regression_files: [RED_FILE] } } : {}),
       ...(this.shape.verdicts.regression === "not-measured" ? { regression_causes: [...(this.shape.regressionCauses ?? ["unrunnable" as const])] } : {}),
       ...(this.shape.assessedCommit !== undefined ? { assessed_commit: this.shape.assessedCommit } : {}),
       ...(this.shape.failingFactFiles !== undefined ? { failing_fact_files: [...this.shape.failingFactFiles] } : {}),

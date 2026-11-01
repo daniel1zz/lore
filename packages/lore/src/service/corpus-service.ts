@@ -7,7 +7,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { ulid } from "ulidx";
 import { isContentChange, buildStateChange, type ContentComparableRow, type StateChange } from "@lore/core";
-import { err, ok, DEDICATED_EXTRA_KEYS, isGateDimension, issueRefSchema, judgeKnownDefectsExtra, readKnownDefects, MAX_ISSUE_REFS_PER_CARRIER, type GateDimension, type KnownDefectEntry, type Result } from "@lore/core";
+import { err, ok, DEDICATED_EXTRA_KEYS, MILESTONE_DIMENSIONS, isGateDimension, issueRefSchema, judgeKnownDefectsExtra, readKnownDefects, MAX_ISSUE_REFS_PER_CARRIER, type GateDimension, type KnownDefectEntry, type Result } from "@lore/core";
 import { admitAcWrite, applyAcChange } from "./ac-write-chokepoint.js";
 import type { LoreError } from "@lore/core";
 // reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
@@ -18,6 +18,10 @@ import type { LoreError } from "@lore/core";
 import { containsCjk, getTransliterateCjk } from "@lore/core/node";
 import {
   adrExtraSchema,
+  templateDocumentExtraSchema,
+  templatesEqual,
+  parseTemplateRef,
+  validationError,
   canonicaliseBody,
   createDocInputSchema,
   deriveTypeMeta,
@@ -94,12 +98,14 @@ import type {
 } from "../store/store-interface.js";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent } from "@lore/core";
 import type { PlanBundle } from "@lore/core";
-import type { ReviewBundle } from "@lore/core";
+import type { ReviewBundle, ReviewTemplateContext } from "@lore/core";
+import { documentKindOf } from "./template-service.js";
 import type { TreeBlueprint } from "@lore/core";
 import { findTraceActorFor, findWriteSourceFor, resolveWriteActorFor, WriteActorUnresolvedError } from "../store/write-context-store.js";
 import { writeCarriesDecision, type DecisionDraft, type DecisionGate } from "./decision-gate.js";
 import { pendingRevisionsOf } from "./baseline-items.js";
-import { acceptedGatesOf, createGateAcceptanceLog } from "./gate-acceptance-service.js";
+import { acceptedGatesOf, createGateAcceptanceLog, unacceptedGateCausesOf } from "./gate-acceptance-service.js";
+import { failingCausesOf, issueTitleOf, type RootCause } from "./root-cause-fingerprint.js";
 import {
   KNOWN_DEFECT_ISSUE_WRITES_AUDIT_ACTION,
   carryOutIssueWrites,
@@ -127,7 +133,7 @@ import {
   type CitedRuleStateRow,
   type MilestoneReviewCurrency,
 } from "./milestone-review.js";
-import { coverFailedDimensions, type DimensionCoverage, type KnownDefectLive, type PlanCloseIssuePort } from "./milestone-review-inputs.js";
+import { coverFailedDimensions, type DimensionCoverage, type FailingCause, type KnownDefectLive, type PlanCloseIssuePort } from "./milestone-review-inputs.js";
 import { describeRetirementRefusal, type PlanCloseRetirementPort } from "./milestone-review.js";
 import type { RuleStateFull } from "./rule-state-service.js";
 import { resolveDoc, ULID_REGEX, type ResolveDocOptions } from "./resolve.js";
@@ -142,6 +148,14 @@ import { type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-r
 import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-archive.js";
 import { isPlanMember } from "./plan-membership.js";
 import { bodyDiffers, RecordLockService, type RecordEditOp } from "./record-lock-service.js";
+import {
+  guardStructuredRowWrite,
+  prepareStructuredCreate,
+  prepareStructuredUpdate,
+  type FieldsPatch,
+  type StructuredWriteDeps,
+} from "./structured-write.js";
+import { resolveRuleSlice } from "./template-rule-slice.js";
 import { ANCHOR_SCANNED_DOC_TYPES } from "./drift-check-service.js";
 import { findPlanClaimedByWriter } from "./run-claimed-plan.js";
 // reason: NOT a cross-service import — `service/CLAUDE.md`'s "no cross-service imports"
@@ -163,83 +177,6 @@ import {
   type CorpusWriteAuthorityContext,
   type ForeignCorpusWriteContext,
 } from "./foreign-corpus-write-guard.js";
-
-/**
- * `checkpointRegistry`'s `"spec-create"` checkpoint always produces a `"spec"` doc
- * (`flows/feed-flow.ts::CHECKPOINT_PRODUCED_TYPE` is the SSOT map for this fact,
- * mirrored by `gate.ts::SPEC_CREATE_PRODUCED_TYPE`) — reproduced here as a local
- * literal rather than importing from `flows/`, since services never import from the
- * adapter-composition layer (service/CLAUDE.md "no cross-service calls" /
- * `../../CLAUDE.md` layer-stack invariant). Safe because the ONLY call site
- * (`_createImpl`'s spec-create gate context enrichment, SPEC-049 §Design Decisions
- * D3) already runs inside a `data.type === "spec"` branch — this constant just
- * documents WHY `"spec"` is the right `findFeedingSkill` scope there, it is not a
- * second independently-drifting derivation of the checkpoint→type mapping.
- */
-const SPEC_CREATE_FEEDING_SCOPE = "spec";
-
-/**
- * Named source label for {@link FALLBACK_SPEC_CREATE_RULE_MARKDOWN} — spec-
- * governance-visibility-an-armed-gate-that-vacuously-passes §B3. Rendered
- * into `renderFeedingPack`'s `[source: ..., trust: ...]` header exactly like
- * a real corpus doc's slug would be; deliberately NOT the literal string
- * `"unknown"` (that string is `feedSpecCreate`'s OWN `ctx.ruleSource ??
- * "unknown"` fallback for a truly absent field — this constant exists so
- * `ruleSource` is never absent in the first place when the corpus lookup
- * misses).
- */
-const FALLBACK_SPEC_CREATE_RULE_SOURCE = "built-in fallback (no seeded rule doc)";
-
-/**
- * Compiled-in spec-create rule slice — spec-governance-visibility-an-armed-
- * gate-that-vacuously-passes §B3 ("a fresh consumer install receives an
- * empty feeding pack"). `findFeedingSkill(SPEC_CREATE_FEEDING_SCOPE)` below
- * is a CORPUS read: a project that just ran `lore init` has zero `knowledge`
- * docs, so that lookup always misses there, and — pre-this-constant — the
- * feeding pack degraded to a bare `[source: unknown]` discriminator with an
- * EMPTY rule slice, defeating the whole "a denial carries the rule that
- * explains it" design (IoC vertical-slice tech-spec §4.1/§11).
- *
- * This is deliberately a SEPARATE literal from
- * `scripts/seed-write-spec-rule.ts`'s `WRITE_SPEC_RULE_CONTENT` (the doc this
- * repo's OWN corpus is seeded with) rather than an import of it:
- * `scripts/` is dev/CI tooling, never part of any distributed package or the
- * compiled `dist/lore` binary (project CLAUDE.md "distribution-first" rule —
- * a fix must land on a surface that SHIPS). A consumer who has only ever run
- * `lore init` has no `scripts/` directory at all, so that module cannot be
- * this fallback's SSOT; this string ships instead as compiled TypeScript
- * inside `corpus-service.ts` itself, landing in `dist/lore` on every build
- * regardless of corpus state, `lore init` having run, or which binary
- * version most recently ran it.
- *
- * A team that wants richer, editable rules than this trims-for-800-chars
- * fallback seeds their OWN approved `knowledge` doc
- * (`extra.sub_type: "skill"`, `extra.skill.applies_to: "spec"`) — the moment
- * one exists, `findFeedingSkill` finds it and this constant is never
- * consulted again (see the call site below).
- */
-const FALLBACK_SPEC_CREATE_RULE_MARKDOWN = `## Rules a candidate spec must satisfy
-
-1. **No parent.** A spec takes no parent: it belongs to the product trees
-   through its criteria's citations of rules (\`lore ac cite\`). A spec created
-   with a parent is rejected.
-2. **Declared spec_kind.** Declare \`extra.spec_kind\` as one of \`feature\`,
-   \`tech\`, or \`design\` (defaults to \`feature\` when absent).
-3. **Required skeleton sections.** Content must include at minimum:
-   \`## Overview/Goal\`, \`## Scope\`, \`## Acceptance Criteria\`.
-4. **Deterministic, oracle-verifiable acceptance criteria.** Every AC must be
-   checkable by a deterministic oracle (exit code, test assertion, concrete
-   observable outcome) — vague verbs ("works", "support") are rejected.
-5. **Structured AC via \`lore ac add\`.** Once the skeleton exists, add
-   machine-checkable criteria with
-   \`lore ac add <spec> <id> --statement <s> --mode <script|ai|human>\`.
-
-This is a BUILT-IN fallback: no approved \`knowledge\` doc with
-\`extra.sub_type: "skill"\` and \`extra.skill.applies_to: "spec"\` exists in
-this corpus yet. Seed your own team-editable version with
-\`lore create knowledge --sub-type skill --parent <prd-or-spec>\` (title, content, then
-\`extra.skill.applies_to: "spec"\`) to replace this fallback.
-`;
 
 // ─── Local types (mirror SPEC-001 §3.1 interfaces) ────────────────────────
 
@@ -338,6 +275,17 @@ export interface SetOptions extends WriteActorOpts {
    * retirement; required to be a plan the writing run claims a task in. Ignored by every other write.
    */
   readonly plan?: string;
+  /**
+   * `lore set --fields-file`: a PARTIAL update of a templated document's structured content. Top-level `fields` keys
+   * replace, `dimensions` merge by id; the result is revalidated against the pinned template and the body re-rendered.
+   * Refused for a document with no `extra.template_ref`.
+   */
+  readonly fieldsPatch?: FieldsPatch;
+  /**
+   * `lore set --template-version latest`: move the document's pin to the newest approved template version and
+   * revalidate against it (a newly required dimension must then be answered, or the write is refused).
+   */
+  readonly templateVersion?: "latest";
 }
 
 /**
@@ -1197,6 +1145,19 @@ export class CorpusService {
   }
 
   /**
+   * Arms template validation and body rendering on the write path (BR-1528/BR-1529). Called once by `app.ts`; absent
+   * (every bare `new CorpusService(store)`) ⇒ create and set behave as before the structured-documents change.
+   *
+   * @param deps - the template reader and the create policy (see {@link StructuredWriteDeps})
+   */
+  setStructuredWrite(deps: StructuredWriteDeps): void {
+    this.structuredWrite = deps;
+  }
+
+  /** Template validation/rendering for the write path; absent (bare construction) ⇒ every write is legacy-shaped. */
+  private structuredWrite: StructuredWriteDeps | undefined;
+
+  /**
    * Arms the citation gate for `create`'s inline acceptance criteria (spec-baseline-slice-2 §C3/§C4,
    * AC-BLS2-2): create is a SANCTIONED AC write path, so it must not bypass the gate `AcService` applies
    * to `ac add|set|cite`. Called once by `app.ts` with the raw `workflow.gates."ac-cite"` entry; absent
@@ -1408,7 +1369,7 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       listRows: async () => this.store.listAuditRowsByAction(KNOWN_DEFECT_ISSUE_WRITES_AUDIT_ACTION),
       writer: this.knownDefectIssueWriter,
       // reason: BR-1511 — each issue's pending writes are retried under `issue-write:<n>` (the store carries the lease rows).
-      leases: new ReviewLeases(this.store, by ?? "known-defect-retry"),
+      leases: new ReviewLeases(this.store, by ?? "known-defect-retry", Date.now, undefined, undefined, undefined, (request) => this.appendAudit(request)),
       appendRow: (details) =>
         this.appendAudit({
           action: KNOWN_DEFECT_ISSUE_WRITES_AUDIT_ACTION,
@@ -1446,10 +1407,15 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     if (!acceptedGates.ok) return acceptedGates;
     const unacceptedGates = currency.failed.filter((dimension) => isGateDimension(dimension) && !acceptedGates.value.includes(dimension));
     if (unacceptedGates.length > 0) {
+      // reason: BR-1513 — a regression is accepted file by file, so the refusal names each file still without a human accept.
+      const missing = latest === undefined ? ok(new Map<GateDimension, RootCause[]>()) : await unacceptedGateCausesOf(plan, latest, createGateAcceptanceLog(this.store));
+      if (!missing.ok) return missing;
+      const named = unacceptedGates.flatMap((gate) => (missing.value.get(gate as GateDimension) ?? []).map(issueTitleOf));
+      const naming = named.length === 0 ? "" : ` (not accepted: ${named.join("; ")})`;
       return err({
         code: "VALIDATION_ERROR",
         field: "gate:plan-close",
-        message: `MILESTONE_REVIEW_FAILED: plan ${plan.slug} cannot close: gate ${unacceptedGates.join(", ")} failed or was not measured in its review and was not accepted for this failure; an open issue does not accept a gate (accept it with \`lore assess ${plan.slug} --accept-gate <dimension>\` and a decision, or fix it and review again) (BR-1379, BR-1500)`,
+        message: `MILESTONE_REVIEW_FAILED: plan ${plan.slug} cannot close: gate ${unacceptedGates.join(", ")} failed or was not measured in its review and was not accepted for this failure${naming}; an open issue does not accept a gate (accept it with \`lore assess ${plan.slug} --accept-gate <dimension>\` and a decision, or fix it and review again) (BR-1379, BR-1500)`,
         rule: "BR-1500",
       });
     }
@@ -1469,15 +1435,27 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
           rule: "BR-1372",
         });
       }
+      // reason: BR-1421 / BR-1513 — a cause no open issue covers refuses the close naming that cause (exit 4), instead of the generic gate refusal.
+      const causes = coverage.value.uncoveredCauses ?? [];
+      if (causes.length > 0) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "gate:plan-close",
+          message: `MILESTONE_REVIEW_FAILED: plan ${plan.slug} cannot close with known defects: no open issue covers ${causes.map((c) => c.title).join("; ")} (BR-1421); file it with \`lore assess ${plan.slug} --file-issues\` and close again`,
+          rule: "BR-1421",
+        });
+      }
       return ok(currency);
     }
     return ok({ state: "accepted", reviewSlug: currency.reviewSlug, failed: currency.failed, issues: coverage.value.issues });
   }
 
   /**
-   * The ONE coverage predicate (BR-1372, BR-1379, BR-1421): which failed dimensions are covered by an entry of the
+   * The ONE coverage predicate (BR-1372, BR-1379, BR-1421, BR-1513): which failed dimensions are covered by entries of the
    * plan's `extra.known_defects` whose issue is open on GitHub, read per issue NUMBER (single-issue read, never the
-   * listing). Plan close and the review batch's "is filing complete" both decide from this.
+   * listing). A dimension is covered only when EVERY current root cause of the plan's latest review (one per charged file for a
+   * regression) has an open entry carrying that cause's fingerprint. Plan close and the review batch's "is filing complete"
+   * both decide from this.
    *
    * @param planId - the plan's document id
    * @param failed - the failed dimension ids of the current review
@@ -1494,6 +1472,20 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     if (plan.value === null) return err({ code: "DOC_NOT_FOUND", id: planId });
     // reason: BR-1510 — a closing plan's gate runs on the entries it KEEPS; a detached entry never covers a failed dimension.
     const entries = (keptEntries ?? readKnownDefects(plan.value.extra)).filter((entry) => failed.includes(entry.dimension));
+    // reason: BR-1513 — coverage is read per root cause, from the plan's latest stored review (the one the caller decides on). A
+    // dimension whose cause cannot be identified has no named cause and is read per dimension, as a cause that cannot be
+    // identified is never read as gone (BR-1510).
+    const reviewDocs = await this.listMilestoneReviewDocs(planId);
+    if (!reviewDocs.ok) return reviewDocs;
+    const latestReview = selectLatestMilestoneReview(reviewDocs.value);
+    let causes: FailingCause[] | undefined;
+    if (latestReview !== undefined) {
+      causes = [];
+      for (const dimension of MILESTONE_DIMENSIONS.filter((d) => failed.includes(d))) {
+        const identified = failingCausesOf(plan.value.slug, latestReview.doc.slug, latestReview.review, dimension);
+        if (identified.ok) causes.push(...identified.value.map((c) => ({ dimension, fingerprint: c.fingerprint, title: issueTitleOf(c) })));
+      }
+    }
     const reads = new Map<number, { repoId: number; state: "open" | "closed" }>();
     const live: KnownDefectLive[] = [];
     for (const entry of entries) {
@@ -1510,9 +1502,9 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       if (read.repoId !== entry.repo_id) {
         return err({ code: "VALIDATION_ERROR", field: "gate:plan-close", message: `known defect #${String(entry.number)} of ${plan.value.slug} is recorded for repository id ${String(entry.repo_id)} but the configured repository has id ${String(read.repoId)}; it cannot be read`, rule: "BR-1372" });
       }
-      live.push({ number: entry.number, dimension: entry.dimension, state: read.state });
+      live.push({ number: entry.number, dimension: entry.dimension, fingerprint: entry.fingerprint, state: read.state });
     }
-    return ok(coverFailedDimensions(failed, live));
+    return ok(coverFailedDimensions(failed, live, causes));
   }
 
   /** Present iff {@link setArchiveIssueClosePort} was called. */
@@ -1626,6 +1618,16 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     if (refusal !== undefined) return refusal;
     const { doc, patch } = request;
     if (patchedFieldsUnchanged(doc, patch)) return ok({ doc, written: false });
+
+    // BR-1528/BR-1529 — the row route carries lifecycle, link and anchor writes; it must not become a way to store a
+    // body or invalid fields on a templated document.
+    if (this.structuredWrite !== undefined) {
+      const guarded = await guardStructuredRowWrite(this.structuredWrite, doc, {
+        content: patch.content,
+        extra: patch.extra,
+      });
+      if (!guarded.ok) return guarded;
+    }
 
     if (request.lock !== "none") {
       const gate = await this.recordLock.assertEditable(doc, request.lock, {
@@ -2699,8 +2701,26 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
         : specKindDefaultedExtra;
     // reason: BR-1339 — a baseline node is born with its own part awaiting a first approval (`pending.node.initial`), so it
     // is `draft` by derivation, not by a status nobody may set; the first approval removes the marker.
-    const resolvedExtra: Record<string, unknown> =
+    const unstructuredExtra: Record<string, unknown> =
       data.type === "baseline" && anchoredExtra["pending"] === undefined ? { ...anchoredExtra, pending: initialPending() } : anchoredExtra;
+
+    // BR-1528 — a templated create is validated against its pinned template and its body is rendered from the fields,
+    // BEFORE any gate or write below runs, so a refusal leaves nothing behind and the gates see the rendered text.
+    // A create that is not structured (no fields, policy not armed) is returned untouched: legacy free body.
+    let resolvedExtra: Record<string, unknown> = unstructuredExtra;
+    if (this.structuredWrite !== undefined) {
+      const structured = await prepareStructuredCreate(this.structuredWrite, {
+        type: data.type,
+        slug,
+        extra: unstructuredExtra,
+        content: data.content,
+      });
+      if (!structured.ok) return structured;
+      if (structured.value !== null) {
+        resolvedExtra = structured.value.extra;
+        data = { ...data, content: structured.value.content };
+      }
+    }
 
     // SPEC-103 §Mechanisms M1 — ledger fast-track (D1: knowledge sub_types
     // assessment/retro/handoff/uat ONLY; `task` is deliberately excluded, see
@@ -2750,30 +2770,16 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       // identical lookup — skipped entirely when the checkpoint is disabled
       // (`isEnabled` short-circuits BEFORE the read, mirroring `gate.ts`'s own
       // isGateDisabledByConfig-before-runXGate order) so a disabled checkpoint
-      // stays byte-identical to pre-D3 behavior (zero extra IO). A missing/failed
-      // lookup falls back to `FALLBACK_SPEC_CREATE_RULE_SOURCE`/`_MARKDOWN`
-      // (spec-governance-visibility-an-armed-gate-that-vacuously-passes §B3) —
-      // NEVER a bare `[source: unknown]` with an empty rule slice, which is what
-      // EVERY fresh-`lore init` corpus produced before this fallback existed (zero
-      // approved `knowledge/skill` docs to find yet). This still degrades to a
-      // never-thrown, never-differently-shaped Result either way (mirrors
-      // `writeProvenanceLink`'s fail-soft posture elsewhere in this file) — it is
-      // strictly more information than the bare discriminator, on BOTH the
-      // "corpus genuinely empty" and "store read failed" branches below.
+      // stays byte-identical to pre-D3 behavior (zero extra IO).
+      // reason: the rule a spec-create denial quotes is the approved TEMPLATE of the spec's kind
+      // (spec-every-document-is-stored-as-structured-fields-validated-by, "One source"): the spec-rules corpus
+      // document and the compiled-in fallback text are retired. A template that cannot be read is NAMED in the slice
+      // (`resolveRuleSlice`), never replaced by an invented rule. Absent only in a bare unit-test construction.
       let ruleEnrichment: Pick<GateContext, "ruleSource" | "ruleMarkdown"> = {};
-      if (this.gateEnforcer.isEnabled("spec-create")) {
-        const feedingSkillResult = await this.findFeedingSkill(SPEC_CREATE_FEEDING_SCOPE);
-        if (feedingSkillResult.ok && feedingSkillResult.value !== null) {
-          ruleEnrichment = {
-            ruleSource: feedingSkillResult.value.slug,
-            ruleMarkdown: feedingSkillResult.value.content,
-          };
-        } else {
-          ruleEnrichment = {
-            ruleSource: FALLBACK_SPEC_CREATE_RULE_SOURCE,
-            ruleMarkdown: FALLBACK_SPEC_CREATE_RULE_MARKDOWN,
-          };
-        }
+      if (this.gateEnforcer.isEnabled("spec-create") && this.structuredWrite !== undefined) {
+        const specKind = typeof resolvedExtra["spec_kind"] === "string" && (SPEC_KINDS as readonly string[]).includes(resolvedExtra["spec_kind"]) ? resolvedExtra["spec_kind"] : "feature";
+        const slice = await resolveRuleSlice(this.structuredWrite.templates, "spec", specKind);
+        ruleEnrichment = { ruleSource: slice.source, ruleMarkdown: slice.markdown };
       }
       // reason: AC-Quantifiability Gate spec §Design — a spec created with INLINE
       // `extra.acceptance_criteria` (the service-layer create path; `lore ac add`
@@ -3282,9 +3288,9 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       if (refusal !== undefined) return refusal;
     }
 
-    const parsedPatch = docPatchSchema.safeParse(patch);
-    if (!parsedPatch.success) {
-      const issue = parsedPatch.error.issues[0];
+    const parsedPatchInput = docPatchSchema.safeParse(patch);
+    if (!parsedPatchInput.success) {
+      const issue = parsedPatchInput.error.issues[0];
       return err({
         code: "VALIDATION_ERROR",
         field: issue ? String(issue.path.join(".")) : "patch",
@@ -3304,6 +3310,24 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
 
     const existing = findResult.value;
     const now = new Date().toISOString();
+
+    // BR-1529 — a templated document's body is rendered from its fields: a supplied body is refused, a fields change
+    // is revalidated against the PINNED template and re-rendered. From here on the patch carries the rendered text, so
+    // every gate below (record lock, demotion, spec-promote) judges what will actually be stored. A legacy document
+    // (no template_ref) passes through untouched.
+    let parsedPatch = parsedPatchInput;
+    if (this.structuredWrite !== undefined) {
+      const structured = await prepareStructuredUpdate(
+        this.structuredWrite,
+        existing,
+        { content: parsedPatchInput.data.content, extra: parsedPatchInput.data.extra },
+        { fieldsPatch: opts?.fieldsPatch, templateVersion: opts?.templateVersion },
+      );
+      if (!structured.ok) return structured;
+      if (structured.value !== null) {
+        parsedPatch = { ...parsedPatchInput, data: { ...parsedPatchInput.data, content: structured.value.content, extra: structured.value.extra } };
+      }
+    }
 
     const carrierRefusal = judgeIssueCarrierExtra(existing.type, parsedPatch.data.extra) ?? judgeKnownDefectsExtra(existing.type, parsedPatch.data.extra);
     if (carrierRefusal !== undefined) return err(carrierRefusal);
@@ -3420,9 +3444,16 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // reason: spec D14 — the demotion trigger is a DIFFERENCE too. A resend of the stored text (a tag save
     // from the dashboard) is not an edit, and demoting a locked record on it would reopen it by the back
     // door. `bodyDiffers` compares canonicalised text, so a re-save of the same body reads as unchanged.
+    // reason: a template's substance is `extra.template`, not its body — editing it is a contract edit, so an approved
+    // template returns to draft and the approved version stays what it was (T2: `slug@N` must keep resolving).
+    const templateChanged =
+      existing.type === "template" &&
+      parsedPatch.data.extra !== undefined &&
+      !templatesEqual(existing.extra["template"], parsedPatch.data.extra["template"]);
     const contentOrTitleChanged =
       (parsedPatch.data.content !== undefined && bodyDiffers(existing.content, parsedPatch.data.content)) ||
-      (parsedPatch.data.title !== undefined && parsedPatch.data.title !== existing.title);
+      (parsedPatch.data.title !== undefined && parsedPatch.data.title !== existing.title) ||
+      templateChanged;
     // reason: this is an INTERNAL lifecycle invariant (SPEC-002 §3), not a
     // user-requested transition — approved→draft is deliberately absent from
     // VALID_TRANSITIONS (only active/archived/deprecated follow "approved"),
@@ -3785,6 +3816,19 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
           message: "extra.validity cannot be changed via `lore set` — use `lore invalidate` instead",
           value: parsedPatch.data.extra["validity"],
           rule: "BR-730",
+        });
+      }
+    }
+
+    // template: extra.template is re-validated by the core meta-schema on every set (all issues, one refusal).
+    if (existing.type === "template" && parsedPatch.data.extra !== undefined) {
+      const templateResult = templateDocumentExtraSchema.safeParse(parsedPatch.data.extra);
+      if (!templateResult.success) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "extra.template",
+          message: templateResult.error.issues.map((issue) => issue.message).join("; "),
+          value: parsedPatch.data.extra["template"],
         });
       }
     }
@@ -5762,12 +5806,49 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
       }
     }
 
+    const templateContext = await this.resolveReviewTemplateContext(doc);
+    if (!templateContext.ok) return templateContext;
+
     return ok({
       doc,
       ...(parent !== undefined ? { parent } : {}),
       links,
       ...(brokenLinkTargets.length > 0 ? { brokenLinkTargets } : {}),
       ...(blueprint !== undefined ? { blueprint } : {}),
+      ...(templateContext.value !== undefined ? { template: templateContext.value } : {}),
+    });
+  }
+
+  /**
+   * The template a templated document is judged against (prompt v9): its PINNED approved version plus the proposals open
+   * against that template. `undefined` for a legacy document (no `extra.template_ref`), which keeps prompt v8.
+   *
+   * @returns the context, `undefined` for a legacy document, or the refusal when the pin cannot be resolved (a templated
+   *   document is never silently judged as a legacy one) or no template reader is wired
+   */
+  private async resolveReviewTemplateContext(doc: DocRecord): Promise<Result<ReviewTemplateContext | undefined, LoreError>> {
+    const ref: unknown = doc.extra["template_ref"];
+    if (typeof ref !== "string") return ok(undefined);
+    const parsedRef = parseTemplateRef(ref);
+    if (this.structuredWrite === undefined || parsedRef === undefined) {
+      return err(
+        validationError(
+          "extra.template_ref",
+          `${doc.slug} is pinned to template "${ref}" but no template reader is available to judge it per dimension`,
+          ref,
+        ),
+      );
+    }
+    const template = await this.structuredWrite.templates.resolvePinned(ref);
+    if (!template.ok) return template;
+    const pending = await this.store.findPendingTemplateRevision(parsedRef.slug);
+    if (!pending.ok) return pending;
+    const kind = documentKindOf(doc);
+    return ok({
+      ref,
+      template: template.value,
+      ...(kind !== undefined ? { kind } : {}),
+      pendingProposals: (pending.value?.proposals ?? []).map((proposal) => ({ id: proposal.id, question: proposal.question, count: proposal.count })),
     });
   }
 

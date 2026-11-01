@@ -100,13 +100,9 @@ async function main(): Promise<void> {
   const seedB = await seedProject(dbPathB, "B", runId);
 
   // Project A ONLY: a draft spec ready for the "approve + edit lands in A, B
-  // byte-unchanged" isolation scenario (AC-078-6). Content already satisfies the
-  // spec-create gate's `hasSkeleton` predicate (real `## ` headings) so the later
-  // approve transition (a lifecycle move, not a gated create) never needs to worry
-  // about skeleton content — only `lore gate spec-create`/`CorpusService._createImpl`'s
-  // create-time gate reads `hasSkeleton`, and this doc is inserted directly via the
-  // ungated bare CorpusService construction (see this file's header), so no gate ever
-  // runs against it here; it exists purely for the UI-driven approve+edit exercise.
+  // byte-unchanged" isolation scenario (AC-078-6). The doc is inserted directly via the
+  // ungated bare CorpusService construction (see this file's header), so no create-time
+  // gate ever runs against it here; it exists purely for the UI-driven approve+edit exercise.
   const storeA = declareWriteActorForTests(new SQLiteStore(dbPathA), "e2e-seed");
   const corpusA = new CorpusService(storeA, new RecordLockService(storeA, new GateEnforcer(undefined)));
   // reason: a spec takes no parent (BR-2) and belongs to the product tree through its criteria's rule

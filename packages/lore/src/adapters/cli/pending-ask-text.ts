@@ -27,6 +27,9 @@ export interface AskText {
   readonly recommendedMarker: string;
   readonly acceptDescription: string;
   readonly rejectDescription: string;
+  /** Third option of a review-round-cap question (BR-1531): its direction is typed as the Other answer. */
+  readonly directLabel: string;
+  readonly directDescription: string;
   readonly question: string;
   readonly what: string;
   readonly before: string;
@@ -44,6 +47,8 @@ export const ASK_TEXT: Record<AskLanguage, AskText> = {
     recommendedMarker: " (Recommended)",
     acceptDescription: "Accept: the operation may proceed when it is re-run.",
     rejectDescription: "Reject: the operation stays refused.",
+    directLabel: "Direct",
+    directDescription: "Direct: type your direction as the Other answer; it is recorded and one more review round is allowed.",
     question: "do you accept it?",
     what: "What: ",
     before: "Before: ",
@@ -59,6 +64,8 @@ export const ASK_TEXT: Record<AskLanguage, AskText> = {
     recommendedMarker: "（推荐）",
     acceptDescription: "接受：重新运行该操作时可以继续。",
     rejectDescription: "拒绝：该操作继续被拒绝。",
+    directLabel: "指示",
+    directDescription: "指示：在“其他”答案中输入你的指示；它会被记录，并多允许一轮评审。",
     question: "你接受吗？",
     what: "内容：",
     before: "之前：",

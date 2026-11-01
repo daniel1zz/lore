@@ -22,6 +22,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { closeSync, openSync } from "node:fs";
 import { dirname, join, resolve as resolvePath } from "node:path";
+import { z } from "zod";
 import { HARNESS_RUN_ENV, err, ok, type LoreError, type PlanBundle, type Result } from "@lore/core";
 import type { PlanCloseTrigger } from "../../service/task-workflow-service.js";
 import type { App } from "../../app.js";
@@ -35,9 +36,37 @@ import {
   type DelegatedRunRegistry,
   type DelegatingCaller,
 } from "../../service/delegated-run.js";
-import { ReviewLeases } from "../../service/review-batch-lease.js";
+import { ReviewLeases, UNKNOWN_MACHINE_ID } from "../../service/review-batch-lease.js";
 import type { ListCompletePlans } from "../../service/check-stats-service.js";
-import { ReviewTriggerService } from "../../service/review-batch-service.js";
+import { ReviewTriggerService, type BatchHandoff, type BatchLeasePort } from "../../service/review-batch-service.js";
+
+/**
+ * The environment variable that carries the batch lease from the landing that took it to the batch process it spawned:
+ * JSON `{key, holder}` (the lease key and the starter's exact holder name). The child takes the lease over from that holder by
+ * compare-and-set (`ReviewLeases.acquireHandedOff`); absent, the process is a hand run and takes the lease itself.
+ */
+export const REVIEW_BATCH_HANDOFF_ENV = "LORE_REVIEW_BATCH_HANDOFF";
+
+const BatchHandoffSchema = z.object({ key: z.string().min(1), holder: z.string().min(1) });
+
+/**
+ * The handoff a spawned batch was given, from its environment.
+ *
+ * @returns `undefined` when the variable is absent; an `err` when it is present and malformed (a batch must not guess whose lease it holds)
+ */
+export function readBatchHandoff(env: Readonly<Record<string, string | undefined>>): Result<BatchHandoff | undefined, LoreError> {
+  const raw = env[REVIEW_BATCH_HANDOFF_ENV];
+  if (raw === undefined || raw === "") return ok(undefined);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return err(spawnRefusal(REVIEW_BATCH_HANDOFF_ENV, `${REVIEW_BATCH_HANDOFF_ENV} is not JSON`));
+  }
+  const checked = BatchHandoffSchema.safeParse(parsed);
+  if (!checked.success) return err(spawnRefusal(REVIEW_BATCH_HANDOFF_ENV, `${REVIEW_BATCH_HANDOFF_ENV} must be {key, holder}`));
+  return ok(checked.data);
+}
 
 /** The batch command line (after the program): the spec's `lore assess --where needs-review --file-issues --close`. */
 export const REVIEW_BATCH_ARGS: readonly string[] = ["assess", "--where", "needs-review", "--file-issues", "--close"];
@@ -47,7 +76,7 @@ export const REVIEW_BATCH_JOB = "review-batch";
 
 /** The keyed leases of one process (plan, suite, issue keys, BR-1511); `holder` identifies it (actor plus pid). */
 export function buildReviewLeases(app: App, holder: string): ReviewLeases | undefined {
-  return app.reviewLeaseStore === undefined ? undefined : new ReviewLeases(app.reviewLeaseStore, holder);
+  return app.reviewLeaseStore === undefined ? undefined : new ReviewLeases(app.reviewLeaseStore, holder, Date.now, undefined, undefined, undefined, (request) => app.corpusService.appendAudit(request));
 }
 
 /** Spec of one delegated detached job. */
@@ -150,9 +179,12 @@ export async function spawnDelegatedJob(spec: DelegatedJobSpec): Promise<Result<
  * @param opts.execPath / opts.isCompiled / opts.env - from the Invocation
  * @param opts.runService - the run registry the batch's child run is written to
  * @param opts.caller - the integrating caller's claimed run and its verification outcome
+ * @param opts.handoff - the batch lease the caller holds for the child (passed in {@link REVIEW_BATCH_HANDOFF_ENV})
  * @returns the job's pid, or the refusal
  */
 export async function spawnDetachedReviewBatch(opts: {
+  /** `undefined` is refused: a batch spawned with no lease handoff could run beside another batch on this machine (BR-1532). */
+  readonly handoff: BatchHandoff | undefined;
   readonly cwd: string;
   readonly corpusDir: string;
   readonly execPath: string;
@@ -165,6 +197,9 @@ export async function spawnDetachedReviewBatch(opts: {
   // landing's own last step, the branch landing's plan-close seam); the first spawn serves them all while that batch is still running.
   const earlier = batchStartedByThisProcess.get(opts.corpusDir);
   if (earlier !== undefined && processIsAlive(earlier)) return ok({ pid: earlier });
+  if (opts.handoff === undefined) {
+    return err(spawnRefusal(REVIEW_BATCH_HANDOFF_ENV, "no batch lease was taken for this batch (no lease store is wired), so it is not started: nothing could stop a second batch on this machine"));
+  }
   const spawned = await spawnDelegatedJob({
     name: REVIEW_BATCH_JOB,
     args: REVIEW_BATCH_ARGS,
@@ -172,7 +207,7 @@ export async function spawnDetachedReviewBatch(opts: {
     logPath: join(opts.corpusDir, "review-batch.log"),
     execPath: opts.execPath,
     isCompiled: opts.isCompiled,
-    env: opts.env,
+    env: { ...opts.env, [REVIEW_BATCH_HANDOFF_ENV]: JSON.stringify(opts.handoff) },
     runService: opts.runService,
     caller: opts.caller,
   });
@@ -218,17 +253,24 @@ export interface PlanCloseTriggerInput {
 export function buildReviewBatchStarter(input: PlanCloseTriggerInput): ((planSlug: string, why: string) => Promise<string>) | undefined {
   const corpusDir = dirname(resolvePath(input.dbPath));
   const projectRoot = dirname(corpusDir);
-  const trigger = buildReviewTriggerService(input.app, () =>
-    spawnDetachedReviewBatch({
-      cwd: projectRoot,
-      corpusDir,
-      execPath: input.execPath,
-      isCompiled: input.isCompiled,
-      env: input.env,
-      // reason: #501 — the batch outlives this process, so it gets a child run registered by THIS (verified) caller
-      runService: input.app.runService,
-      caller: input.caller,
-    }),
+  // reason: BR-1532 — this process takes `batch:<machine>` itself and hands it to the batch it spawns; with no lease store no batch is started
+  const batchLeases = buildReviewLeases(input.app, `${input.actor}:plan-close:${String(process.pid)}`);
+  if (batchLeases === undefined) return undefined;
+  const trigger = buildReviewTriggerService(
+    input.app,
+    (handoff) =>
+      spawnDetachedReviewBatch({
+        handoff,
+        cwd: projectRoot,
+        corpusDir,
+        execPath: input.execPath,
+        isCompiled: input.isCompiled,
+        env: input.env,
+        // reason: #501 — the batch outlives this process, so it gets a child run registered by THIS (verified) caller
+        runService: input.app.runService,
+        caller: input.caller,
+      }),
+    batchLeases,
   );
   if (trigger === undefined) return undefined;
   return async (planSlug, why) => {
@@ -239,6 +281,8 @@ export function buildReviewBatchStarter(input: PlanCloseTriggerInput): ((planSlu
         return `plan close: ${planSlug} ${why}; no plan needs review`;
       case "started":
         return `plan close: ${planSlug} ${why}; the review batch started${started.value.pid !== undefined ? ` (pid ${String(started.value.pid)})` : ""} and closes it in the background`;
+      case "covered":
+        return `plan close: ${planSlug} ${why}; another review batch (${started.value.holder}) holds ${started.value.key} and covers it`;
     }
   };
 }
@@ -273,14 +317,22 @@ export function refuseSpawnForRead(): Result<{ readonly pid: number | undefined 
   return err({ code: "VALIDATION_ERROR", field: "spawn", message: "a read never spawns a review batch", rule: "BR-1379" });
 }
 
+/** The batch lease a read-only caller binds: a read never takes `batch:<machine>`, so `acquire` refuses. */
+export const refuseBatchLeaseForRead: BatchLeasePort = {
+  machineId: async () => UNKNOWN_MACHINE_ID,
+  acquire: async () => err({ code: "VALIDATION_ERROR", field: "batchLease", message: "a read never takes the review batch lease", rule: "BR-1532" }),
+};
+
 /**
  * The trigger/start service over the real App.
  *
  * @param spawnBatch - the detached spawn (`spawnDetachedReviewBatch` bound to the invocation)
+ * @param batchLease - the machine's batch lease (BR-1532); a read-only caller passes {@link refuseBatchLeaseForRead}
  */
 export function buildReviewTriggerService(
   app: App,
-  spawnBatch: () => Result<{ readonly pid: number | undefined }, LoreError> | Promise<Result<{ readonly pid: number | undefined }, LoreError>>,
+  spawnBatch: (handoff: BatchHandoff) => Result<{ readonly pid: number | undefined }, LoreError> | Promise<Result<{ readonly pid: number | undefined }, LoreError>>,
+  batchLease: BatchLeasePort,
 ): ReviewTriggerService | undefined {
   const decisions = app.decisionReadService;
   const retired = app.retiredAcService;
@@ -299,5 +351,6 @@ export function buildReviewTriggerService(
     issueCoverage: (planId, failed) => app.corpusService.coverageOfFailedDimensions(planId, failed),
     ...(retired !== undefined ? { hasStaleOwnerDecision: (bundle: PlanBundle) => retired.hasStalePendingDecision(bundle) } : {}),
     spawnBatch,
+    batchLease,
   });
 }

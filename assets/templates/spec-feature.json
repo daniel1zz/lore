@@ -1,0 +1,210 @@
+{
+  "doc_type": "spec",
+  "kind": "feature",
+  "version": 2,
+  "fields": {
+    "type": "object",
+    "required": ["goal", "problem_evidence", "scope", "out_of_scope", "user_visible_behaviour", "design_decisions"],
+    "properties": {
+      "goal": {
+        "type": "object",
+        "title": "Goal",
+        "x-goal": true,
+        "required": ["statement", "measure"],
+        "properties": {
+          "statement": { "type": "string", "minLength": 1, "description": "What changes for the user, in one sentence." },
+          "measure": { "type": "string", "minLength": 1, "description": "The observable outcome that shows the goal is met (a command output, a count, a state), not an adjective." }
+        }
+      },
+      "problem_evidence": {
+        "type": "array",
+        "title": "Problem and evidence",
+        "minItems": 1,
+        "description": "Each claim about the current problem with the source that shows it (a command run, an issue, a review round, a document slug).",
+        "items": {
+          "type": "object",
+          "required": ["claim", "source"],
+          "properties": {
+            "claim": { "type": "string", "minLength": 1 },
+            "source": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "scope": {
+        "type": "array",
+        "title": "In scope",
+        "x-scope-list": true,
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["id", "text"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "text": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "out_of_scope": {
+        "type": "array",
+        "title": "Out of scope",
+        "x-out-of-scope-list": true,
+        "items": {
+          "type": "object",
+          "required": ["id", "text"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "text": { "type": "string", "minLength": 1 },
+            "why": { "type": "string" }
+          }
+        }
+      },
+      "user_visible_behaviour": {
+        "type": "array",
+        "title": "User-visible behaviour",
+        "minItems": 1,
+        "description": "What a person sees or can do after this ships: command, screen or message, with the exact text where it is a contract.",
+        "items": {
+          "type": "object",
+          "required": ["id", "behaviour"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "behaviour": { "type": "string", "minLength": 1 },
+            "example": { "type": "string" }
+          }
+        }
+      },
+      "rules": {
+        "type": "array",
+        "title": "Rules",
+        "description": "Each rule statement with an example that agrees with scope and acceptance criteria.",
+        "items": {
+          "type": "object",
+          "required": ["id", "statement"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "statement": { "type": "string", "minLength": 1 },
+            "example": { "type": "string" }
+          }
+        }
+      },
+      "refusals": {
+        "type": "array",
+        "title": "Refusals and exceptions",
+        "x-refusal-list": true,
+        "description": "Every input or state the feature refuses, with exit code and message. Each needs an acceptance criterion that triggers it.",
+        "items": {
+          "type": "object",
+          "required": ["id", "input_or_state", "message"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "input_or_state": { "type": "string", "minLength": 1 },
+            "exit_code": { "type": "integer" },
+            "message": { "type": "string", "minLength": 1 },
+            "acs": {
+              "type": "array",
+              "description": "Ids of the acceptance criteria that trigger this refusal (at least one must exist on the spec at promote).",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      },
+      "rule_changes": {
+        "type": "array",
+        "title": "Rule changes",
+        "x-rule-change-list": true,
+        "description": "Existing rules this feature changes. Each needs an acceptance criterion that pins the new behaviour.",
+        "items": {
+          "type": "object",
+          "required": ["id", "before", "after"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "before": { "type": "string", "minLength": 1 },
+            "after": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "design_decisions": {
+        "type": "array",
+        "title": "Design decisions",
+        "x-decision-list": true,
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["decision", "chosen", "rejected", "why"],
+          "properties": {
+            "decision": { "type": "string", "minLength": 1 },
+            "chosen": { "type": "string", "minLength": 1 },
+            "rejected": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["option", "why"],
+                "properties": {
+                  "option": { "type": "string", "minLength": 1 },
+                  "why": { "type": "string", "minLength": 1 }
+                }
+              }
+            },
+            "why": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "human_acceptance": {
+        "type": "array",
+        "title": "Acceptance by a human",
+        "description": "What a person must try or look at before this counts as done, where a script cannot judge it.",
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "benchmark": {
+        "type": "object",
+        "title": "Benchmark",
+        "properties": {
+          "practice": { "type": "string", "description": "What an established product or practice does for this problem." },
+          "difference": { "type": "string", "description": "How this feature differs and why." }
+        }
+      },
+      "structure": {
+        "type": "array",
+        "title": "Code structure",
+        "description": "Paths the work lives in.",
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "related": {
+        "type": "array",
+        "title": "Related documents",
+        "x-ref-list": true,
+        "items": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "dimensions": [
+    { "id": "edge-cases", "question": "What happens for deleted or renamed inputs, for empty or vacuous sets (\"all of zero items\"), and for the first run versus a repeated run?" },
+    { "id": "refusal-paths", "question": "Which refusals or exceptions does this have, and which acceptance criterion triggers each one?", "needs_refs": true },
+    { "id": "concurrency", "question": "What happens when two sessions do this at the same time? No answer may rely on exclusivity." },
+    { "id": "unseen-inputs", "question": "Which inputs can the design not observe (config, environment, files loaded by path, other processes), and how are they handled?" },
+    { "id": "rule-consistency", "question": "Do the rule statements and their examples match the scope and the acceptance criteria?", "needs_refs": true },
+    { "id": "end-state", "question": "Does anything here (a stopgap, a transitional gate, a hard-coded list, a fallback) become unnecessary under the end-state design? Where a list is needed, where does its single source live?" },
+    { "id": "failure-visibility", "question": "Does anything fail silently? What is named to the user when a step cannot run?" },
+    { "id": "false-green", "question": "For each acceptance criterion, what is the simplest wrong implementation that would still pass, and how does the criterion refuse it?", "needs_refs": true },
+    { "id": "cost", "question": "What is the time and token cost under load, and what bounds it?" },
+    { "id": "migration", "question": "How do existing data and documents reach the new state?" },
+    { "id": "user-visible-behaviour", "question": "What exactly does a user see or do differently, and where is the exact text a contract?" },
+    { "id": "human-acceptance", "question": "Which part needs a human to judge it, and what do they check?" }
+  ],
+  "checks": ["refs-resolve", "refusal-has-ac", "rule-change-has-ac", "decision-has-rejected", "out-of-scope-not-in-scope", "goal-has-measure"],
+  "render": [
+    { "heading": "Goal", "fields": ["goal"] },
+    { "heading": "Problem and evidence", "fields": ["problem_evidence"] },
+    { "heading": "Scope", "fields": ["scope", "out_of_scope"] },
+    { "heading": "User-visible behaviour", "fields": ["user_visible_behaviour"] },
+    { "heading": "Rules", "fields": ["rules"] },
+    { "heading": "Refusals and exceptions", "fields": ["refusals"] },
+    { "heading": "Rule changes", "fields": ["rule_changes"] },
+    { "heading": "Design decisions", "fields": ["design_decisions"] },
+    { "heading": "Acceptance by a human", "fields": ["human_acceptance"] },
+    { "heading": "Benchmark", "fields": ["benchmark"] },
+    { "heading": "Code structure", "fields": ["structure"] },
+    { "heading": "Related documents", "fields": ["related"] }
+  ]
+}

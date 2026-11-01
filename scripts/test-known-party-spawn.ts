@@ -28,7 +28,7 @@ export const KNOWN_PARTY_OPT_OUT_ENV = "LORE_TEST_IDENTITY";
  * The `lore` entry as a spawn names it: the source entry of any checkout, the compiled binary, or an operator script that
  * resolves its identity through `resolveEntryInvocation` exactly as `lore` does (and so reads the per-call run value).
  */
-const LORE_ENTRY = /(?:packages\/lore\/src\/index\.ts|\/dist\/lore|\/scripts\/seed-write-spec-rule\.ts)$/;
+const LORE_ENTRY = /(?:packages\/lore\/src\/index\.ts|\/dist\/lore)$/;
 
 /** How far into an argv the entry may sit (`bun run --preload X --bun ENTRY`). */
 const ENTRY_SEARCH_DEPTH = 8;

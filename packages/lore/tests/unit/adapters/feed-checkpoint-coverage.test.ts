@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/templates/**
 /**
  * AC-FR-1 (task-derive-lore-feed-s-checkpoint-set-from-the-registry-make,
  * spec-falsifiability-reachability-a-feedable-checkpoint-an) — `lore feed`'s
@@ -203,6 +204,12 @@ describe("derived-from-registry — lore feed's checkpoint set derives from chec
       content: `## Rule\n\n${ruleMarker(checkpoint)}\n\nGoverning rule for checkpoint "${checkpoint}".\n`,
     }));
     seedSkillDocs(dbPath, tmpDir, specs);
+    // reason: spec-create's rule is the approved spec template, not a skill doc (the spec-rules document is retired), so
+    // the shipped templates are seeded for that one checkpoint.
+    const templates = runLore(["migrate", "templates", "--apply"], tmpDir);
+    if (templates.exitCode !== 0) {
+      throw new Error(`lore migrate templates failed (exit ${templates.exitCode}): ${templates.stderr}${templates.stdout}`);
+    }
   }, 60_000);
 
   afterAll(() => {
@@ -228,6 +235,12 @@ describe("derived-from-registry — lore feed's checkpoint set derives from chec
         // never the bare "no approved governing skill for X" / "unknown
         // checkpoint: X" shapes.
         expect(result.stdout).toContain("[source:");
+        if (checkpoint === "spec-create") {
+          // the rule is the approved spec template (feature kind), never a skill doc
+          expect(result.stdout).toContain("[source: template spec-feature-template@2, trust: team-authored]");
+          expect(result.stdout).not.toContain(ruleMarker(checkpoint));
+          return;
+        }
         // Proves the rule slice that came back is THIS checkpoint's own seeded
         // doc, not a different one and not a fallback note.
         expect(result.stdout).toContain(ruleMarker(checkpoint));

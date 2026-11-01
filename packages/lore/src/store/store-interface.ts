@@ -25,7 +25,7 @@ import type {
   Slug,
   VersionRecord,
 } from "@lore/core";
-import type { DecisionRecord, LoreError, Result } from "@lore/core";
+import type { DecisionRecord, TemplateDimensionVerdict, LoreError, ProposalDecision, Result, TemplateRevision } from "@lore/core";
 import type { AuditChainEntry } from "./store-shared.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 
@@ -293,6 +293,8 @@ export type CalibrationRecordWithPromptVersion = CalibrationRecord & {
 // is store-shared.ts; this module re-exports so a consumer of
 // StoreInterface's trace methods has ONE import surface for both).
 export type {
+  FileRunClassification,
+  InconclusiveCause,
   SuiteFileRunRecord,
   SuiteResultRecord,
   CheckOutcomeInput,
@@ -300,6 +302,7 @@ export type {
   CheckOutcomeStat,
   LeaseAcquisition,
   LeaseRecord,
+  LeaseTakeover,
   PendingAskInput,
   PendingAskRecord,
   TraceDenyByCheckpoint,
@@ -317,6 +320,7 @@ import type {
   CheckOutcomeStat,
   LeaseAcquisition,
   LeaseRecord,
+  LeaseTakeover,
   PendingAskInput,
   PendingAskRecord,
   ReadDayCount,
@@ -1314,6 +1318,61 @@ export interface StoreInterface {
   insertJudgment(judgment: ReviewJudgment): Promise<Result<void, LoreError>>;
 
   /**
+   * The per-dimension verdicts of one judgment (prompt v9), in the order they were stored. `insertJudgment` writes one
+   * `review_judgment_dimensions` row per `dimension_verdicts` entry in the same transaction as the judgment row; every
+   * `findJudgments` / `latestJudgment` read returns the judgment WITHOUT them (they live in their own table), so a reader
+   * that needs them calls this. Empty for a v1-v8 judgment.
+   */
+  findJudgmentDimensions(judgmentId: string): Promise<Result<TemplateDimensionVerdict[], LoreError>>;
+
+  // ── Template revisions and proposals (judging per template dimension; BR-1530) ──
+  // At most ONE pending revision per template slug (a partial unique index / the same check in memory). A proposal's
+  // `count` is its number of finding rows, so a repeated finding is an insert.
+
+  /** Open a pending revision. A second pending revision for the same template slug is refused (STORE_ERROR). */
+  insertTemplateRevision(input: {
+    id: string;
+    template_slug: string;
+    base_version: number;
+    created_at: string;
+  }): Promise<Result<void, LoreError>>;
+
+  /** The template's pending revision with its proposals, or null. */
+  findPendingTemplateRevision(templateSlug: string): Promise<Result<TemplateRevision | null, LoreError>>;
+
+  /** Every revision of the template, newest first, each with its proposals (creation order). */
+  findTemplateRevisions(templateSlug: string): Promise<Result<TemplateRevision[], LoreError>>;
+
+  /** Add a proposal AND its first finding to a pending revision, atomically (a proposal always has count >= 1). */
+  insertTemplateProposal(input: {
+    id: string;
+    revision_id: string;
+    question: string;
+    judgment_id: string;
+    reason?: string | undefined;
+    created_at: string;
+  }): Promise<Result<void, LoreError>>;
+
+  /** Record that one more finding named an existing proposal: its count rises by one, the judgment joins its sources. */
+  insertTemplateProposalFinding(input: {
+    proposal_id: string;
+    judgment_id: string;
+    reason?: string | undefined;
+    created_at: string;
+  }): Promise<Result<void, LoreError>>;
+
+  /**
+   * Approve a PENDING revision: record each proposal's decision and close the revision, atomically. The caller has already
+   * checked that `decisions` covers every proposal exactly once. A revision that is not pending is refused.
+   */
+  approveTemplateRevision(input: {
+    id: string;
+    resolved_at: string;
+    resolved_by: string;
+    decisions: readonly ProposalDecision[];
+  }): Promise<Result<void, LoreError>>;
+
+  /**
    * All judgments for a doc, newest first (`created_at DESC`).
    *
    * @param kind - When provided, only rows whose `kind` matches (SPEC-044 D3) —
@@ -1433,6 +1492,14 @@ export interface StoreInterface {
    * true when an expired row of another holder was replaced. A live lease of another holder is `acquired: false`.
    */
   acquireLease(name: string, holder: string, nowIso: string, expiresAtIso: string): Promise<Result<LeaseAcquisition, LoreError>>;
+
+  /**
+   * Compare-and-set takeover (BR-1514): ONE conditional UPDATE `WHERE name = ? AND holder = expectedHolder` that makes
+   * `newHolder` the holder with `expiresAtIso`, whether or not the row has expired. Of two takers of one dead holder,
+   * exactly one matches; the other gets `acquired: false` with the row now stored. The caller decides the expected
+   * holder is dead; the store only guarantees the swap is atomic against that exact name.
+   */
+  takeOverLease(name: string, expectedHolder: string, newHolder: string, expiresAtIso: string): Promise<Result<LeaseTakeover, LoreError>>;
 
   /** Moves `holder`'s lease expiry forward; `ok(false)` when the row is no longer `holder`'s (it expired and was taken over). */
   renewLease(name: string, holder: string, expiresAtIso: string): Promise<Result<boolean, LoreError>>;

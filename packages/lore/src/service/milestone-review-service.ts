@@ -3,7 +3,7 @@
  *
  * Purpose: judge a plan on the seven dimensions from its landed diff, documents, attested task evidence, cited-rule
  *   state and the `milestone` decisions that belong to it; store the review with the plan-state fingerprint it judged.
- * Public surface: `MilestoneReviewService.review(planRef, opts)`, `factsFingerprint`, `hasStaleCitations`,`MilestoneReviewService.recordMainRed(suite)`,`MilestoneReviewDeps`, `MilestoneReviewResult`.
+ * Public surface: `MilestoneReviewService.review(planRef, opts)`, `factsFingerprint`, `hasStaleCitations`, `MilestoneReviewDeps`, `MilestoneReviewResult`.
  * Invariants:
  *   - The judge never writes the fingerprint, the overall verdict or the decision list; this service computes them.
  *   - The judge is asked only the four judged dimensions and the AI-mode criteria (`milestone-review-judgment.ts`); the
@@ -50,14 +50,10 @@ import {
 } from "../ai/milestone-review-template.js";
 import { decisionDetailSchema, type DecisionLogRow } from "../store/decision-log.js";
 import {
-  classifySuiteForMainRed,
-  foldMainRedRecords,
   MILESTONE_REVIEW_SUB_TYPE,
   milestoneFactsFingerprint,
-  planMainRedWrites,
   planStateFingerprint,
   type CitedRuleStateRow,
-  type MainRedLedgerPort,
 } from "./milestone-review.js";
 import { withDecisionFindingCites } from "./decision-finding-cites.js";
 import { applyDecisionFindings,rerunCitingCriteria, type CriterionRerunPort } from "./decision-recheck.js";
@@ -87,11 +83,6 @@ export interface MilestoneReviewDeps {
   readonly listRetiredAcs?: (bundle: PlanBundle) => Promise<Result<RetiredAcRef[], LoreError>>;
   readonly createReviewDoc: (input: CreateDocInput) => Promise<Result<DocRecord, LoreError>>;
   readonly link: (fromId: string, toId: string, type: LinkType) => Promise<Result<unknown, LoreError>>;
-  /**
-   * The local main-red ledger (BR-1412). Optional so hand-built services (unit tests, MCP stubs) stay valid; `app.ts`
-   * always wires it, and a service without it records nothing.
-   */
-  readonly mainRedLedger?: MainRedLedgerPort;
   /**
    * The deterministic re-check of the plan's recorded decisions (`decision-recheck.ts`). Optional like the other
    * measured ports: a service without it records no decision findings.
@@ -141,11 +132,9 @@ export function measuredCauses(
   const contradicted = cited.filter((r) => r.state === "contradicted").map((r) => r.rule_id);
   const rules = dimensions.snapshot_accuracy.verdict === "fail" && contradicted.length > 0 ? [...new Set(contradicted)].sort() : undefined;
   if (regression === undefined && rules === undefined) return undefined;
-  // reason: BR-1496 / #540 — no review measures a full suite, so the root cause is the set of files the selection found red
-  // at the plan's last landing and charged to it. `suite_failing_files` (the field the fingerprint reads, BR-1379) carries
-  // that set; the per-file fingerprint is #556's change, not made here.
-  const suiteSet = regression;
-  return { ...(regression !== undefined ? { regression_files: regression } : {}), ...(suiteSet !== undefined ? { suite_failing_files: suiteSet } : {}), ...(rules !== undefined ? { contradicted_rules: rules } : {}) };
+  // reason: BR-1496 / #540 — no review measures a full suite, so the root causes are the files the selection found red at the
+  // plan's last landing and charged to it. Each file is its own cause (BR-1513): the fingerprint reads one file at a time.
+  return { ...(regression !== undefined ? { regression_files: regression } : {}), ...(rules !== undefined ? { contradicted_rules: rules } : {}) };
 }
 
 /** The `milestone` decisions whose document is the plan, its spec or one of its tasks (newest per class+document). */
@@ -263,30 +252,6 @@ export class MilestoneReviewService {
   }
 
   /**
-   * Records what one suite measurement says about main in the local ledger (BR-1412): a main-red record at detection
-   * (commit range checked, failing checks and files, time), the green time on the open record when main is green again,
-   * and the check itself. Never touches the issue tracker.
-   *
-   * @param suite - the batch's suite run; `undefined` or not measured records nothing
-   * @returns `ok` once every row is written; `err` when the ledger cannot be read, holds a row that does not parse, or a write fails
-   */
-  async recordMainRed(suite: SuiteRun | undefined): Promise<Result<void, LoreError>> {
-    const ledger = this.deps.mainRedLedger;
-    if (ledger === undefined || suite === undefined) return ok(undefined);
-    const measured = classifySuiteForMainRed(suite.status === "measured" ? suite : { status: suite.status });
-    if (measured.state === "unmeasured") return ok(undefined);
-    const rows = await ledger.listRows();
-    if (!rows.ok) return rows;
-    const folded = foldMainRedRecords(rows.value);
-    if (!folded.ok) return folded;
-    for (const row of planMainRedWrites(folded.value, measured, ledger.now())) {
-      const appended = await ledger.appendRow(row);
-      if (!appended.ok) return appended;
-    }
-    return ok(undefined);
-  }
-
-  /**
    * Reviews one plan and stores the review.
    *
    * @param planRef - plan id or slug
@@ -295,10 +260,6 @@ export class MilestoneReviewService {
    *   nothing stored), a store failure, or a half-failure (doc created, link failed)
    */
   async review(planRef: string, opts: MilestoneReviewOptions): Promise<Result<MilestoneReviewResult, LoreError>> {
-    // reason: BR-1412 — detection is recorded first, whatever the judge or the issue tracker later does. One batch
-    // measures once and calls this per plan; the open record makes every call after the first a no-op for main red.
-    const recorded = await this.recordMainRed(opts.suite);
-    if (!recorded.ok) return recorded;
     const bundleResult = await this.deps.getPlanBundle(planRef);
     if (!bundleResult.ok) return bundleResult;
     const bundle = bundleResult.value;

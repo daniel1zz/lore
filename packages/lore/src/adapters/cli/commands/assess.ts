@@ -50,19 +50,19 @@ import { createGithubIssuePort } from "../assess-file-issues.js";
 import { IssueFilingService } from "../../../service/issue-filing-service.js";
 import type { FailedFinding } from "../../../service/root-cause-fingerprint.js";
 import { retirementAssessFields } from "../../../service/retired-ac-service.js";
-import { skippedEveryPlan, type BatchPlanRow } from "../../../service/review-batch-service.js";
-import { leaseLostError, planLeaseKey, type LeaseHandle, type ReviewLeases } from "../../../service/review-batch-lease.js";
-import { buildReviewLeases, buildReviewTriggerService } from "../review-batch-wiring.js";
+import { skippedEveryPlan, type BatchPlanRow, type MachineBatchPorts, type MachineBatchRun } from "../../../service/review-batch-service.js";
+import { UNKNOWN_MACHINE_ID, batchLeaseKey, leaseLostError, planLeaseKey, type LeaseHandle, type ReviewLeases } from "../../../service/review-batch-lease.js";
+import { buildReviewLeases, buildReviewTriggerService, readBatchHandoff, refuseBatchLeaseForRead } from "../review-batch-wiring.js";
 import { ASSESS_EXIT_LEASE_HELD, renderAssessExitCodes } from "../assess-exit-codes.js";
 
 export { ASSESS_EXIT_CODES } from "../assess-exit-codes.js";
-import { err } from "@lore/core";
+import { err, ok } from "@lore/core";
 import { DECISION_FLAG_ARGS, parseDecisionFlags } from "../decision-flags.js";
 import { DecisionGate } from "../../../service/decision-gate.js";
 import { SpawnDecisionGitPort } from "../../../service/decision-git-port.js";
 import { GateAcceptanceService } from "../../../service/gate-acceptance-service.js";
 import type { App } from "../../../app.js";
-import { buildBatchRunPorts, gateAcceptanceLogOf, createAssessFiling, createAssessWiring, createBatchRunner, type AssessWiring } from "../assess-batch-wiring.js";
+import { buildBatchRunPorts, gateAcceptanceLogOf, createAssessFiling, createAssessWiring, createBatchRunner, createReviewTestSlots, type AssessWiring } from "../assess-batch-wiring.js";
 import { buildPlanCloseService, closeFlowOf } from "../plan-close-wiring.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
 import { invocationOf } from "../command-invocation.js";
@@ -175,6 +175,8 @@ export default defineLoreCommand({
     }
 
     const { app, config, dbPath } = loadLoreApp({ inv });
+    // reason: released on every exit path (an early return after the batch lease was taken must not leave it held for its 10-minute expiry).
+    let batchLease: LeaseHandle | undefined;
     try {
       const fileIssues = args["file-issues"] === true;
       let issueUpstream: GithubUpstreamCfg | undefined;
@@ -209,10 +211,35 @@ export default defineLoreCommand({
         inv.io.stderr.write("Error: this composition has no lease store, so review work cannot be leased and nothing ran.\n");
         return 1;
       }
+      // reason: BR-1532 — every review test run on this machine takes one of `workflow.review.machine_test_slots` slots; the runners
+      // and rerunners below are built ONLY through the `slot*` decorators of this one `slots`, so no review run bypasses it.
+      const slots = createReviewTestSlots(inv, leases, config);
+      // reason: BR-1532 — a post-landing batch (`--where needs-review --close`) holds `batch:<machine>` for its whole run: the lease the
+      // landing took for it (handoff, one compare-and-set) or, for a hand run, one taken here; busy = another batch runs and covers the plans.
+      if (needsReview && args.close === true) {
+        const handoff = readBatchHandoff(inv.env);
+        if (!handoff.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, handoff.error) + "\n");
+          return exitCode(handoff.error);
+        }
+        const machine = await leases.machineId();
+        const key = batchLeaseKey(machine);
+        const granted = handoff.value !== undefined && handoff.value.key === key ? await leases.acquireHandedOff(key, handoff.value.holder) : await leases.acquire(key);
+        if (!granted.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, granted.error) + "\n");
+          return exitCode(granted.error);
+        }
+        if (granted.value.state === "busy") {
+          inv.io.stderr.write(`Another review batch holds ${key} (${granted.value.holder} until ${granted.value.expires_at}); it re-reads the trigger set when it finishes and covers these plans. Nothing ran.\n`);
+          return ASSESS_EXIT_LEASE_HELD;
+        }
+        batchLease = granted.value.handle;
+        printLine(inv.io.stdout, `review batch holds ${key}${machine === UNKNOWN_MACHINE_ID ? " (machine identity unreadable: every such process shares this key)" : ""}`);
+      }
       let planRefs: string[];
       if (needsReview) {
         // reason: the SAME trigger set the landing computes (BR-1379); a hand run and the detached batch select identically.
-        const trigger = buildReviewTriggerService(app, () => err({ code: "VALIDATION_ERROR", field: "spawn", message: "a hand run never spawns a batch" }));
+        const trigger = buildReviewTriggerService(app, () => err({ code: "VALIDATION_ERROR", field: "spawn", message: "a hand run never spawns a batch" }), refuseBatchLeaseForRead);
         if (trigger === undefined) {
           inv.io.stderr.write("Error: this composition cannot compute the needs-review set (no lease store or decision reader wired).\n");
           return 1;
@@ -234,12 +261,26 @@ export default defineLoreCommand({
       const refs = { ok: true as const, value: planRefs };
 
       // reason: the measurements, the judge call and the issue filing are one module shared with the review batch and `lore plan close`
-      const wiring = createAssessWiring({ app, inv, actor, reviewService });
+      const wiring = createAssessWiring({ app, inv, actor, reviewService, slots });
       const { measureSuite, reviewOne } = wiring;
       const filing = createAssessFiling({ app, inv, actor, upstream: issueUpstream, leases });
 
       if (args.close === true) {
-        return await runBatchClose({ app, inv, dbPath, actor, leases, direct: !needsReview && typeof args.where !== "string", planRefs, wiring, filing, json: args.json === true });
+        // reason: BR-1532 — a post-landing batch loops under its batch lease: it re-reads the trigger set after releasing it and takes plans landed during the run.
+        const machineBatch =
+          batchLease === undefined
+            ? undefined
+            : {
+                lease: batchLease,
+                retakeLease: async () => leases.acquire(batchLeaseKey(await leases.machineId())),
+                readTriggerSet: async () => {
+                  const trigger = buildReviewTriggerService(app, () => err({ code: "VALIDATION_ERROR", field: "spawn", message: "a hand run never spawns a batch" }), refuseBatchLeaseForRead);
+                  if (trigger === undefined) return err<LoreError>({ code: "VALIDATION_ERROR", field: "trigger", message: "this composition cannot compute the needs-review set" });
+                  const set = await trigger.computeTriggerSet();
+                  return set.ok ? ok(set.value.map((entry) => entry.plan)) : set;
+                },
+              };
+        return await runBatchClose({ app, inv, dbPath, actor, leases, ...(machineBatch !== undefined ? { machineBatch } : {}), direct: !needsReview && typeof args.where !== "string", planRefs, wiring, filing, json: args.json === true });
       }
 
       // reason: BR-1511 — a hand review of a plan runs under that plan's lease, taken for every selected plan BEFORE any
@@ -373,6 +414,7 @@ export default defineLoreCommand({
         for (const handle of handles.values()) await handle.release();
       }
     } finally {
+      await batchLease?.release();
       app.close();
     }
   },
@@ -433,9 +475,13 @@ async function runAcceptGate(context: Parameters<typeof invocationOf>[0], positi
       inv.io.stderr.write(formatErrorFor(inv, accepted.error) + "\n");
       return exitCode(accepted.error);
     }
-    const line = `Accepted gate ${accepted.value.dimension} of plan ${accepted.value.plan} (human decision record ${String(accepted.value.decision_record)}, issue #${String(accepted.value.issue)}, review ${accepted.value.review}); the next \`lore assess --where needs-review --close\` may archive it.`;
+    const lines = [
+      `Accepted gate ${accepted.value.dimension} of plan ${accepted.value.plan} (review ${accepted.value.review}):`,
+      ...accepted.value.accepted.map((entry) => `  ${entry.cause}: human decision record ${String(entry.decision_record)}, issue #${String(entry.issue)}`),
+      "the next `lore assess --where needs-review --close` may archive it.",
+    ];
     if (args.json === true) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: accepted.value }, null, 2));
-    else printLine(inv.io.stdout, line);
+    else for (const line of lines) printLine(inv.io.stdout, line);
     return 0;
   } finally {
     app.close();
@@ -455,6 +501,8 @@ interface BatchCloseInput {
   readonly direct: boolean;
   readonly planRefs: readonly string[];
   readonly wiring: AssessWiring;
+  /** Set for a post-landing batch: the batch lease it holds and the ports of its re-read loop (BR-1532). */
+  readonly machineBatch?: Pick<MachineBatchPorts, "lease" | "retakeLease" | "readTriggerSet">;
   readonly filing: IssueFilingService | undefined;
   readonly json: boolean;
 }
@@ -467,16 +515,19 @@ interface BatchCloseInput {
  */
 async function runBatchClose(input: BatchCloseInput): Promise<number> {
   const { app, inv, actor } = input;
-  const run = await createBatchRunner(app).runBatch(
-    input.planRefs,
-    buildBatchRunPorts({ app, actor, wiring: input.wiring, filing: input.filing, leases: input.leases, mode: input.direct ? "direct" : "batch", closeFlow: closeFlowOf(() => buildPlanCloseService({ app, inv, dbPath: input.dbPath, actor })) }),
-  );
+  const service = createBatchRunner(app);
+  const batchPorts = buildBatchRunPorts({ app, actor, wiring: input.wiring, filing: input.filing, leases: input.leases, mode: input.direct ? "direct" : "batch", closeFlow: closeFlowOf(() => buildPlanCloseService({ app, inv, dbPath: input.dbPath, actor })) });
+  const run = input.machineBatch === undefined ? await service.runBatch(input.planRefs, batchPorts) : await service.runMachineBatch(input.planRefs, { batch: batchPorts, ...input.machineBatch });
   if (!run.ok) {
     inv.io.stderr.write(formatErrorFor(inv, run.error) + "\n");
     return exitCode(run.error);
   }
   const rows: readonly BatchPlanRow[] = run.value.rows;
-  const heldEvery = skippedEveryPlan(run.value, input.planRefs.length);
+  const machineRun: MachineBatchRun | undefined = input.machineBatch === undefined ? undefined : (run.value as MachineBatchRun);
+  const heldEvery = skippedEveryPlan(run.value, machineRun?.selected ?? input.planRefs.length);
+  if (machineRun?.coveredBy !== undefined) {
+    inv.io.stderr.write(`Review batch ended: another batch (${machineRun.coveredBy.holder}) took the lease and will review what is left.\n`);
+  }
   if (input.json) {
     printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { rows, suite_runs: run.value.suiteRuns } }, null, 2));
   } else if (rows.length === 0) {

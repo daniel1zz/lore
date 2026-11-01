@@ -70,6 +70,9 @@ export const BUILT_IN_TEMPLATES: Record<DocType, string> = {
   // baseline tree node (spec-baseline-slice-1 C1) — compile-forced entry.
   baseline:
     'Write a product-baseline node titled "{{title}}"{{#parent_title}} under "{{parent_title}}"{{/parent_title}}. Describe current product behaviour as rules, without implementation detail. Output GitHub-flavoured Markdown.',
+  // template (structured documents T2) — compile-forced entry; a template's body is not AI-generated prose.
+  template:
+    'Describe the document template titled "{{title}}": which fields it requires and which questions every document must answer. Output GitHub-flavoured Markdown.',
 };
 
 // ─── Prompt-Version Registry (SPEC-103 I1, task-t3-hardening) ───────────────────
