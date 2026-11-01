@@ -27,6 +27,7 @@ import {
   parseTemplateRef,
   renderDocument,
   runCrossFieldChecks,
+  specAcceptanceCriteriaSchema,
   validateDocument,
   validationError,
   type CheckFinding,
@@ -201,7 +202,8 @@ export class TemplateService {
 
   /**
    * The promote-time cross-field checks the pinned template lists, run on demand. Criteria are the document's own
-   * acceptance criteria; a ref resolves when it names one of them, a registered rule id, or a document (slug or id).
+   * acceptance criteria plus those of the spec `fields.spec_ref` names; a ref resolves when it names one of them, a
+   * registered rule id, or a document (slug or id).
    *
    * @param doc - a templated document
    * @returns the findings (empty = clean), or the resolution refusal
@@ -212,7 +214,9 @@ export class TemplateService {
     const { template, fields } = loaded.value;
 
     const criteria = this.criteriaOf(doc);
-    const known = await this.knownRefTargets(criteria.map((criterion) => criterion.id));
+    const governingSpecCriterionIds = await this.governingSpecCriterionIds(fields["spec_ref"]);
+    if (!governingSpecCriterionIds.ok) return governingSpecCriterionIds;
+    const known = await this.knownRefTargets([...criteria.map((criterion) => criterion.id), ...governingSpecCriterionIds.value]);
     if (!known.ok) return known;
 
     const answers: DimensionAnswer[] = [];
@@ -279,6 +283,27 @@ export class TemplateService {
       criteria.push({ id: entry["id"], cites });
     }
     return criteria;
+  }
+
+  /**
+   * Criterion ids of the spec a document's `fields.spec_ref` names (a task's `ac_scope` and a plan's
+   * `task_criteria_map` cite the criteria of that spec, not of the document itself). Superseded criteria count
+   * (BR-1494: an archived task's scope stays addressable). Resolved by id or slug only, never by searching specs
+   * for a criterion id (ids are unique only within one spec, issue #496).
+   *
+   * @param specRef - `fields.spec_ref`; absent / non-string / empty = the document names no spec
+   * @returns the ids, empty when no spec is named or the named document is not a spec. A `spec_ref` that names no
+   *   document yields no ids; `refs-resolve` then reports the `spec_ref` entry itself, naming the spec, so the
+   *   gap is a finding and never a silent pass.
+   */
+  private async governingSpecCriterionIds(specRef: unknown): Promise<Result<string[], LoreError>> {
+    if (typeof specRef !== "string" || specRef === "") return ok([]);
+    const specs = await this.store.findMany({ type: "spec" });
+    if (!specs.ok) return specs;
+    const spec = specs.value.find((candidate) => candidate.id === specRef || candidate.slug === specRef);
+    if (spec === undefined) return ok([]);
+    const criteria = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
+    return ok(criteria.success ? criteria.data.map((criterion) => criterion.id) : []);
   }
 
   /** Ids a ref may name: the document's criteria, registered rule ids, and every document's slug and id. */
