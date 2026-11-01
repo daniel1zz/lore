@@ -11,6 +11,7 @@
  * (migration-044 reclassifies non-run suite results).
  */
 
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -105,7 +106,7 @@ describe("suite_results (migration-043)", () => {
 describe("suite_file_runs (migration-043)", () => {
   it("AC-AF-2 per-file rows come back attached to their result in insertion order; none for another result", async () => {
     await store.insertSuiteResult(result());
-    const base = { suite_result_id: "suite-1", commit_sha: COMMIT, duration_ms: 5, measured_at: "2026-10-28T10:01:00.000Z" };
+    const base = { suite_result_id: "suite-1", commit_sha: COMMIT, duration_ms: 5, measured_at: "2026-10-28T10:01:00.000Z", classification: "green" as const, inconclusive_cause: null };
     const inserted = await store.insertSuiteFileRuns([
       { ...base, file: "tests/a.test.ts", exit_code: 1, output_tail: "red" },
       { ...base, file: "tests/b.test.ts", exit_code: 0, output_tail: "green" },
@@ -161,11 +162,11 @@ describe("migration-044 reclassifies suite results whose command never ran the t
 });
 
 describe("migration-045 single-file runs are unique per (key, file) (#528)", () => {
-  const base = { commit_sha: COMMIT, file: "tests/a.test.ts", duration_ms: 5, measured_at: "2026-10-28T10:01:00.000Z" };
+  const base = { commit_sha: COMMIT, file: "tests/a.test.ts", duration_ms: 5, measured_at: "2026-10-28T10:01:00.000Z", classification: "green" as const, inconclusive_cause: null };
   const key = `file-bisect@${COMMIT}`;
 
   it("AC-AF-2 the schema version includes 045 (046 widened docs.type for templates)", () => {
-    expect(LATEST_SCHEMA_VERSION).toBe(46);
+    expect(LATEST_SCHEMA_VERSION).toBe(47);
   });
 
   it("AC-AF-2 a second row for the same single-file key and file is ignored, the first stays; another file or key still stores", async () => {
@@ -188,12 +189,13 @@ describe("migration-045 single-file runs are unique per (key, file) (#528)", () 
   });
 
   it("AC-AF-2 upgrading a schema-44 corpus keeps every existing row (re-run duplicates included) and then enforces uniqueness on single-file keys", async () => {
-    const old = new SQLiteStore(join(dir, "old45.db"), { schemaCeiling: 44 });
-    await old.insertSuiteFileRuns([
-      { ...base, suite_result_id: "suite-1", exit_code: 0, output_tail: "a" },
-      { ...base, suite_result_id: "suite-1", exit_code: 1, output_tail: "b" },
-    ]);
-    old.close();
+    new SQLiteStore(join(dir, "old45.db"), { schemaCeiling: 44 }).close();
+    // reason: the schema-44 table has no classification columns, so the rows go in with the schema-44 statement (the store's writer names the 047 columns).
+    const rawOld = new Database(join(dir, "old45.db"));
+    const insertOld = "INSERT INTO suite_file_runs (suite_result_id, commit_sha, file, exit_code, output_tail, duration_ms, measured_at) VALUES ('suite-1', ?, ?, ?, ?, 5, '2026-10-28T10:01:00.000Z')";
+    rawOld.run(insertOld, [COMMIT, "tests/a.test.ts", 0, "a"]);
+    rawOld.run(insertOld, [COMMIT, "tests/a.test.ts", 1, "b"]);
+    rawOld.close();
     const upgraded = new SQLiteStore(join(dir, "old45.db"), { migrate: true });
     try {
       const kept = await upgraded.listSuiteFileRuns("suite-1");

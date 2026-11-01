@@ -33,7 +33,7 @@ import {
   type DelegatedRunRegistry,
   type DelegatingCaller,
 } from "../../service/delegated-run.js";
-import { ReviewLeases } from "../../service/review-batch-lease.js";
+import { ReviewLeases, UNKNOWN_MACHINE_ID } from "../../service/review-batch-lease.js";
 import type { ListCompletePlans } from "../../service/check-stats-service.js";
 import { ReviewTriggerService, type BatchHandoff, type BatchLeasePort } from "../../service/review-batch-service.js";
 
@@ -73,7 +73,7 @@ export const REVIEW_BATCH_JOB = "review-batch";
 
 /** The keyed leases of one process (plan, suite, issue keys, BR-1511); `holder` identifies it (actor plus pid). */
 export function buildReviewLeases(app: App, holder: string): ReviewLeases | undefined {
-  return app.reviewLeaseStore === undefined ? undefined : new ReviewLeases(app.reviewLeaseStore, holder);
+  return app.reviewLeaseStore === undefined ? undefined : new ReviewLeases(app.reviewLeaseStore, holder, Date.now, undefined, undefined, undefined, (request) => app.corpusService.appendAudit(request));
 }
 
 /** Spec of one delegated detached job. */
@@ -226,15 +226,22 @@ export function refuseSpawnForRead(): Result<{ readonly pid: number | undefined 
   return err({ code: "VALIDATION_ERROR", field: "spawn", message: "a read never spawns a review batch", rule: "BR-1379" });
 }
 
+/** The batch lease a read-only caller binds: a read never takes `batch:<machine>`, so `acquire` refuses. */
+export const refuseBatchLeaseForRead: BatchLeasePort = {
+  machineId: async () => UNKNOWN_MACHINE_ID,
+  acquire: async () => err({ code: "VALIDATION_ERROR", field: "batchLease", message: "a read never takes the review batch lease", rule: "BR-1532" }),
+};
+
 /**
  * The trigger/start service over the real App.
  *
  * @param spawnBatch - the detached spawn (`spawnDetachedReviewBatch` bound to the invocation)
+ * @param batchLease - the machine's batch lease (BR-1532); a read-only caller passes {@link refuseBatchLeaseForRead}
  */
 export function buildReviewTriggerService(
   app: App,
-  spawnBatch: (handoff: BatchHandoff | undefined) => Result<{ readonly pid: number | undefined }, LoreError> | Promise<Result<{ readonly pid: number | undefined }, LoreError>>,
-  batchLease?: BatchLeasePort,
+  spawnBatch: (handoff: BatchHandoff) => Result<{ readonly pid: number | undefined }, LoreError> | Promise<Result<{ readonly pid: number | undefined }, LoreError>>,
+  batchLease: BatchLeasePort,
 ): ReviewTriggerService | undefined {
   const decisions = app.decisionReadService;
   const retired = app.retiredAcService;
@@ -253,6 +260,6 @@ export function buildReviewTriggerService(
     issueCoverage: (planId, failed) => app.corpusService.coverageOfFailedDimensions(planId, failed),
     ...(retired !== undefined ? { hasStaleOwnerDecision: (bundle: PlanBundle) => retired.hasStalePendingDecision(bundle) } : {}),
     spawnBatch,
-    ...(batchLease !== undefined ? { batchLease } : {}),
+    batchLease,
   });
 }

@@ -108,7 +108,7 @@ import type { AIProvider, DocRecord, DocType, GenerateInput, GenerateOutput, Lin
 import type { AiDefaultSource, CallerSurface, Result } from "@lore/core";
 import { extractAssessmentJson, linkTypeSchema } from "@lore/core";
 import type { CheckResult, LlmReviewOutput, NewReviewJudgment, ReviewBundle, ReviewTruncationEntry } from "@lore/core";
-import { llmReviewOutputSchema } from "@lore/core";
+import { completeDimensionVerdicts, llmReviewOutputSchema } from "@lore/core";
 import type { StalenessBundle, StalenessVerdict } from "@lore/core";
 import {
   mapStalenessVerdictDecisionToJudgmentDecision,
@@ -126,6 +126,7 @@ import {
 import {
   REVIEW_PROMPT_VERSION,
   REVIEW_TEMPLATES,
+  TEMPLATED_REVIEW_PROMPT_VERSION,
   buildReviewRetryPrompt,
   type ReviewBudgets,
 } from "../ai/review-template.js";
@@ -638,7 +639,11 @@ export class AIProviderService {
     // REVIEW_PROMPT_VERSION — the module co-locates the const with its own registry entry,
     // so this lookup cannot miss in practice; the non-null assertion documents that guarantee
     // rather than silently tolerating an impossible `undefined`.
-    const template = REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]!;
+    // reason: a templated document (bundle.template) is judged per template dimension with v9; every legacy document keeps
+    // the frozen active v8 (BR-268). The choice is made once here and passed to _finalizeJudgment so the stored
+    // `judge.prompt_version` always names the prompt that was actually sent.
+    const promptVersion = bundle.template !== undefined ? TEMPLATED_REVIEW_PROMPT_VERSION : REVIEW_PROMPT_VERSION;
+    const template = REVIEW_TEMPLATES[promptVersion]!;
     // reason: SPEC-043 §Design Decisions D9 — nowIso drives the prompt's "# Staleness
     // Notice" section (bundle.doc/bundle.parent invalidated-state check). judgeDoc is
     // the sole production caller of this template — resolving "now" here, once, keeps
@@ -668,7 +673,7 @@ export class AIProviderService {
       return first.providerResult;
     }
     if (first.parsed !== undefined) {
-      const finalized = this._finalizeJudgment(first.parsed, bundle, checks, docTruncated, cuts);
+      const finalized = this._finalizeJudgment(first.parsed, bundle, checks, docTruncated, cuts, promptVersion);
       emitReviewEvent(first.providerResult, finalized.decision, finalized.confidence);
       return ok(finalized);
     }
@@ -681,7 +686,7 @@ export class AIProviderService {
       return second.providerResult;
     }
     if (second.parsed !== undefined) {
-      const finalized = this._finalizeJudgment(second.parsed, bundle, checks, docTruncated, cuts);
+      const finalized = this._finalizeJudgment(second.parsed, bundle, checks, docTruncated, cuts, promptVersion);
       emitReviewEvent(second.providerResult, finalized.decision, finalized.confidence);
       return ok(finalized);
     }
@@ -946,7 +951,9 @@ export class AIProviderService {
     checks: CheckResult[],
     docTruncated: boolean,
     cuts: readonly ReviewTruncationEntry[],
+    promptVersion: string,
   ): NewReviewJudgment {
+    const templated = bundle.template;
     return {
       doc_id: bundle.doc.id,
       doc_version: bundle.doc.version,
@@ -963,6 +970,18 @@ export class AIProviderService {
       // reason: SPEC-044 D11 byproduct — a review judge MAY emit this nomination
       // alongside its normal verdict; passed through verbatim, never re-derived here.
       ...(parsed.superseded_candidate !== undefined ? { superseded_candidate: parsed.superseded_candidate } : {}),
+      // reason: v9 — the service COMPLETES the judge's verdicts against the pinned template (a dimension the judge left out is
+      // `unclear`, never `pass`; unknown/repeated ids are dropped) and stamps the template ref itself; the model is never trusted
+      // to say which template it judged against.
+      ...(templated !== undefined
+        ? {
+            template_ref: templated.ref,
+            dimension_verdicts: completeDimensionVerdicts(templated.template, templated.kind, parsed.dimension_verdicts),
+            ...(parsed.missing_dimensions !== undefined && parsed.missing_dimensions.length > 0
+              ? { missing_dimensions: parsed.missing_dimensions }
+              : {}),
+          }
+        : {}),
       judge: {
         provider: this.active,
         // reason: the AIProvider interface (packages/core/src/ai.ts) exposes no resolved
@@ -973,7 +992,7 @@ export class AIProviderService {
         // judgeIdentitySchema's `.min(1)`, and this keeps the field honest (a real,
         // non-empty identifier) rather than fabricating an unverified model string.
         model: this.active,
-        prompt_version: REVIEW_PROMPT_VERSION,
+        prompt_version: promptVersion,
       },
     };
   }

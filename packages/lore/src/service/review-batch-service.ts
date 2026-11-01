@@ -52,7 +52,7 @@ import type { SuiteRun } from "./milestone-review-inputs.js";
 import { retirementSubjectId } from "./retired-ac-service.js";
 import type { IssueFilingService } from "./issue-filing-service.js";
 import type { DimensionCoverage } from "./milestone-review-inputs.js";
-import { rootCauseOf, type FailedFinding, type RootCause } from "./root-cause-fingerprint.js";
+import { failingCausesOf, type FailedFinding } from "./root-cause-fingerprint.js";
 import { UNKNOWN_MACHINE_ID, batchLeaseKey, leaseLostError, type LeaseHandle, type LeaseOutcome } from "./review-batch-lease.js";
 
 // reason: the constant lives in the pure acceptance view (bootstrap and checks stats read the same rows); re-exported so existing importers keep one name.
@@ -125,9 +125,9 @@ export interface ReviewTriggerDeps {
    * Starts the detached batch process; returns once it is spawned (never waits for it). `handoff` names the batch lease the
    * starter holds on the child's behalf: the child takes it over by compare-and-set on `handoff.holder` before it works.
    */
-  readonly spawnBatch: (handoff: BatchHandoff | undefined) => Result<{ readonly pid: number | undefined }, LoreError> | Promise<Result<{ readonly pid: number | undefined }, LoreError>>;
-  /** The machine's batch lease (BR-1532). Absent only in a bare construction (and the read-only ones, which never start a batch): `start` then spawns with no handoff. */
-  readonly batchLease?: BatchLeasePort;
+  readonly spawnBatch: (handoff: BatchHandoff) => Result<{ readonly pid: number | undefined }, LoreError> | Promise<Result<{ readonly pid: number | undefined }, LoreError>>;
+  /** The machine's batch lease (BR-1532), required: a start without it would spawn a batch no lease covers. A read-only caller passes a port that refuses `acquire`. */
+  readonly batchLease: BatchLeasePort;
 }
 
 /** The batch lease a landing took for the batch it spawns: the key and the starter's exact holder name. */
@@ -250,7 +250,12 @@ function messageOf(error: LoreError): string {
 
 /** The trigger side: reads state, never writes (see the module header). */
 export class ReviewTriggerService {
-  constructor(private readonly deps: ReviewTriggerDeps) {}
+  constructor(private readonly deps: ReviewTriggerDeps) {
+    // reason: the type already requires the port; this guards an untyped caller (a cast, a JS composition) from the retired no-handoff spawn.
+    if ((deps.batchLease as BatchLeasePort | undefined) === undefined) {
+      throw new Error("ReviewTriggerService needs a batch lease (BR-1532): a trigger without one would spawn a batch no lease covers");
+    }
+  }
 
   /**
    * The plans that need work now. Reads stored progress; computes no review.
@@ -315,14 +320,6 @@ export class ReviewTriggerService {
     if (!set.ok) return set;
     if (set.value.length === 0) return ok({ state: "empty" });
     const port = this.deps.batchLease;
-    if (port === undefined) {
-      // reason: an optional DI port, absent only in bare constructions (the repo's pattern: `app.ts` wires, a bare `new X(deps)` stays
-      // unleased). The spawn receives `undefined` as its handoff and the production spawn (`spawnDetachedReviewBatch`) refuses it, so
-      // a composition that forgot the port cannot start a batch; `lore integrate`'s wiring is asserted by review-machine-cap.test.ts.
-      const spawned = await this.deps.spawnBatch(undefined);
-      if (!spawned.ok) return spawned;
-      return ok({ state: "started", triggered: set.value.length, pid: spawned.value.pid });
-    }
     const machine = await port.machineId();
     const key = batchLeaseKey(machine);
     const machineUnknown = machine === UNKNOWN_MACHINE_ID;
@@ -664,8 +661,8 @@ export class ReviewBatchRunner {
 }
 
 /** "; acceptance pending <id> (<gate>)" for each blocking gate whose acceptance waits for a human; "" when none. */
-function pendingNote(pending: ReadonlyMap<string, number>, blockers: readonly string[]): string {
-  const parts = blockers.filter((gate) => pending.has(gate)).map((gate) => `acceptance pending ${String(pending.get(gate))} (${gate})`);
+function pendingNote(pending: ReadonlyMap<string, readonly number[]>, blockers: readonly string[]): string {
+  const parts = blockers.filter((gate) => pending.has(gate)).map((gate) => `acceptance pending ${(pending.get(gate) ?? []).map(String).join(", ")} (${gate})`);
   return parts.length === 0 ? "" : `; ${parts.join("; ")}`;
 }
 
@@ -732,18 +729,15 @@ function hasFindingsToFile(review: MilestoneReview): boolean {
   return review.overall === "fail" || filableDimensions(review.dimensions).length > 0;
 }
 
-/** The root-cause results of a stored review's failed dimensions, one per dimension. */
-function causesOfReview(planSlug: string, reviewSlug: string, review: MilestoneReview): Result<RootCause, LoreError>[] {
-  return filableDimensions(review.dimensions).map((dimension) =>
-    rootCauseOf({ plan: planSlug, dimension, reason: review.dimensions[dimension].reason, reference: review.dimensions[dimension].reference, cites: review.dimensions[dimension].cites, reviewSlug, causes: review.causes }),
-  );
-}
-
 /**
- * The reason a stored review cannot be filed (a failed regression without `suite_failing_files`), or `undefined`.
- * Per-plan by construction: the filing site keeps its loud error; classification only turns it into "needs review".
+ * The reason a stored review cannot be filed (a failed dimension whose root cause cannot be identified, e.g. a cite-less
+ * finding), or `undefined`. Per-plan by construction: the filing site keeps its loud error; classification only turns it
+ * into "needs review".
  */
 export function unfileableReviewError(planSlug: string, reviewSlug: string, review: MilestoneReview): LoreError | undefined {
-  for (const cause of causesOfReview(planSlug, reviewSlug, review)) if (!cause.ok) return cause.error;
+  for (const dimension of filableDimensions(review.dimensions)) {
+    const causes = failingCausesOf(planSlug, reviewSlug, review, dimension);
+    if (!causes.ok) return causes.error;
+  }
   return undefined;
 }

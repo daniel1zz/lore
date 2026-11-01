@@ -88,6 +88,10 @@ import {
   isSingleFileRunKey,
   withoutNullDecision,
   withoutNullHarnessRun,
+  assembleTemplateRevisions,
+  type TemplateProposalFindingRow,
+  type TemplateProposalRow,
+  type TemplateRevisionRow,
 } from "./store-shared.js";
 import {
   buildPlanProgressWrite,
@@ -100,7 +104,7 @@ import { stampAuditSurface } from "./audit-surface.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey, DecisionVersionQuery } from "./store-interface.js";
-import type { DecisionRecord, RuleIdPrefix } from "@lore/core";
+import type { DecisionRecord, TemplateDimensionVerdict, ProposalDecision, RuleIdPrefix, TemplateRevision } from "@lore/core";
 import { deriveAcCites, deriveRuleDepends, listedRuleLifecycle } from "./index-rows.js";
 
 // ─── InMemoryStore ─────────────────────────────────────────────────────────────
@@ -143,6 +147,10 @@ export class InMemoryStore implements StoreInterface {
   private readonly decisionLog: DecisionLogRow[] = [];
   private autonomyThresholds: { content: string; updated_at: string } | null = null;
   private readonly judgments: ReviewJudgment[] = [];
+  private readonly judgmentDimensions = new Map<string, TemplateDimensionVerdict[]>();
+  private readonly templateRevisions: (TemplateRevisionRow & { base_version: number })[] = [];
+  private readonly templateProposals: TemplateProposalRow[] = [];
+  private readonly templateFindings: TemplateProposalFindingRow[] = [];
   private readonly calibrationRecords: CalibrationRecord[] = [];
   /** SPEC-102 — mirrors `trace_events`; never hash-chained, id is a plain 1-based sequence (insertion order). */
   private readonly traceEvents: TraceEventRecord[] = [];
@@ -1667,7 +1675,115 @@ export class InMemoryStore implements StoreInterface {
   // ── Review Judgments ─────────────────────────────────────────────────────────
 
   async insertJudgment(judgment: ReviewJudgment): Promise<Result<void, LoreError>> {
-    this.judgments.push({ ...judgment });
+    // reason: mirrors the SQL stores — per-dimension verdicts live apart from the judgment row (review_judgment_dimensions),
+    // so a judgment read back never carries them; findJudgmentDimensions is the one reader.
+    const { dimension_verdicts, ...row } = judgment;
+    this.judgments.push({ ...row });
+    if (dimension_verdicts !== undefined) this.judgmentDimensions.set(judgment.id, dimension_verdicts.map((verdict) => ({ ...verdict })));
+    return ok(undefined);
+  }
+
+  async findJudgmentDimensions(judgmentId: string): Promise<Result<TemplateDimensionVerdict[], LoreError>> {
+    return ok((this.judgmentDimensions.get(judgmentId) ?? []).map((verdict) => ({ ...verdict })));
+  }
+
+  // ── Template revisions and proposals ─────────────────────────────────────────
+
+  async insertTemplateRevision(input: {
+    id: string;
+    template_slug: string;
+    base_version: number;
+    created_at: string;
+  }): Promise<Result<void, LoreError>> {
+    // reason: mirrors migration-048's primary key and partial unique index (one pending revision per template).
+    if (this.templateRevisions.some((r) => r.id === input.id)) {
+      return err({ code: "STORE_ERROR", message: `template_revisions: duplicate id ${input.id}` });
+    }
+    if (this.templateRevisions.some((r) => r.template_slug === input.template_slug && r.status === "pending")) {
+      return err({ code: "STORE_ERROR", message: `template_revisions: ${input.template_slug} already has a pending revision` });
+    }
+    this.templateRevisions.push({ ...input, status: "pending", resolved_at: null, resolved_by: null });
+    return ok(undefined);
+  }
+
+  private readTemplateRevisions(matches: (row: TemplateRevisionRow) => boolean): TemplateRevision[] {
+    const revisions = this.templateRevisions
+      .filter(matches)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id));
+    const ids = new Set(revisions.map((r) => r.id));
+    const proposals = this.templateProposals.filter((p) => ids.has(p.revision_id));
+    const proposalIds = new Set(proposals.map((p) => p.id));
+    const findings = this.templateFindings.filter((f) => proposalIds.has(f.proposal_id));
+    return assembleTemplateRevisions(revisions, proposals, findings);
+  }
+
+  async findPendingTemplateRevision(templateSlug: string): Promise<Result<TemplateRevision | null, LoreError>> {
+    return ok(this.readTemplateRevisions((r) => r.template_slug === templateSlug && r.status === "pending")[0] ?? null);
+  }
+
+  async findTemplateRevisions(templateSlug: string): Promise<Result<TemplateRevision[], LoreError>> {
+    return ok(this.readTemplateRevisions((r) => r.template_slug === templateSlug));
+  }
+
+  async insertTemplateProposal(input: {
+    id: string;
+    revision_id: string;
+    question: string;
+    judgment_id: string;
+    reason?: string | undefined;
+    created_at: string;
+  }): Promise<Result<void, LoreError>> {
+    const revision = this.templateRevisions.find((r) => r.id === input.revision_id);
+    if (revision === undefined || revision.status !== "pending") {
+      return err({ code: "STORE_ERROR", message: `template revision ${input.revision_id} is not pending` });
+    }
+    if (this.templateProposals.some((p) => p.id === input.id)) {
+      return err({ code: "STORE_ERROR", message: `template_proposals: duplicate id ${input.id}` });
+    }
+    this.templateProposals.push({ id: input.id, revision_id: input.revision_id, question: input.question, decision: null, dimension_id: null, drop_reason: null });
+    this.templateFindings.push({ proposal_id: input.id, judgment_id: input.judgment_id });
+    return ok(undefined);
+  }
+
+  async insertTemplateProposalFinding(input: {
+    proposal_id: string;
+    judgment_id: string;
+    reason?: string | undefined;
+    created_at: string;
+  }): Promise<Result<void, LoreError>> {
+    if (!this.templateProposals.some((p) => p.id === input.proposal_id)) {
+      return err({ code: "STORE_ERROR", message: `template_proposal_findings: no proposal ${input.proposal_id}` });
+    }
+    this.templateFindings.push({ proposal_id: input.proposal_id, judgment_id: input.judgment_id });
+    return ok(undefined);
+  }
+
+  async approveTemplateRevision(input: {
+    id: string;
+    resolved_at: string;
+    resolved_by: string;
+    decisions: readonly ProposalDecision[];
+  }): Promise<Result<void, LoreError>> {
+    const revision = this.templateRevisions.find((r) => r.id === input.id);
+    if (revision === undefined || revision.status !== "pending") {
+      return err({ code: "STORE_ERROR", message: `template revision ${input.id} is not pending` });
+    }
+    // reason: validate every decision before changing anything, so the approval is all-or-nothing like the SQL transaction.
+    for (const decision of input.decisions) {
+      if (!this.templateProposals.some((p) => p.id === decision.proposal_id && p.revision_id === input.id)) {
+        return err({ code: "STORE_ERROR", message: `template revision ${input.id} has no proposal ${decision.proposal_id}` });
+      }
+    }
+    revision.status = "approved";
+    revision.resolved_at = input.resolved_at;
+    revision.resolved_by = input.resolved_by;
+    for (const decision of input.decisions) {
+      const proposal = this.templateProposals.find((p) => p.id === decision.proposal_id);
+      if (proposal === undefined) continue;
+      proposal.decision = decision.decision;
+      proposal.dimension_id = decision.decision === "accepted" ? decision.dimension_id : null;
+      proposal.drop_reason = decision.decision === "dropped" ? decision.reason : null;
+    }
     return ok(undefined);
   }
 
@@ -1911,8 +2027,11 @@ export class InMemoryStore implements StoreInterface {
 
   async insertSuiteFileRuns(rows: readonly SuiteFileRunRecord[]): Promise<Result<void, LoreError>> {
     for (const row of rows) {
-      // reason: a single-file key stores one row per file, first wins (migration-045's partial unique index, #528).
-      const taken = isSingleFileRunKey(row.suite_result_id) && this.suiteFileRuns.some((r) => r.suite_result_id === row.suite_result_id && r.file === row.file);
+      // reason: a single-file key stores one CONCLUSIVE row per file, first wins (migration-045's partial unique index narrowed by 047, #528); inconclusive rows never conflict.
+      const taken =
+        isSingleFileRunKey(row.suite_result_id) &&
+        row.classification !== "inconclusive" &&
+        this.suiteFileRuns.some((r) => r.suite_result_id === row.suite_result_id && r.file === row.file && r.classification !== "inconclusive");
       if (!taken) this.suiteFileRuns.push({ ...row });
     }
     return ok(undefined);

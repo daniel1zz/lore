@@ -210,7 +210,8 @@ export interface ValidateDocumentOptions {
   readonly kind?: string;
 }
 
-function dimensionApplies(dimension: TemplateDimension, kind: string | undefined): boolean {
+/** True when the dimension applies to a document of `kind` (no `applies_to`, or no kind, means it applies). */
+export function dimensionApplies(dimension: TemplateDimension, kind: string | undefined): boolean {
   return dimension.applies_to === undefined || kind === undefined || dimension.applies_to.includes(kind);
 }
 

@@ -52,7 +52,7 @@ import type { FailedFinding } from "../../../service/root-cause-fingerprint.js";
 import { retirementAssessFields } from "../../../service/retired-ac-service.js";
 import { BATCH_ERROR_AUDIT_ACTION, ReviewBatchRunner, skippedEveryPlan, type BatchPlanRow, type BatchRunPorts, type MachineBatchPorts, type MachineBatchRun } from "../../../service/review-batch-service.js";
 import { UNKNOWN_MACHINE_ID, batchLeaseKey, leaseLostError, planLeaseKey, type LeaseHandle, type ReviewLeases } from "../../../service/review-batch-lease.js";
-import { buildReviewLeases, buildReviewTriggerService, readBatchHandoff } from "../review-batch-wiring.js";
+import { buildReviewLeases, buildReviewTriggerService, readBatchHandoff, refuseBatchLeaseForRead } from "../review-batch-wiring.js";
 import { ASSESS_EXIT_LEASE_HELD, renderAssessExitCodes } from "../assess-exit-codes.js";
 
 export { ASSESS_EXIT_CODES } from "../assess-exit-codes.js";
@@ -283,7 +283,7 @@ export default defineLoreCommand({
       let planRefs: string[];
       if (needsReview) {
         // reason: the SAME trigger set the landing computes (BR-1379); a hand run and the detached batch select identically.
-        const trigger = buildReviewTriggerService(app, () => err({ code: "VALIDATION_ERROR", field: "spawn", message: "a hand run never spawns a batch" }));
+        const trigger = buildReviewTriggerService(app, () => err({ code: "VALIDATION_ERROR", field: "spawn", message: "a hand run never spawns a batch" }), refuseBatchLeaseForRead);
         if (trigger === undefined) {
           inv.io.stderr.write("Error: this composition cannot compute the needs-review set (no lease store or decision reader wired).\n");
           return 1;
@@ -556,7 +556,7 @@ export default defineLoreCommand({
                 lease: batchLease,
                 retakeLease: async () => leases.acquire(batchLeaseKey(await leases.machineId())),
                 readTriggerSet: async () => {
-                  const trigger = buildReviewTriggerService(app, () => err({ code: "VALIDATION_ERROR", field: "spawn", message: "a hand run never spawns a batch" }));
+                  const trigger = buildReviewTriggerService(app, () => err({ code: "VALIDATION_ERROR", field: "spawn", message: "a hand run never spawns a batch" }), refuseBatchLeaseForRead);
                   if (trigger === undefined) return err<LoreError>({ code: "VALIDATION_ERROR", field: "trigger", message: "this composition cannot compute the needs-review set" });
                   const set = await trigger.computeTriggerSet();
                   return set.ok ? ok(set.value.map((entry) => entry.plan)) : set;
@@ -757,9 +757,13 @@ async function runAcceptGate(context: Parameters<typeof invocationOf>[0], positi
       inv.io.stderr.write(formatErrorFor(inv, accepted.error) + "\n");
       return exitCode(accepted.error);
     }
-    const line = `Accepted gate ${accepted.value.dimension} of plan ${accepted.value.plan} (human decision record ${String(accepted.value.decision_record)}, issue #${String(accepted.value.issue)}, review ${accepted.value.review}); the next \`lore assess --where needs-review --close\` may archive it.`;
+    const lines = [
+      `Accepted gate ${accepted.value.dimension} of plan ${accepted.value.plan} (review ${accepted.value.review}):`,
+      ...accepted.value.accepted.map((entry) => `  ${entry.cause}: human decision record ${String(entry.decision_record)}, issue #${String(entry.issue)}`),
+      "the next `lore assess --where needs-review --close` may archive it.",
+    ];
     if (args.json === true) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: accepted.value }, null, 2));
-    else printLine(inv.io.stdout, line);
+    else for (const line of lines) printLine(inv.io.stdout, line);
     return 0;
   } finally {
     app.close();

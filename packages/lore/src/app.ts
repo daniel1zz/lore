@@ -128,6 +128,7 @@ import { SessionService } from "./service/session-service.js";
 import { ValidityService } from "./service/validity-service.js";
 import { DriftCheckService } from "./service/drift-check-service.js";
 import { TemplateService } from "./service/template-service.js";
+import { TemplateGrowthService } from "./service/template-growth-service.js";
 import { OutlineSectionsRetireMigrationService } from "./service/outline-sections-retire-migration-service.js";
 import { OrdinalMigrationService } from "./service/ordinal-migration-service.js";
 import { SpecParentMigrationService } from "./service/spec-parent-migration-service.js";
@@ -549,7 +550,7 @@ export interface App {
    */
   retiredAcService?: RetiredAcService;
   /** The store's lease verbs, for the post-landing review batch lease (BR-1379); optional like the other late additions. */
-  reviewLeaseStore?: Pick<StoreInterface, "acquireLease" | "takeOverLease" | "renewLease" | "releaseLease" | "readLease" | "appendAuditEntry">;
+  reviewLeaseStore?: Pick<StoreInterface, "acquireLease" | "takeOverLease" | "renewLease" | "releaseLease" | "readLease">;
   /**
    * SeatService — thin `GitPort` orchestration for the `lore seat` verb family
    * (`enter`/`list`/`resume`/`remove`, SPEC-057). Wired here with the REAL `GitPort`
@@ -645,6 +646,11 @@ export interface App {
    * `driftCheckService`; always wired in production.
    */
   templateService?: TemplateService;
+  /**
+   * The single pending revision of a template and its review (accepted proposals become dimensions). Judgments feed it
+   * through `JudgmentService.record`. Optional for the same hand-built-App reason as `templateService`.
+   */
+  templateGrowthService?: TemplateGrowthService;
   /**
    * SPEC-102 OPTIONAL read/deny-instrumentation port — the SAME instance
    * wired into `CorpusService`/`GateEnforcer` (service-layer deny). Exposed
@@ -1077,6 +1083,9 @@ function buildAppFromSqlite(
     // reason: TemplateService is a read-only reader of corpus template documents (store only), same DI shape as
     // DriftCheckService; structured-documents T2.
     templateService: new TemplateService(store),
+    // reason: the review that turns a template's accepted proposals into dimensions edits the template document, so it takes the
+    // composed CorpusService (the one write route); stateless otherwise. structured-documents T8.
+    templateGrowthService: new TemplateGrowthService(store, new TemplateService(store), corpusService),
     // reason: VerificationProjectionService depends only on StoreInterface plus the
     // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
     // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.
@@ -1177,7 +1186,7 @@ function buildAppFromSqlite(
     // envPassthroughAll (resolved config) + processEnv (a `process.env` snapshot
     // captured HERE at composition time, mirroring how `repoRoot` is captured from
     // `process.cwd()` — VerifyRunnerService itself never reads `process.env`).
-    suiteResultService: buildSuiteResultService(store),
+    suiteResultService: buildSuiteResultService(store, corpusService),
     verifyRunnerService: new VerifyRunnerService(
       corpusService.getPlanBundle.bind(corpusService),
       taskWorkflowService.recordVerifiedEvidence.bind(taskWorkflowService),
@@ -1528,6 +1537,9 @@ function buildAppFromTurso(
     // reason: TemplateService is a read-only reader of corpus template documents (store only), same DI shape as
     // DriftCheckService; structured-documents T2.
     templateService: new TemplateService(store),
+    // reason: the review that turns a template's accepted proposals into dimensions edits the template document, so it takes the
+    // composed CorpusService (the one write route); stateless otherwise. structured-documents T8.
+    templateGrowthService: new TemplateGrowthService(store, new TemplateService(store), corpusService),
     // reason: VerificationProjectionService depends only on StoreInterface plus the
     // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
     // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.
@@ -1623,7 +1635,7 @@ function buildAppFromTurso(
     // CorpusService/TaskWorkflowService/the bun-only executor module directly
     // (SPEC-039 §2 D3). SPEC-039 §M2 additions — see `buildAppFromSqlite`'s
     // identical comment.
-    suiteResultService: buildSuiteResultService(store),
+    suiteResultService: buildSuiteResultService(store, corpusService),
     verifyRunnerService: new VerifyRunnerService(
       corpusService.getPlanBundle.bind(corpusService),
       taskWorkflowService.recordVerifiedEvidence.bind(taskWorkflowService),
@@ -1764,10 +1776,11 @@ function buildDecisionRechecker(store: StoreInterface, ambient: AppAmbient): (bu
  * store) single-flight per commit. Each acquisition adds a random suffix to the holder, so two lookups in this process
  * still exclude each other.
  */
-function buildSuiteResultService(store: StoreInterface): SuiteResultService {
+function buildSuiteResultService(store: StoreInterface, corpusService: CorpusService): SuiteResultService {
   return new SuiteResultService({
     store,
-    leases: new ReviewLeases(store, `app:${String(process.pid)}`),
+    // reason: the takeover audit row goes through the one audit write path (CorpusService.appendAudit), never the store.
+    leases: new ReviewLeases(store, `app:${String(process.pid)}`, Date.now, undefined, undefined, undefined, (request) => corpusService.appendAudit(request)),
     now: () => new Date().toISOString(),
     newId: () => `suite-${randomUUID()}`,
     clockMs: () => performance.now(),

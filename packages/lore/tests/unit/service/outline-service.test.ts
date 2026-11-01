@@ -735,6 +735,14 @@ true,
         insertJudgment: (j) => store.insertJudgment(j),
         findJudgments: (id, kind) => store.findJudgments(id, kind),
         latestJudgment: (id, kind) => store.latestJudgment(id, kind),
+        // reason: judging per template dimension — new required StoreInterface methods; mechanical delegates like the rest.
+        findJudgmentDimensions: (id) => store.findJudgmentDimensions(id),
+        insertTemplateRevision: (input) => store.insertTemplateRevision(input),
+        findPendingTemplateRevision: (slug) => store.findPendingTemplateRevision(slug),
+        findTemplateRevisions: (slug) => store.findTemplateRevisions(slug),
+        insertTemplateProposal: (input) => store.insertTemplateProposal(input),
+        insertTemplateProposalFinding: (input) => store.insertTemplateProposalFinding(input),
+        approveTemplateRevision: (input) => store.approveTemplateRevision(input),
         // reason: SPEC-044 D2 — new required StoreInterface method; mechanical
         // addition (same class of fix as every other explicit delegate above).
         latestJudgmentsByDocIds: (docIds, kind) => store.latestJudgmentsByDocIds(docIds, kind),

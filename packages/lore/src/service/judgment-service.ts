@@ -69,6 +69,7 @@ import type {
   StoreInterface,
 } from "../store/store-interface.js";
 import { bareDocWriter, type DocWritePort } from "./corpus-service.js";
+import { recordMissingDimensionFindings } from "./template-growth-service.js";
 
 // ─── Public Types ───────────────────────────────────────────────────────────
 
@@ -220,6 +221,12 @@ export class JudgmentService {
       details: { judgment_ref: parsed.data.id, version: parsed.data.doc_version },
     });
     if (!auditResult.ok) return auditResult;
+
+    // reason: BR-1530 — a v9 judgment's missing_dimension findings become proposals in the template's single pending revision
+    // in THIS one persistence method, so no caller can store such a judgment and forget its proposals. A failure is returned
+    // (never swallowed): the judgment row stays, and the caller learns the proposals were not recorded.
+    const proposals = await recordMissingDimensionFindings(this.store, parsed.data);
+    if (!proposals.ok) return proposals;
 
     return ok(parsed.data);
   }

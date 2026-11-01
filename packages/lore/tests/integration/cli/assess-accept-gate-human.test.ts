@@ -293,7 +293,7 @@ describe("AC-HG-2 a human's answer applies to its own root-cause fingerprint onl
     const accepted = await w.service("run").acceptGate(w.plan.slug, "security", FULL_DECISION);
     // the CLI's exit code for this result: 0 for a success, `exitCode(error)` for a refusal
     expect(accepted.ok ? 0 : exitCode(accepted.error)).toBe(0);
-    expect(accepted).toMatchObject({ ok: true, value: { dimension: "security", issue: ISSUE, decision_record: humanRecord } });
+    expect(accepted).toMatchObject({ ok: true, value: { dimension: "security", accepted: [expect.objectContaining({ issue: ISSUE, decision_record: humanRecord })] } });
     // the plan RECORDS the acceptance (a flagged known defect); the authority is the human record in the log
     expect(readKnownDefects((await w.reload()).extra).some((e) => e.gate_accepted === true)).toBe(true);
 
@@ -394,7 +394,7 @@ describe("AC-HG-3 only a human-backed acceptance counts", () => {
     const human = rows.value.filter((r) => r.channel === "human-tty");
     expect(human).toHaveLength(1);
     expect(human[0]).toMatchObject({ class: "governance-loosen", subject_id: `${w.plan.id}:security`, verdict: "auto" });
-    expect(accepted.ok && accepted.value.decision_record).toBe(human[0]?.id);
+    expect(accepted.ok && accepted.value.accepted.map((a) => a.decision_record)).toEqual([human[0]?.id]);
     expect(readKnownDefects((await w.reload()).extra).some((e) => e.gate_accepted === true)).toBe(true);
     expect((await w.runBatch()).outcome).toBe("accepted-with-known-defects");
     expect((await w.reload()).status).toBe("archived");

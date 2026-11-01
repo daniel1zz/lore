@@ -69,7 +69,7 @@ import {
   type LoreError,
   type Result,
 } from "@lore/core";
-import type { DecisionRecord, RuleIdPrefix } from "@lore/core";
+import type { DecisionRecord, TemplateDimensionVerdict, ProposalDecision, RuleIdPrefix, TemplateRevision } from "@lore/core";
 import { listedRuleLifecycle } from "./index-rows.js";
 import type {
   AcCiteRow,
@@ -128,6 +128,10 @@ import {
   type DocRow,
   type FtsRow,
   type JudgmentRow,
+  assembleTemplateRevisions,
+  type TemplateProposalFindingRow,
+  type TemplateProposalRow,
+  type TemplateRevisionRow,
   type LinkRow,
   type VersionRow,
   INSERT_RUN_SQL,
@@ -201,6 +205,8 @@ import { MIGRATION_043_SQL } from "./migrations/migration-043.js";
 import { MIGRATION_044_SQL } from "./migrations/migration-044.js";
 import { MIGRATION_045_SQL } from "./migrations/migration-045.js";
 import { MIGRATION_046_SQL } from "./migrations/migration-046.js";
+import { MIGRATION_047_ADD_COLUMNS, MIGRATION_047_SQL } from "./migrations/migration-047.js";
+import { MIGRATION_048_ADD_COLUMNS, MIGRATION_048_SQL } from "./migrations/migration-048.js";
 import { DECISION_GENESIS_HASH, computeDecisionEntryHash } from "./decision-log.js";
 import type { DecisionLogRow, DecisionRecordInput } from "./decision-log.js";
 import type { DecisionSubjectKey, DecisionVersionQuery } from "./store-interface.js";
@@ -1122,6 +1128,44 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("PRAGMA foreign_keys = ON");
         } catch {
           // reason: only throws on a closed/broken connection, where `error` below is what the caller needs.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 47 && 47 <= ceiling) {
+      // reason: migration-047 classifies every stored file run (BR-1533) and narrows the single-file unique index to conclusive rows, in ONE BEGIN/COMMIT; a failure rolls back and leaves schema 46.
+      // Two-phase like 041/042 (#587): each column is added only where `PRAGMA table_info` lacks it, so a replay does not throw.
+      try {
+        for (const { table, column, ddl } of MIGRATION_047_ADD_COLUMNS) {
+          const cols = this.db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+          if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
+        }
+        this.db.exec(MIGRATION_047_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-044 — safe to ignore, the failure below is what to report.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 48 && 48 <= ceiling) {
+      // reason: migration-048 is two-phase like 019: nullable review_judgments columns where missing, then one BEGIN/COMMIT creates the
+      // per-dimension verdict and template revision/proposal tables and bumps user_version; a failure rolls back and leaves schema 47.
+      try {
+        for (const { table, column, ddl } of MIGRATION_048_ADD_COLUMNS) {
+          const cols = this.db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+          if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
+        }
+        this.db.exec(MIGRATION_048_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-019 — safe to ignore, the failure below is what to report.
         }
         throw error;
       }
@@ -3594,33 +3638,195 @@ export class SQLiteStore implements StoreInterface {
 
   async insertJudgment(judgment: ReviewJudgment): Promise<Result<void, LoreError>> {
     try {
-      this.db
-        .prepare(
-          `INSERT INTO review_judgments
-             (id, doc_id, doc_version, decision, confidence, reasons, checks,
-              blocking_questions, judge_provider, judge_model, judge_prompt_version,
-              kind, superseded_candidate, truncated, truncation, created_at, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          judgment.id,
-          judgment.doc_id,
-          judgment.doc_version,
-          judgment.decision,
-          judgment.confidence,
-          JSON.stringify(judgment.reasons),
-          JSON.stringify(judgment.checks),
-          JSON.stringify(judgment.blocking_questions),
-          judgment.judge.provider,
-          judgment.judge.model,
-          judgment.judge.prompt_version,
-          judgment.kind ?? "review",
-          judgment.superseded_candidate !== undefined ? JSON.stringify(judgment.superseded_candidate) : null,
-          judgment.truncated === true ? 1 : null,
-          judgment.truncation !== undefined ? JSON.stringify(judgment.truncation) : null,
-          judgment.created_at,
-          judgment.created_by,
-        );
+      // reason: the judgment row and its per-dimension rows land together or not at all.
+      this.db.transaction(() => {
+        this.db
+          .prepare(
+            `INSERT INTO review_judgments
+               (id, doc_id, doc_version, decision, confidence, reasons, checks,
+                blocking_questions, judge_provider, judge_model, judge_prompt_version,
+                kind, superseded_candidate, truncated, truncation, template_ref, missing_dimensions, created_at, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            judgment.id,
+            judgment.doc_id,
+            judgment.doc_version,
+            judgment.decision,
+            judgment.confidence,
+            JSON.stringify(judgment.reasons),
+            JSON.stringify(judgment.checks),
+            JSON.stringify(judgment.blocking_questions),
+            judgment.judge.provider,
+            judgment.judge.model,
+            judgment.judge.prompt_version,
+            judgment.kind ?? "review",
+            judgment.superseded_candidate !== undefined ? JSON.stringify(judgment.superseded_candidate) : null,
+            judgment.truncated === true ? 1 : null,
+            judgment.truncation !== undefined ? JSON.stringify(judgment.truncation) : null,
+            judgment.template_ref ?? null,
+            judgment.missing_dimensions !== undefined ? JSON.stringify(judgment.missing_dimensions) : null,
+            judgment.created_at,
+            judgment.created_by,
+          );
+        for (const verdict of judgment.dimension_verdicts ?? []) {
+          this.db.run(
+            "INSERT INTO review_judgment_dimensions (judgment_id, dimension_id, verdict, reason, evidence) VALUES (?, ?, ?, ?, ?)",
+            [judgment.id, verdict.dimension_id, verdict.verdict, verdict.reason, verdict.evidence],
+          );
+        }
+      })();
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async findJudgmentDimensions(judgmentId: string): Promise<Result<TemplateDimensionVerdict[], LoreError>> {
+    try {
+      const rows = this.db
+        .prepare("SELECT dimension_id, verdict, reason, evidence FROM review_judgment_dimensions WHERE judgment_id = ? ORDER BY rowid")
+        .all(judgmentId) as TemplateDimensionVerdict[];
+      return ok(rows.map((row) => ({ dimension_id: row.dimension_id, verdict: row.verdict, reason: row.reason, evidence: row.evidence })));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  // ── Template revisions and proposals ───────────────────────────────────────
+
+  async insertTemplateRevision(input: {
+    id: string;
+    template_slug: string;
+    base_version: number;
+    created_at: string;
+  }): Promise<Result<void, LoreError>> {
+    try {
+      // reason: the partial unique index idx_template_revisions_one_pending refuses a second pending revision per template.
+      this.db.run("INSERT INTO template_revisions (id, template_slug, status, base_version, created_at) VALUES (?, ?, 'pending', ?, ?)", [
+        input.id,
+        input.template_slug,
+        input.base_version,
+        input.created_at,
+      ]);
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  private readTemplateRevisions(where: string, param: string): TemplateRevision[] {
+    const revisions = this.db
+      .prepare(`SELECT * FROM template_revisions WHERE ${where} ORDER BY created_at DESC, id DESC`)
+      .all(param) as TemplateRevisionRow[];
+    if (revisions.length === 0) return [];
+    const marks = revisions.map(() => "?").join(", ");
+    const ids = revisions.map((revision) => revision.id);
+    const proposals = this.db
+      .prepare(`SELECT * FROM template_proposals WHERE revision_id IN (${marks}) ORDER BY created_at, rowid`)
+      .all(...ids) as TemplateProposalRow[];
+    const proposalMarks = proposals.map(() => "?").join(", ");
+    const findings =
+      proposals.length === 0
+        ? []
+        : (this.db
+            .prepare(`SELECT proposal_id, judgment_id FROM template_proposal_findings WHERE proposal_id IN (${proposalMarks}) ORDER BY id`)
+            .all(...proposals.map((proposal) => proposal.id)) as TemplateProposalFindingRow[]);
+    return assembleTemplateRevisions(revisions, proposals, findings);
+  }
+
+  async findPendingTemplateRevision(templateSlug: string): Promise<Result<TemplateRevision | null, LoreError>> {
+    try {
+      return ok(this.readTemplateRevisions("template_slug = ? AND status = 'pending'", templateSlug)[0] ?? null);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async findTemplateRevisions(templateSlug: string): Promise<Result<TemplateRevision[], LoreError>> {
+    try {
+      return ok(this.readTemplateRevisions("template_slug = ?", templateSlug));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async insertTemplateProposal(input: {
+    id: string;
+    revision_id: string;
+    question: string;
+    judgment_id: string;
+    reason?: string | undefined;
+    created_at: string;
+  }): Promise<Result<void, LoreError>> {
+    try {
+      this.db.transaction(() => {
+        const open = this.db.prepare("SELECT 1 AS ok FROM template_revisions WHERE id = ? AND status = 'pending'").get(input.revision_id);
+        if (open === null || open === undefined) throw new Error(`template revision ${input.revision_id} is not pending`);
+        this.db.run("INSERT INTO template_proposals (id, revision_id, question, created_at) VALUES (?, ?, ?, ?)", [
+          input.id,
+          input.revision_id,
+          input.question,
+          input.created_at,
+        ]);
+        this.db.run("INSERT INTO template_proposal_findings (proposal_id, judgment_id, reason, created_at) VALUES (?, ?, ?, ?)", [
+          input.id,
+          input.judgment_id,
+          input.reason ?? null,
+          input.created_at,
+        ]);
+      })();
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async insertTemplateProposalFinding(input: {
+    proposal_id: string;
+    judgment_id: string;
+    reason?: string | undefined;
+    created_at: string;
+  }): Promise<Result<void, LoreError>> {
+    try {
+      this.db.run("INSERT INTO template_proposal_findings (proposal_id, judgment_id, reason, created_at) VALUES (?, ?, ?, ?)", [
+        input.proposal_id,
+        input.judgment_id,
+        input.reason ?? null,
+        input.created_at,
+      ]);
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async approveTemplateRevision(input: {
+    id: string;
+    resolved_at: string;
+    resolved_by: string;
+    decisions: readonly ProposalDecision[];
+  }): Promise<Result<void, LoreError>> {
+    try {
+      this.db.transaction(() => {
+        // reason: RETURNING id (not the affected-row count) decides the outcome — see this module's CLAUDE.md on bun's stale counts.
+        const closed = this.db
+          .prepare("UPDATE template_revisions SET status = 'approved', resolved_at = ?, resolved_by = ? WHERE id = ? AND status = 'pending' RETURNING id")
+          .all(input.resolved_at, input.resolved_by, input.id);
+        if (closed.length === 0) throw new Error(`template revision ${input.id} is not pending`);
+        for (const decision of input.decisions) {
+          const updated = this.db
+            .prepare("UPDATE template_proposals SET decision = ?, dimension_id = ?, drop_reason = ? WHERE id = ? AND revision_id = ? RETURNING id")
+            .all(
+              decision.decision,
+              decision.decision === "accepted" ? decision.dimension_id : null,
+              decision.decision === "dropped" ? decision.reason : null,
+              decision.proposal_id,
+              input.id,
+            );
+          if (updated.length === 0) throw new Error(`template revision ${input.id} has no proposal ${decision.proposal_id}`);
+        }
+      })();
       return ok(undefined);
     } catch (e) {
       return wrapStoreError(e);
@@ -4016,9 +4222,9 @@ export class SQLiteStore implements StoreInterface {
       this.db.transaction(() => {
         for (const row of rows) {
           this.db.run(
-            // reason: OR IGNORE honours migration-045's partial unique index: a second single-file run of one (key, file) is dropped, first wins (#528); re-run rows under a suite id never conflict.
-            "INSERT OR IGNORE INTO suite_file_runs (suite_result_id, commit_sha, file, exit_code, output_tail, duration_ms, measured_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [row.suite_result_id, row.commit_sha, row.file, row.exit_code, row.output_tail, row.duration_ms, row.measured_at],
+            // reason: OR IGNORE honours the partial unique index (migration-045, narrowed by 047 to conclusive rows): a second CONCLUSIVE single-file run of one (key, file) is dropped, first wins (#528); inconclusive runs and re-run rows under a suite id never conflict.
+            "INSERT OR IGNORE INTO suite_file_runs (suite_result_id, commit_sha, file, exit_code, output_tail, duration_ms, measured_at, classification, inconclusive_cause) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [row.suite_result_id, row.commit_sha, row.file, row.exit_code, row.output_tail, row.duration_ms, row.measured_at, row.classification, row.inconclusive_cause],
           );
         }
       })();

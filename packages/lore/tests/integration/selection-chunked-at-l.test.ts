@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 import { ok } from "@lore/core";
-import { finishedTestFiles, outcomesOfTogetherRun } from "../../src/adapters/cli/assess-suite-runner.js";
+import { outcomesOfTogetherRun } from "../../src/adapters/cli/assess-suite-runner.js";
 import { InMemoryStore } from "../../src/store/in-memory-store.js";
 import { regressionAtHead, type RegressionAtHead, type RegressionAtHeadPorts } from "../../src/service/regression-at-head.js";
 import { CHUNK_BUDGET_MS, DEFAULT_FILE_ESTIMATE_MS, MAX_CHUNK_FILES, MAX_CONSECUTIVE_FAILED_CHUNKS, planSelectionChunks } from "../../src/service/selection-run-at-l.js";
@@ -82,7 +82,7 @@ function build(files: readonly string[], redFiles: ReadonlySet<string> = new Set
   };
   const storeSingle = async (kind: "bisect" | "confirm", commitIndex: number, file: string, durationMs: number): Promise<void> => {
     const inserted = await store.insertSuiteFileRuns([
-      { suite_result_id: singleFileRunKey(kind, sha(commitIndex)), commit_sha: sha(commitIndex), file, exit_code: 0, output_tail: "", duration_ms: durationMs, measured_at: "2026-10-30T09:00:00.000Z" },
+      { suite_result_id: singleFileRunKey(kind, sha(commitIndex)), commit_sha: sha(commitIndex), file, exit_code: 0, output_tail: "", duration_ms: durationMs, measured_at: "2026-10-30T09:00:00.000Z", classification: "green", inconclusive_cause: null },
     ]);
     if (!inserted.ok) throw new Error(`fixture row not stored: ${inserted.error.code}`);
   };
@@ -189,25 +189,17 @@ describe("the head recheck and attribution on a chunked selection", () => {
   });
 });
 
-describe("what a timed-out run shows as finished", () => {
-  it("BR-1497 a run the limit ended keeps the files whose result line was printed; a file with no line is incomplete, never green", () => {
-    const output = ["✓ packages/x/tests/a.test.ts (3 tests) 12ms", "❯ packages/x/tests/b.test.ts (2 tests | 1 failed) 40ms", "❯ packages/x/tests/c.test.ts (4 tests) 9ms"].join("\n");
-    expect([...finishedTestFiles(output)]).toEqual([
-      ["packages/x/tests/a.test.ts", 0],
-      ["packages/x/tests/b.test.ts", 1],
-    ]);
-    const files = ["packages/x/tests/a.test.ts", "packages/x/tests/b.test.ts", "packages/x/tests/c.test.ts", "packages/x/tests/d.test.ts"];
-    const outcomes = outcomesOfTogetherRun(files, { status: 1, output, durationMs: 5, incomplete: TIMEOUT_CAUSE });
-    expect(outcomes.map((o) => [o.file, o.exit_code, o.incomplete])).toEqual([
-      [files[0], 0, undefined],
-      [files[1], 1, undefined],
-      [files[2], 1, TIMEOUT_CAUSE],
-      [files[3], 1, TIMEOUT_CAUSE],
-    ]);
+describe("what a timed-out run shows", () => {
+  it("BR-1533 a run the limit ended makes every file inconclusive (timeout), whatever result lines its console printed: the console is never read", () => {
+    const output = ["✓ packages/x/tests/a.test.ts (3 tests) 12ms", "❯ packages/x/tests/b.test.ts (2 tests | 1 failed) 40ms"].join("\n");
+    const files = ["packages/x/tests/a.test.ts", "packages/x/tests/b.test.ts", "packages/x/tests/c.test.ts"];
+    const outcomes = outcomesOfTogetherRun(files, { status: 1, output, durationMs: 5, incomplete: TIMEOUT_CAUSE, timedOut: true });
+    expect(outcomes.map((o) => [o.file, o.classification, o.inconclusive_cause, o.incomplete])).toEqual(files.map((file) => [file, "inconclusive", "timeout", TIMEOUT_CAUSE]));
   });
 
-  it("BR-1497 a timed-out run whose output names no file marks every file incomplete (the dot reporter case)", () => {
+  it("BR-1497 a timed-out run whose process tree could not be ended stays incomplete and unclassified", () => {
     const outcomes = outcomesOfTogetherRun(["packages/x/tests/a.test.ts"], { status: 1, output: "....", durationMs: 5, incomplete: TIMEOUT_CAUSE });
     expect(outcomes[0]).toMatchObject({ exit_code: 1, incomplete: TIMEOUT_CAUSE });
+    expect(outcomes[0]?.classification).toBeUndefined();
   });
 });
