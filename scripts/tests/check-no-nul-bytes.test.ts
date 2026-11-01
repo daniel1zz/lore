@@ -1,6 +1,5 @@
 // @spawns-external git lists tracked files in a throwaway repository (and the script under test runs `git ls-files`)
 // @reads .claude/rules/**
-// @reads assets/governance/write-spec-rule.md
 // @reads .claude/settings.json
 // @reads .gitignore
 // @reads .lore-bootstrap/.lore/.gitignore

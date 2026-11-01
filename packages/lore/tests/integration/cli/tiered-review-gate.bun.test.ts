@@ -1,6 +1,5 @@
 // @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 // @reads assets/project/lore-config-template.yaml
-// @reads assets/governance/write-spec-rule.md
 /**
  * SPEC-103 §Mechanisms M2/M3 — judgment-required promote (anti-lottery worst-
  * decision-wins, `--override-judgment`/`--override-no-judgment` audited escapes) +

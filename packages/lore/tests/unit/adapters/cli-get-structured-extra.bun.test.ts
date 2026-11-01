@@ -1,4 +1,3 @@
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
  * `lore get` structured-`extra` loss notice — COMPILED-BINARY end-to-end contract

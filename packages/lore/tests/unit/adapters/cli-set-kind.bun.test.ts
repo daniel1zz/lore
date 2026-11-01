@@ -1,4 +1,3 @@
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
  * @spec_ref SPEC-032 §3.1 — `lore set --kind` (spec_kind taxonomy)

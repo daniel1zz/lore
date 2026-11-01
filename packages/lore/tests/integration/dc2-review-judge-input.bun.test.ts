@@ -1,4 +1,3 @@
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
  * @spec_ref spec-defect-clusters-round-2-part-b-review-pending-queue-corpus#AC-DC2-9 (D9, BR-268, BR-269, BR-960)

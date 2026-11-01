@@ -1,5 +1,4 @@
 // @reads assets/project/lore-config-template.yaml
-// @reads assets/governance/write-spec-rule.md
 /**
  * Bun-only integration seam test for the acRef THREE-HOP WIRING between
  * `VerifyRunnerService`'s `recordAcRef` gate, `buildVerifySpawnSpec`'s `acRef`

@@ -1,6 +1,5 @@
 // @spawns-external git builds a throwaway git repository the test runs against
 // @reads assets/project/lore-config-template.yaml
-// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref AC-CP-4 (spec-corpus-resolution-carries-provenance-and-a-foreign-write §D4)
  *
