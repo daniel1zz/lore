@@ -1,5 +1,6 @@
 // @spawns packages/lore/src/index.ts
 // @reads lore.tree.yaml
+// @reads assets/templates/**
 /**
  * Consumers that derived structure from a spec's parent accept a parentless spec
  * (AC-BLS3B-5; BR-400 tree check, BR-718 lore get navigation, BR-789 spec-file import, BR-2).
@@ -30,6 +31,7 @@ import { join } from "node:path";
 
 import { detachParentInDb } from "../helpers/detach-parent.js";
 import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
+import { fillShippedTemplate } from "../helpers/structured-corpus-wiring.js";
 setDefaultTimeout(300_000);
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -101,6 +103,8 @@ beforeAll(() => {
   git(["add", "."]);
   git(["commit", "-q", "-m", "init"]);
   mustRun(["init"]);
+  // BR-1528: sync-docs creates each imported spec structured through the approved `spec/feature` template.
+  mustRun(["migrate", "templates", "--apply"]);
   // sync-docs bodies below are not spec-create skeletons; gating itself is not under test here.
   patchLoreConfig(
     dir,
@@ -161,10 +165,12 @@ describe("parentless spec consumers (AC-BLS3B-5)", () => {
   it("HAPPY: lore sync-docs (spec-file import) creates specs with no parent (BR-789)", () => {
     const specDir = join(dir, "docs", "requirements", "spec");
     mkdirSync(specDir, { recursive: true });
+    const filled = fillShippedTemplate("spec", "feature");
     for (const title of ["Imported One", "Imported Two"]) {
+      // BR-1528: the file's content is its front matter `fields:` / `dimensions:` (JSON is YAML); its body is rendered, so empty
       writeFileSync(
         join(specDir, `${title.replace(/ /g, "-")}.md`),
-        `---\ntype: spec\ntitle: "${title}"\nparent: "Consumers PRD"\n---\n${SKELETON}`,
+        `---\ntype: spec\ntitle: "${title}"\nparent: "Consumers PRD"\nfields: ${JSON.stringify(filled.fields)}\ndimensions: ${JSON.stringify(filled.dimensions)}\n---\n`,
       );
     }
     const r = runLore(["sync-docs", "--from", specDir, "--json"]);
