@@ -40,8 +40,9 @@
 
 4. lore calls:
    lore feed plan-promote
+   lore template show plan --blank > /tmp/plan-fields.yaml   # fill the skeleton
    lore create plan --title "User Authentication" --parent spec-user-auth \
-     --content-file /tmp/plan-content.md --json
+     --fields-file /tmp/plan-fields.yaml --json
    → plan-user-authentication
    # Content includes: Invariants + Risk Register + Estimation Summary + Critical Path + Exit Criteria
 
@@ -57,20 +58,20 @@
    lore create task --title "[Skill:research] Evaluate auth approaches" \
      --parent plan-user-authentication --plan-id plan-user-authentication \
      --phase "Phase 1: Research & Design" \
-     --content "Estimate: M\nScope-Alt: Can skip OAuth evaluation if only JWT needed\n\nAC:\n- Comparison table with >=5 criteria"
+     --fields-file /tmp/task-evaluate.yaml   # estimate M; scope-alt: skip OAuth evaluation if only JWT needed; done_condition: comparison table with >=5 criteria
    → task-evaluate-auth-approaches
 
    lore create task --title "[Skill:design] Design auth API" \
      --parent plan-user-authentication --plan-id plan-user-authentication \
      --phase "Phase 1: Research & Design" \
-     --content "Estimate: M\nApproach: OpenAPI-first design\nSource: prd-auth section 4\nScope-Alt: Can defer admin endpoints to Phase 3\nCovers: AC-AUTH-1\n\nAC:\n- OpenAPI spec, all endpoints documented"
+     --fields-file /tmp/task-design.yaml   # estimate M; approach: OpenAPI-first design (prd-auth section 4); scope-alt: defer admin endpoints to Phase 3; ac_scope: [AC-AUTH-1]; done_condition: OpenAPI spec, all endpoints documented
    → task-design-auth-api
 
    lore create task --title "[Skill:implement] JWT middleware" \
      --parent plan-user-authentication --plan-id plan-user-authentication \
      --phase "Phase 2: Implementation" \
      --anchor src/middleware/jwt.ts --priority critical \
-     --content "Estimate: M\nApproach: express-jwt\nSource: research conclusion\nDimensions: D-FUNC, D-SEC\nScope-Alt: Can defer refresh rotation to later task\nCovers: AC-AUTH-2\n\nAC:\n- Given a valid Bearer token, When any /api/v1/* route is hit, Then req.user is populated\n- Given an invalid/expired token, When any protected route is hit, Then 401 with { code, message }"
+     --fields-file /tmp/task-jwt.yaml   # estimate M; approach: express-jwt (research conclusion); scope-alt: defer refresh rotation; ac_scope: [AC-AUTH-2]; done_condition: valid Bearer token populates req.user on /api/v1/*, invalid/expired token gets 401 with { code, message }
    → task-jwt-middleware
    # ... remaining Phase 2 + Phase 3 tasks ...
 
@@ -199,7 +200,7 @@ Last Phase 2 task archived → Phase Gate triggered:
    → RCF multiplier: 1.17 (applied to remaining Phase 3 estimate: 4 × 1.17 ≈ 5 su)
 
 6. Batched plan-doc edit (risk register + RCF + Decisions Log in ONE edit):
-   lore get plan-user-authentication --raw → edit → lore set plan-user-authentication --content-file /tmp/plan.md
+   lore get plan-user-authentication --json → write the changed fields → lore set plan-user-authentication --fields-file /tmp/plan-fields.yaml
    lore approve plan-user-authentication    # edit reset it to draft; re-approve
 
 7. No user stop: gate passed, no Invariant violated → auto-proceed
@@ -239,9 +240,9 @@ Skill("plan","replan") on plan-user-authentication
    lore phase add plan-user-authentication "Phase 4: OAuth"
    lore create task --title "[Skill:research] Evaluate OAuth libraries" \
      --parent plan-user-authentication --plan-id plan-user-authentication \
-     --phase "Phase 4: OAuth" --content "Estimate: S\n..." → task-evaluate-oauth-libs
+     --phase "Phase 4: OAuth" --fields-file /tmp/task-oauth-eval.yaml → task-evaluate-oauth-libs
    lore create task --title "[Skill:implement] OAuth provider integration" \
-     --phase "Phase 4: OAuth" --anchor src/auth/oauth/ --content "Estimate: L\n..." \
+     --phase "Phase 4: OAuth" --anchor src/auth/oauth/ --fields-file /tmp/task-oauth-providers.yaml \
      --parent plan-user-authentication --plan-id plan-user-authentication → task-oauth-providers
    lore create task --title "[Skill:implement] OAuth callback handlers" ... → task-oauth-callbacks
    lore create task --title "[Skill:test] OAuth E2E tests" ... → task-oauth-e2e
@@ -254,7 +255,7 @@ Skill("plan","replan") on plan-user-authentication
 
 6. Batched plan edit: Decisions Log + Risk Register (+2 risks) + Critical Path
    | 2026-03-22 | REPLAN: Add OAuth2 support | User requested Google+GitHub OAuth | +4 su, +4 tasks, +2 risks |
-   lore set plan-user-authentication --content-file /tmp/plan.md && lore approve plan-user-authentication
+   lore set plan-user-authentication --fields-file /tmp/plan-fields.yaml && lore approve plan-user-authentication
 
 7. lore ready plan-user-authentication --json → validation clean; user confirmation: ✅
 ```

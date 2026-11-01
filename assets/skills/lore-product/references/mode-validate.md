@@ -147,7 +147,7 @@ Every row is one of exactly three states — `✅ validated` (experiment ran, pa
 ## Persist (MANDATORY)
 
 ```bash
-lore create knowledge --parent <spec or prd it concerns> --sub-type research --title '{feature} Validation Ledger' --content ...
+lore create knowledge --parent <spec or prd it concerns> --sub-type research --title '{feature} Validation Ledger' --fields-file f.yaml   # skeleton: lore template show knowledge --kind research --blank
 lore link <ledger> <ost-doc> --type=implements
 ```
 

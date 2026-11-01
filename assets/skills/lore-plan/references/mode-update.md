@@ -89,8 +89,10 @@
 - Editing an approved doc auto-resets it to draft, and re-approving re-fires the
   plan-promote gate. So batch ALL content updates (risk register status, RCF-revised
   estimates, Decisions Log entries, deviations) into one edit at the phase gate:
-  - lore get <plan> --raw → current content
-  - apply edits → lore set <plan> --content-file /tmp/plan-content.md
+  - lore get <plan> --json → current fields
+  - write the changed fields/dimension answers → lore set <plan> --fields-file /tmp/plan-fields.yaml
+    (templated plan: top-level fields replace, dimensions merge by id; a supplied body is refused.
+    A legacy unconverted plan is still edited with --content-file.)
   - lore approve <plan> → back to approved (gate re-checks the spec chain — expected to pass)
 - Fix deviations before proceeding, or escalate to user
 

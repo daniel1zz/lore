@@ -143,11 +143,14 @@ Query official tuning/optimization docs for the recommended option:
 Use `lore create adr --parent <spec it governs>` to persist the benchmark-driven decision:
 
 ```
+lore template show adr --blank > adr-fields.yaml   # fill, then:
 lore create adr --parent <spec it governs> \
   --title "Use {A} for {purpose} — benchmark-driven" \
   --decision-status proposed \
-  --content "{performance question + normalized results + conditions + methodology quality + confidence + constraints: A wins for {workload X} by {margin}% under {conditions}; B preferred when {alternative condition}}"
+  --fields-file adr-fields.yaml
 ```
+
+Fields carry: performance question (context), options with normalized results and conditions, the decision with methodology quality and confidence, constraints (A wins for {workload X} by {margin}% under {conditions}; B preferred when {alternative condition}).
 
 ## Tools (mode-specific priority)
 

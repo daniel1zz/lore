@@ -117,8 +117,8 @@ export default defineLoreCommand({
         }
         if (report.matched_drift.some((entry) => entry.structured !== true)) {
           inv.io.stdout.write(
-            `  To push file → corpus, manually strip the YAML frontmatter and run:\n` +
-              `    lore set <slug> --content-file <stripped-file>\n`,
+            `  To push file → corpus (a legacy unconverted document; a templated one takes --fields-file), manually strip the YAML frontmatter and run:\n` +
+              `    lore set <slug> --content-file <stripped-file>   # legacy unconverted document only\n`,
           );
         }
         if (report.matched_drift.some((entry) => entry.structured === true)) {

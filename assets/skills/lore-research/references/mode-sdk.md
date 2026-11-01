@@ -129,11 +129,14 @@ Query official integration docs for the recommended library paired with the proj
 Use `lore create adr --parent <spec it governs>` to persist the architectural decision:
 
 ```
+lore template show adr --blank > adr-fields.yaml   # fill, then:
 lore create adr --parent <spec it governs> \
   --title "Use {SDK} for {purpose}" \
   --decision-status proposed \
-  --content "{context + evaluation summary + why this SDK won + alternatives considered with rejection reasons + constraints: must use {SDK} >= v{X}; avoid {rejected SDK} due to {deal-breaker}}"
+  --fields-file adr-fields.yaml
 ```
+
+Fields carry: context, evaluation summary, why this SDK won, alternatives with rejection reasons, constraints (must use {SDK} >= v{X}; avoid {rejected SDK} due to {deal-breaker}).
 
 Include in rationale: evaluation scores, role perspectives summary, alternatives considered with rejection reasons.
 
