@@ -14,7 +14,7 @@
  * Side-effect class: pure.
  */
 
-import { Document, isMap, isSeq, stringify } from "yaml";
+import { Document, isMap, isScalar, isSeq, stringify } from "yaml";
 import type { JsonSchemaNode, Template } from "@lore/core";
 
 function isNode(value: unknown): value is JsonSchemaNode {
@@ -42,7 +42,7 @@ export function blankFieldValue(schema: JsonSchemaNode | undefined): unknown {
       // reason: one entry even when minItems is 0, so an array shows its item shape (an optional entry is marked in the
       // YAML and may be deleted); see task-template-show-blank-prints-one-entry-for-every-optional.
       const length = items === undefined ? minItems : Math.max(minItems, 1);
-      return Array.from({ length }, () => blankFieldValue(items));
+      return Array.from({ length }, () => blankItemValue(items));
     }
     case "integer":
     case "number":
@@ -52,6 +52,17 @@ export function blankFieldValue(schema: JsonSchemaNode | undefined): unknown {
     default:
       return "";
   }
+}
+
+/**
+ * The placeholder entry of an array: an object item lists ALL its properties (the optional ones are marked in the YAML), so
+ * the entry shows the complete item shape; any other item is its plain blank value.
+ */
+function blankItemValue(items: JsonSchemaNode | undefined): unknown {
+  const isPlainObject = items !== undefined && items["type"] === "object" && isNode(items["properties"]) && items["enum"] === undefined && items["const"] === undefined;
+  if (!isPlainObject) return blankFieldValue(items);
+  const properties = items["properties"] as Record<string, unknown>;
+  return Object.fromEntries(Object.entries(properties).map(([name, node]) => [name, blankFieldValue(isNode(node) ? node : undefined)]));
 }
 
 /**
@@ -97,15 +108,15 @@ function annotateOptionalEntries(schema: JsonSchemaNode | undefined, node: unkno
     const items = isNode(schema["items"]) ? schema["items"] : undefined;
     const minItems = typeof schema["minItems"] === "number" ? schema["minItems"] : 0;
     annotateOptionalEntries(items, first);
-    if (minItems === 0 && typeof first === "object" && first !== null && "commentBefore" in first) {
-      (first as { commentBefore?: string | null }).commentBefore = OPTIONAL_ENTRY_COMMENT;
-    }
+    if (minItems === 0 && (isMap(first) || isSeq(first) || isScalar(first))) first.commentBefore = OPTIONAL_ENTRY_COMMENT;
     return;
   }
   if (isMap(node) && isNode(schema["properties"])) {
     const properties = schema["properties"] as Record<string, unknown>;
+    const required = new Set(Array.isArray(schema["required"]) ? schema["required"] : []);
     for (const pair of node.items) {
-      const key = String((pair.key as { value?: unknown } | null)?.value ?? pair.key);
+      const key = String(isScalar(pair.key) ? pair.key.value : pair.key);
+      if (!required.has(key) && isScalar(pair.key)) pair.key.commentBefore = " optional property";
       const child = properties[key];
       annotateOptionalEntries(isNode(child) ? child : undefined, pair.value);
     }

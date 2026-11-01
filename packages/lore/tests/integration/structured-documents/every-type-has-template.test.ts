@@ -129,11 +129,26 @@ function fillMinimal(schema: JsonSchemaNode | undefined, blank: unknown): unknow
   return blank;
 }
 
+/**
+ * Every optional array entry is filled with minimal values EXCEPT where the template makes a non-empty list demand another
+ * field: the task template's `if ac_scope has an item then spec_ref is required`. A minimal `ac_scope` entry names no real
+ * criterion and a `spec_ref` must name a real spec, so for such a list the entry is deleted, as its optional-entry comment
+ * says it may be.
+ */
+function dropDependentEntries(shown: ShownTemplate, fields: Record<string, unknown>): Record<string, unknown> {
+  const condition = shown.fields["if"];
+  const demanded = isNode(shown.fields["then"]) && Array.isArray(shown.fields["then"]["required"]) ? shown.fields["then"]["required"] : [];
+  if (!isNode(condition) || !isNode(condition["properties"]) || demanded.some((name) => fields[String(name)] !== undefined)) return fields;
+  const result = { ...fields };
+  for (const name of Object.keys(condition["properties"])) if (Array.isArray(result[name])) result[name] = [];
+  return result;
+}
+
 /** The fields file a round-trip writes: the blank filled with minimal values, every dimension answered (refs where required). */
 function filledFilesOf(shown: ShownTemplate): { fields: unknown; dimensions: unknown[] } {
   const needsRefs = new Set(shown.dimensions.filter((dimension) => dimension.needs_refs === true).map((dimension) => dimension.id));
   return {
-    fields: fillMinimal(shown.fields, shown.blank.fields),
+    fields: dropDependentEntries(shown, fillMinimal(shown.fields, shown.blank.fields) as Record<string, unknown>),
     dimensions: shown.blank.dimensions.map((entry) => ({
       ...entry,
       answer: "A minimal answer.",
@@ -256,11 +271,11 @@ describe("AC-ST-8: the filled blank of every type and kind creates in a fresh co
 
   it("the spec-tech blank shows one out_of_scope entry with its id/text/why item shape", async () => {
     const shown = await showBlank("spec", "tech");
-    expect(shown.blank.fields["out_of_scope"]).toEqual([{ id: "", text: "" }]);
+    expect(shown.blank.fields["out_of_scope"]).toEqual([{ id: "", text: "", why: "" }]);
     const itemProperties = ((shown.fields["properties"] as Record<string, { items?: { properties?: Record<string, unknown> } }>)["out_of_scope"]?.items?.properties) ?? {};
     expect(Object.keys(itemProperties)).toEqual(["id", "text", "why"]);
     const yaml = await rig.lore(["template", "show", "spec", "--kind", "tech", "--blank"]);
-    expect(yaml.stdout).toMatch(/out_of_scope:\n\s+# optional[^\n]*\n\s+- id: ""\n\s+text: ""\n\s+why: ""/);
+    expect(yaml.stdout).toMatch(/out_of_scope:\n\s+# optional[^\n]*\n\s+- id: ""\n\s+text: ""\n\s+# optional property\n\s+why: ""/);
   });
 
   it("every blank shows one entry for every array reachable through its required fields", async () => {
