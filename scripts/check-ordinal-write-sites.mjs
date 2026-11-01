@@ -122,6 +122,8 @@ export const SANCTIONED_ORDINAL_WRITE_FILES = [
   "packages/lore/src/store/migrations/migration-010.ts",
   // docs-table rebuild admitting type 'baseline' — copies `ordinal` verbatim row-for-row (no allocation).
   "packages/lore/src/store/migrations/migration-013.ts",
+  // docs-table rebuild — copies `ordinal` verbatim row-for-row (INSERT..SELECT); computes none.
+  "packages/lore/src/store/migrations/migration-046.ts",
   // SPEC-084 D7's one-shot repair migration service — the sole caller of
   // `assignOrdinalForRepair`; its doc comments discuss the MAX+1 sites by
   // name to explain why THIS path deliberately avoids them.
