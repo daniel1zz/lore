@@ -231,7 +231,8 @@ import type { VerifiedEvidenceInput } from "./task-workflow-service.js";
 import { buildStateBindingSkipAuditEntry } from "./state-binding-skip.js";
 import { materializeFalsifierDependencies } from "./falsifier-dep-materialization.js";
 import { createHash } from "node:crypto";
-import { requireOverrideAuto, type OverrideDecisionPort } from "./override-decision.js";
+import type { PlanGoverningSpecsPort } from "./plan-governing-specs.js";
+import { requireOverrideAuto,type OverrideDecisionPort } from "./override-decision.js";
 import { writeScratchOwner, type ScratchRemovalPort } from "./worktree-cleanup.js";
 import { FALSIFIER_EXIT_CODE_MAX, FALSIFIER_EXIT_CODE_MIN, isValidFalsifierExitCode } from "./ac-write-chokepoint.js";
 // Probe + stamp decision live in ./git-state-stamp.js, shared with `lore evidence --capture`.
@@ -899,6 +900,17 @@ export class VerifyRunnerService {
   }
 
   private overrideDecisions: OverrideDecisionPort | undefined;
+
+  /**
+   * Wires the resolver of a plan's governing specs (parent + `implements`), bound by the composition root to
+   * `resolvePlanGoverningSpecs` — the same resolver the done-contract compiler uses (issue 622).
+   */
+  setGoverningSpecsPort(port: PlanGoverningSpecsPort): this {
+    this.governingSpecs = port;
+    return this;
+  }
+
+  private governingSpecs: PlanGoverningSpecsPort | undefined;
 
   /**
    * Recursively finds the newest `mtimeMs` among `.ts` files under `dir`
@@ -1764,18 +1776,31 @@ export class VerifyRunnerService {
       });
     }
 
+    // reason: the criteria a run may select are those of EVERY governing spec (parent + `implements`), the same set the
+    // done-contract compiler resolves — checking the parent alone refused ids the contract itself compiled (issue 622).
+    // A bare construction with no port keeps the parent spec as the only governing spec.
+    const governing = this.governingSpecs === undefined ? ok([spec]) : await this.governingSpecs(plan);
+    if (!governing.ok) return governing;
+    const governingSpecs = governing.value.length === 0 ? [spec] : governing.value;
+    const allCriteria: AcceptanceCriterion[] = [];
+    for (const governingSpec of governingSpecs) {
+      const parsedCriteria = specAcceptanceCriteriaSchema.safeParse(governingSpec.extra["acceptance_criteria"]);
+      if (!parsedCriteria.success) continue;
+      for (const criterion of parsedCriteria.data) if (!allCriteria.some((known) => known.id === criterion.id)) allCriteria.push(criterion);
+    }
+
     // The pre-existing unknown-AC-id check stays HERE, ahead of target-task
     // resolution: an id no spec criterion declares is a caller error regardless
     // of which task the run would target (REGRESSION-pinned — the refusal names
     // field "acIds" and fires even for an ambiguous target).
     if (opts.acIds !== undefined) {
-      const declaredIds = new Set(criteriaParsed.data.map((c) => c.id));
+      const declaredIds = new Set(allCriteria.map((c) => c.id));
       const unknown = opts.acIds.filter((id) => !declaredIds.has(id));
       if (unknown.length > 0) {
         return err({
           code: "VALIDATION_ERROR",
           field: "acIds",
-          message: `unknown AC id(s) not declared on spec "${spec.slug}": ${unknown.join(", ")}`,
+          message: `unknown AC id(s) not declared on spec "${governingSpecs.map((s) => s.slug).join('", "')}": ${unknown.join(", ")}`,
           value: unknown,
           rule: "BR-167",
         });
@@ -1797,7 +1822,7 @@ export class VerifyRunnerService {
     // declaration lives on the resolved task) and BEFORE anything in step ③,
     // so a refusal leaves zero executions and zero recorded entries.
     const selectionResult = this._selectDeclaredScopeCriteria(
-      criteriaParsed.data,
+      allCriteria,
       task,
       spec.slug,
       opts.acIds,
