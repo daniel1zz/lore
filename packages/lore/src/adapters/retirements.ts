@@ -59,15 +59,14 @@ export const RETIREMENTS: readonly Retirement[] = [
     still_shipped: true,
   },
   {
-    // reason: the write-spec rule is binary-read, not a machine-install file — `lore gate spec-create` reads it off the
-    // binary's own assets root when a corpus has no rule doc of its own (BR-1359), so `lore setup` must neither write
-    // nor manifest-track it, and `lore init` writes no document for it (BR-807).
+    // reason: the write-spec rule file is deleted (it was binary-read, never a machine-install file): the rule a spec-create
+    // denial or `lore feed spec-create` quotes is now the approved corpus template of the spec's kind.
     id: "install-governance-write-spec-rule",
     kind: "install-asset",
     target: "governance/write-spec-rule.md",
-    replacement: "lore gate spec-create (reads the write-spec rule shipped with the binary)",
-    spec_ref: "spec-the-write-spec-rule-ships-with-the-binary-lore-init-writes BR-1359",
-    still_shipped: true,
+    replacement: "lore template show spec (the approved template is the one rule source)",
+    spec_ref: "spec-every-document-is-stored-as-structured-fields-validated-by",
+    still_shipped: false,
   },
   {
     id: "install-skill-lore-init-context",

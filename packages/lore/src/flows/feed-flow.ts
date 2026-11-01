@@ -170,6 +170,7 @@ import {
   RESUME_SCOPE_CLOSURE,
 } from "@lore/core";
 import { buildFeedingPack, renderFeedingPack } from "../service/gate-feeding.js";
+import { resolveRuleSlice } from "../service/template-rule-slice.js";
 import { isRegisteredCheckpoint } from "../service/checkpoint-registry.js";
 import { renderResolvedToMarkdown } from "../service/outline-service.js";
 import type { ResumeHandoffRecord, ResumeResult } from "../service/session-service.js";
@@ -419,6 +420,34 @@ async function buildDiscoveredFeed(
 }
 
 /**
+ * The feed of a checkpoint whose governing rule is the approved template of `docType`/`kind`: a pack with
+ * `missing: []` quoting the template's compact rule slice, plus the `--parent` slice when it resolves.
+ *
+ * @returns a `FeedOutcome` with `skill: null` (no governing skill document); always resolves
+ */
+async function buildTemplateFeed(
+  app: App,
+  checkpoint: string,
+  docType: string,
+  kind: string,
+  parentIdOrSlug?: string,
+): Promise<FeedOutcome> {
+  if (app.templateService === undefined) {
+    return { checkpoint, type: docType, skill: null, feed: `no rule available for ${docType}: TemplateService is not wired on this App` };
+  }
+  const slice = await resolveRuleSlice(app.templateService, docType, kind);
+  const parentDoc = await resolveParentDoc(app, parentIdOrSlug);
+  const parentMarkdown = parentDoc !== null ? await renderDocMarkdown(app, parentDoc) : undefined;
+  const pack = buildFeedingPack({
+    ruleSource: slice.source,
+    ruleMarkdown: slice.markdown,
+    ...(parentMarkdown !== undefined ? { parentMarkdown } : {}),
+    missing: [],
+  });
+  return { checkpoint, type: docType, skill: null, feed: renderFeedingPack(pack) };
+}
+
+/**
  * Assembles the feed-before-produce advisory pack for `checkpoint`: derives the
  * discovery scope, discovers its approved governing skill
  * (`app.corpusService.findFeedingSkill`, the SAME discovery call `lore gate
@@ -460,6 +489,11 @@ export async function buildFeed(
   checkpoint: string,
   parentIdOrSlug?: string,
 ): Promise<FeedOutcome> {
+  // reason: the rule a spec author is fed before writing is the approved TEMPLATE (the `feature` kind, the create-time
+  // default; the slice points at `lore template show spec --kind <kind>` for the others). The spec-rules corpus document is
+  // retired (spec-every-document-is-stored-as-structured-fields-validated-by, "One source"); a pull that finds no template
+  // says so in the pack rather than quoting an invented rule.
+  if (checkpoint === "spec-create") return buildTemplateFeed(app, checkpoint, "spec", "feature", parentIdOrSlug);
   const curatedType = CHECKPOINT_PRODUCED_TYPE[checkpoint];
   if (curatedType !== undefined) {
     return buildDiscoveredFeed(app, checkpoint, curatedType, parentIdOrSlug);
