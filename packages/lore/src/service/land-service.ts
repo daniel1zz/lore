@@ -44,6 +44,7 @@ import type { StoreInterface } from "../store/store-interface.js";
 import { IntegrateQueueTimeoutError, IntegrateQueueUnreadableError, type QueueTaker } from "./integrate-queue.js";
 import { isPlanMember } from "./plan-membership.js";
 import { resolveDoc } from "./resolve.js";
+import { formatWorktreeOutcomeLine, type WorktreeOutcome } from "./worktree-cleanup.js";
 
 /** Exit code of "busy, try later" (EX_TEMPFAIL); the same class the integrate queue uses. */
 export const LAND_EXIT_BUSY = 75;
@@ -88,8 +89,8 @@ export interface LandPorts {
   readonly queue: { runInTurn<T>(taker: QueueTaker, fn: () => Promise<T>): Promise<T> };
   /** `lore integrate <branch>`; throws {@link LandIntegrateFailed} when it did not succeed. When called inside a held turn it shares it. */
   readonly integrate: { integrate(branch: string): Promise<void> };
-  /** The `lore done` walk for a task (archives it, removes its worktree and branch); the refusal is returned, never thrown. */
-  readonly done: (slug: string) => Promise<Result<unknown, LoreError>>;
+  /** The `lore done` walk for a task (archives it, removes its worktree and branch); the refusal is returned, never thrown. Its worktree outcomes are printed by land. */
+  readonly done: (slug: string) => Promise<Result<{ readonly worktree_outcomes?: readonly WorktreeOutcome[] }, LoreError>>;
   /** Appends execution-log entries to a task. */
   readonly log: { appendEntries(task: DocRecord, entries: readonly ExecutionLogEntry[]): Promise<Result<ExecutionLogEntry[], LoreError>> };
   /** The caller's session id (names the queue ticket). */
@@ -461,6 +462,9 @@ export class LandService {
       const done = await this.ports.done(slug);
       if (done.ok) {
         lines.push(`land: archived ${slug}`);
+        // reason: the done walk's worktree outcome (removed / gone / kept <reason>) is carried through in done's own form; the autopilot
+        // skill tells agents to follow a kept reason, so dropping it would leave a kept worktree unreported.
+        for (const outcome of done.value.worktree_outcomes ?? []) lines.push(formatWorktreeOutcomeLine(outcome));
         continue;
       }
       errors.push(`land: ${slug} is landed but not archived: ${"message" in done.error ? done.error.message : done.error.code}\nland: the landing stays recorded; fix the cause, then run \`lore land ${target}\` again`);
