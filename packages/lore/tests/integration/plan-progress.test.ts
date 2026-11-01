@@ -741,7 +741,7 @@ describe("landing starts the review — trigger set and detached start (AC-PCR-3
     const world = new World();
     world.add(makeWorldPlan("p-needs"));
     const started = await new ReviewTriggerService(world.triggerDeps({ leaseLive: false })).start();
-    expect(started).toEqual({ ok: true, value: { state: "started", triggered: 1, pid: 4242 } });
+    expect(started).toEqual({ ok: true, value: { state: "started", triggered: 1, pid: 4242, key: batchLeaseKey(await world.lease("probe").machineId()), machineUnknown: false } });
     expect(world.spawns).toBe(1);
   });
 
