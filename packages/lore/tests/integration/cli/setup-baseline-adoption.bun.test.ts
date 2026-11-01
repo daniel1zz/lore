@@ -200,7 +200,7 @@ describe("setup seeds baseline adoption (BL-8): authoring skill and templates", 
 
   it("every skills/lore-baseline/** asset is installed byte-identical AND listed in the ledger", () => {
     const wanted = readEmbeddedManifestPaths().filter((p) => p.startsWith("skills/lore-baseline/"));
-    expect(wanted.length).toBeGreaterThanOrEqual(2); // SKILL.md + >= 1 template
+    expect(wanted.length).toBeGreaterThanOrEqual(1); // SKILL.md (node skeletons come from `template show --blank`)
     const ledgerPaths = new Set(readLedger(fresh).entries.map((e) => e.path));
     for (const rel of wanted) {
       const installed = join(fresh, ".claude", rel);
