@@ -400,6 +400,13 @@ describe("AC-JR-2: criterion key covers its files and facts", () => {
     expect(asked).toEqual(["spec-x:AC-N"]);
   });
 
+  it("AC-JR-2 re-asks a criterion whose statement was edited although its rubric and the files did not change", async () => {
+    const before = criterion("AC-S", "The plan reads clearly overall.", { statement: "Readers can follow the plan." });
+    const after = criterion("AC-S", "The plan reads clearly overall.", { statement: "Readers can follow the plan and its rollback." });
+    expect(await secondReviewAsks({ files: BASE, criteria: [before] }, { files: BASE, criteria: [before] })).toEqual([]);
+    expect(await secondReviewAsks({ files: BASE, criteria: [before] }, { files: BASE, criteria: [after] })).toEqual(["spec-x:AC-S"]);
+  });
+
   it("AC-JR-2 reuses a criterion naming a changed path when a different file changed", async () => {
     const named = criterion("AC-N", "The behaviour in src/lib.ts is documented.");
     const asked = await secondReviewAsks(

@@ -56,6 +56,11 @@ export const GenerateInputSchema = z.object({
   doc_type: DocTypeSchema,
   title: z.string().min(1),
   parent_title: z.string().optional(),
+  /**
+   * The model the caller wants this call answered by (milestone review, BR-1535: `ai.assess.model`). A provider that can take
+   * an explicit model uses it (`claude -p --model <id>`, the HTTP request body); one that cannot ignores it.
+   */
+  model: z.string().min(1).optional(),
 }).strict();
 
 /** Validated input to an AI provider generate() call. */
@@ -330,6 +335,12 @@ export const AiConfigSchema = z
       .object({
         /** Max chars of the optional git diff included in the prompt. Default: 80000. */
         max_diff_chars: z.number().int().positive().default(80_000),
+        /**
+         * The model that judges `lore assess` (BR-1535). The judge is invoked with it explicitly (`claude -p --model <id>`; the HTTP
+         * provider's request body), so the review knows which model answered and can reuse a stored per-unit verdict only under
+         * that model. Unset: the judge's model is unknown and no stored verdict is reused (the review records the cause).
+         */
+        model: z.string().min(1).optional(),
       })
       .strict()
       .default({}),

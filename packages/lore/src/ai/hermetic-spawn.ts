@@ -157,10 +157,13 @@ export function isClaudeCliCommand(command: string): boolean {
  */
 export function buildHermeticSpawnSpec(
   cfg: AiProviderConfig,
-  context: { sourceEnv: Record<string, string | undefined>; tmpDir: string },
+  context: { sourceEnv: Record<string, string | undefined>; tmpDir: string; model?: string },
 ): HermeticSpawnSpec {
+  // reason: BR-1535 — `--model <id>` is the Claude Code CLI's flag (`claude --help`), so like the isolation flag it is added only for
+  // the `claude` binary; a custom judge command owns its own argument contract and is never handed a flag it may not know.
+  const modelFlags = context.model !== undefined && isClaudeCliCommand(cfg.command) ? ["--model", context.model] : [];
   const args = isClaudeCliCommand(cfg.command)
-    ? [...cfg.args, ...HERMETIC_ISOLATION_FLAGS]
+    ? [...cfg.args, ...HERMETIC_ISOLATION_FLAGS, ...modelFlags]
     : [...cfg.args];
   return {
     command: cfg.command,

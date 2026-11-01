@@ -106,6 +106,7 @@
 import { err, ok } from "@lore/core";
 import type { AIProvider, DocRecord, DocType, GenerateInput, GenerateOutput, LinkType, LoreError, Telemetry } from "@lore/core";
 import type { AiDefaultSource, CallerSurface, Result } from "@lore/core";
+import type { JudgeIdentity } from "./judge-unit-keys.js";
 import { extractAssessmentJson, linkTypeSchema } from "@lore/core";
 import type { CheckResult, LlmReviewOutput, NewReviewJudgment, ReviewBundle, ReviewTruncationEntry } from "@lore/core";
 import { completeDimensionVerdicts, llmReviewOutputSchema } from "@lore/core";
@@ -144,6 +145,8 @@ import {
  */
 export interface AssessBudgets {
   readonly max_diff_chars: number;
+  /** `ai.assess.model`: the model the milestone judge is invoked with (BR-1535); absent = the answering model is unknown. */
+  readonly model?: string | undefined;
 }
 
 /**
@@ -160,6 +163,8 @@ export interface AssessBudgets {
  */
 interface ModelAwareProvider {
   readonly modelId?: string;
+  /** True when a call's `model` decides the model that answers (`claude -p --model`, the HTTP request body). */
+  readonly acceptsModelOverride?: boolean;
 }
 
 export class AIProviderService {
@@ -268,7 +273,7 @@ export class AIProviderService {
    * @returns `ok(text)` or the provider's own `AI_PROVIDER_ERROR`; never throws
    */
   async judgeMilestone(prompt: string, title: string): Promise<Result<string, LoreError>> {
-    const { result } = await this._invokeProvider({ prompt, doc_type: "knowledge", title });
+    const { result } = await this._invokeProvider({ prompt, doc_type: "knowledge", title, ...this._milestoneModel() });
     return result.ok ? ok(result.value.content) : result;
   }
 
@@ -284,7 +289,7 @@ export class AIProviderService {
     prompt: string,
     title: string,
   ): Promise<Result<{ text: string; duration_ms: number; tokens_in?: number; tokens_out?: number; model?: string }, LoreError>> {
-    const { result, duration_ms } = await this._invokeProvider({ prompt, doc_type: "knowledge", title });
+    const { result, duration_ms } = await this._invokeProvider({ prompt, doc_type: "knowledge", title, ...this._milestoneModel() });
     if (!result.ok) return result;
     const usage = result.value.usage;
     const model = this.judgeIdentity().model;
@@ -298,17 +303,36 @@ export class AIProviderService {
   }
 
   /**
-   * Which judge answers milestone reviews: the active provider's name, the model it names (`HttpAIProvider.modelId`; the CLI
-   * provider cannot know which model served a call, so it names none and per-unit reuse is off for it, BR-1535 S5) and the
-   * model-behaviour settings it sends. No provider sends a reasoning-effort or temperature setting today, so `settings` is empty;
-   * the key reads it so a provider that starts sending one invalidates stored verdicts.
+   * The explicit model a milestone call is invoked with: `ai.assess.model`, only when the active provider can take one
+   * (`claude -p --model`, the HTTP request body). Empty when none is configured or the provider cannot take it, so a custom
+   * judge command is never handed a model it did not ask for.
+   */
+  private _milestoneModel(): { model?: string } {
+    const provider = this.providers.get(this.active) as (AIProvider & Partial<ModelAwareProvider>) | undefined;
+    const configured = this.assessBudgets.model;
+    return configured !== undefined && provider?.acceptsModelOverride === true ? { model: configured } : {};
+  }
+
+  /**
+   * Which judge answers milestone reviews (BR-1535). The model is the one the call is INVOKED with: `ai.assess.model` when the
+   * provider takes an explicit model (the `claude` CLI via `--model <id>`, the HTTP provider), else the model the provider itself
+   * names (`HttpAIProvider.modelId`). A provider that can do neither (a custom judge command) or no configured model leaves it
+   * unknown: per-unit reuse is then off and `modelHint` says what to set. No provider sends a reasoning-effort or temperature
+   * setting today, so `settings` is empty; the key reads it so a provider that starts sending one invalidates stored verdicts.
    *
    * @returns the identity; never throws
    */
-  judgeIdentity(): { provider: string; model: string | undefined; settings: Record<string, string | number> } {
+  judgeIdentity(): JudgeIdentity {
     const provider = this.providers.get(this.active) as (AIProvider & Partial<ModelAwareProvider>) | undefined;
-    const modelId = provider?.modelId;
-    return { provider: this.active, model: modelId === undefined || modelId.trim() === "" ? undefined : modelId, settings: {} };
+    const invoked = this._milestoneModel().model;
+    const own = provider?.modelId;
+    const named = invoked ?? (own === undefined || own.trim() === "" ? undefined : own);
+    if (named !== undefined) return { provider: this.active, model: named, settings: {} };
+    const hint =
+      provider?.acceptsModelOverride === true
+        ? "set ai.assess.model to the model id the judge should answer with (the judge is then invoked with it explicitly)"
+        : `provider "${this.active}" takes no explicit model, so use the claude-cli provider with the claude binary or the http provider and set ai.assess.model`;
+    return { provider: this.active, model: undefined, settings: {}, modelHint: hint };
   }
 
   // ─── SPEC-017: create path ──────────────────────────────────────────────────

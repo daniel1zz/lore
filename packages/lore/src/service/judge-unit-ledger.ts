@@ -128,7 +128,9 @@ export class UnitLedger {
     if (store === undefined) this.disabledCause = "no judge verdict store is wired into this review";
     else if (identity === undefined) this.disabledCause = "the judge port names no provider identity, so a verdict cannot be keyed to its judge";
     else if (identity.model === undefined || identity.model.trim() === "") {
-      this.disabledCause = `provider "${identity.provider}" cannot name the model that answers, so a stored verdict cannot be tied to it`;
+      this.disabledCause =
+        `the model that answers is unknown for provider "${identity.provider}", so a stored verdict cannot be tied to it` +
+        (identity.modelHint !== undefined ? `; ${identity.modelHint}` : "");
     } else this.disabledCause = undefined;
   }
 

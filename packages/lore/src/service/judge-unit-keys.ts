@@ -25,6 +25,8 @@ export interface JudgeIdentity {
   readonly model: string | undefined;
   /** Model-behaviour settings (reasoning effort, temperature) as sent; empty when none is set. */
   readonly settings: Readonly<Record<string, string | number>>;
+  /** When `model` is unknown: what to configure so it is known (named in the review's reuse-disabled cause). */
+  readonly modelHint?: string;
 }
 
 /** What a criterion's covered set needs from the repository at the assessed commit. */
