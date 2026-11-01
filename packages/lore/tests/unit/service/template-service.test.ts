@@ -37,7 +37,11 @@ function templateBody(version: number, extraDimension = false): Record<string, u
       required: ["summary"],
       properties: {
         summary: { type: "string", minLength: 1 },
-        refusals: { type: "array", items: { type: "string" }, "x-refusal-list": true },
+        refusals: {
+          type: "array",
+          items: { type: "object", properties: { id: { type: "string" }, acs: { type: "array", items: { type: "string" } } } },
+          "x-refusal-list": true,
+        },
       },
     },
     dimensions: [
@@ -84,7 +88,7 @@ function templatedDoc(ref: string, extra: Record<string, unknown> = {}): DocReco
     extra: {
       spec_kind: "tech",
       template_ref: ref,
-      fields: { summary: "does the thing", refusals: ["refuse-x"] },
+      fields: { summary: "does the thing", refusals: [{ id: "refuse-x" }] },
       dimensions: [
         { id: "scope", status: "handled", answer: "the module", refs: [] },
         { id: "risks", status: "handled", answer: "see AC", refs: ["AC-T-1"] },
@@ -296,17 +300,28 @@ describe("TemplateService.render / validate / checks", () => {
     }
   });
 
-  it("reports a refusal entry no criterion cites, and none once one does (checks, STATE)", async () => {
-    const uncited = await ctx.service.checks(templatedDoc(`${slug}@1`));
-    expect(uncited.ok).toBe(true);
-    if (!uncited.ok) return;
-    expect(uncited.value.some((finding) => finding.check === "refusal-has-ac" && finding.entry.includes("refuse-x"))).toBe(true);
+  it("reports a refusal entry that names no existing criterion, and none once it names one (checks, STATE)", async () => {
+    const unnamed = await ctx.service.checks(templatedDoc(`${slug}@1`));
+    expect(unnamed.ok).toBe(true);
+    if (!unnamed.ok) return;
+    expect(unnamed.value.some((finding) => finding.check === "refusal-has-ac" && finding.entry.includes("refuse-x"))).toBe(true);
 
-    const cited = await ctx.service.checks(
+    // an AC whose `cites` names the refusal does NOT cover it (cites takes rule ids only): the refusal names its own acs
+    const citedOnly = await ctx.service.checks(
       templatedDoc(`${slug}@1`, {
         acceptance_criteria: [{ id: "AC-T-1", statement: "x", verify: { mode: "human", note: "n" }, cites: ["refuse-x"] }],
       }),
     );
-    expect(cited.ok && cited.value).toEqual([]);
+    expect(citedOnly.ok && citedOnly.value.some((finding) => finding.check === "refusal-has-ac")).toBe(true);
+
+    const named = await ctx.service.checks(
+      templatedDoc(`${slug}@1`, { fields: { summary: "does the thing", refusals: [{ id: "refuse-x", acs: ["AC-T-1"] }] } }),
+    );
+    expect(named.ok && named.value).toEqual([]);
+
+    const ghost = await ctx.service.checks(
+      templatedDoc(`${slug}@1`, { fields: { summary: "does the thing", refusals: [{ id: "refuse-x", acs: ["AC-NOPE"] }] } }),
+    );
+    expect(ghost.ok && ghost.value.map((finding) => finding.problem).join(" ")).toContain("AC-NOPE");
   });
 });
