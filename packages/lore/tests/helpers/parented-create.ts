@@ -17,6 +17,10 @@
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
 import type { CreateDocInput, DocId, DocRecord } from "@lore/core";
 import { ulid } from "ulidx";
+import { readShippedTemplateSeeds } from "../../src/adapters/cli/template-seeds.js";
+import type { TemplateSeedWriter } from "../../src/service/template-seed-service.js";
+import { TemplateSeedService } from "../../src/service/template-seed-service.js";
+import type { TemplateService } from "../../src/service/template-service.js";
 import { templatedExtra, templatedFieldsArgs } from "./templated-create.js";
 
 /** Title of the requirements document the helper creates when the corpus holds none. */
@@ -32,6 +36,8 @@ export interface CorpusParentSource {
     | { ok: false; error: unknown }
   >;
   create(input: CreateDocInput): Promise<{ ok: true; value: { id: string } } | { ok: false; error: unknown }>;
+  /** Present on a service wired for structured writes (`app.corpusService`); absent on a bare construction. */
+  readonly templateReader?: TemplateService;
 }
 
 /** What one spawned `lore` produced: the slice of a runner's result the CLI variant reads. */
@@ -106,6 +112,7 @@ export async function ensureRequirementsDocId(service: CorpusParentSource): Prom
   if (!existing.ok) throw new Error(`list prd failed: ${JSON.stringify(existing.error)}`);
   const first = existing.value.docs[0];
   if (first !== undefined) return first.id;
+  await ensurePrdTemplate(service);
   const made = await service.create({
     type: "prd",
     title: FIXTURE_REQUIREMENTS_TITLE,
@@ -113,6 +120,23 @@ export async function ensureRequirementsDocId(service: CorpusParentSource): Prom
   } as CreateDocInput);
   if (!made.ok) throw new Error(`create fixture prd failed: ${JSON.stringify(made.error)}`);
   return made.value.id;
+}
+
+/**
+ * A corpus built bare (`createApp(dbPath)` with no `lore init`) holds no templates, so the fixture requirements document
+ * cannot be created structured. Seed the shipped templates through the service's own write path when the prd template is
+ * missing; a service without the template wiring (a bare unit-test construction) writes legacy-shaped and needs none.
+ */
+async function ensurePrdTemplate(service: CorpusParentSource): Promise<void> {
+  const reader = service.templateReader;
+  if (reader === undefined) return;
+  if ((await reader.resolveTemplate("prd", undefined)).ok) return;
+  const writer = service as Partial<TemplateSeedWriter>;
+  if (typeof writer.create !== "function" || typeof writer.set !== "function") throw new Error("ensureRequirementsDocId: the corpus service cannot seed templates");
+  const seeds = readShippedTemplateSeeds();
+  if (!seeds.ok) throw new Error(`ensureRequirementsDocId: ${JSON.stringify(seeds.error)}`);
+  const seeded = await new TemplateSeedService(reader, service as unknown as TemplateSeedWriter).apply(seeds.value);
+  if (!seeded.ok) throw new Error(`ensureRequirementsDocId: seeding templates failed: ${JSON.stringify(seeded.error)}`);
 }
 
 /** The slice of a store the history-free insert needs. */

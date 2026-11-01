@@ -5,7 +5,7 @@
  *   template (the shipped seed `lore init` seeds, through `fillTemplate`), merges the caller's overrides, writes a fields file
  *   and returns the `--fields-file <path>` args; the service-path twin returns the `extra` a `CorpusService.create` takes.
  *   A fixture built on it works with `workflow.structured_documents.require_create` ON or OFF.
- * Public surface: {@link templatedFill}, {@link templatedFieldsArgs}, {@link templatedExtra}, {@link TemplatedFillOptions}.
+ * Public surface: {@link templatedFill}, {@link templatedFieldsArgs}, {@link planFieldsArgs}, {@link templatedExtra}, {@link TemplatedFillOptions}.
  * Invariants:
  *   - Filled values are the minimal deterministic ones of `fillTemplate`; `fields` overrides replace top-level keys.
  *   - A fields file is written once per call under one process-lifetime temp directory (or the `dir` the caller names); the
@@ -71,6 +71,19 @@ export function templatedFieldsArgs(type: string, options: TemplatedFillOptions 
   const path = join(options.dir ?? fieldsDir(), `fields-${type}-${String(++fileSeq)}.json`);
   writeFileSync(path, JSON.stringify(templatedFill(type, options), null, 2));
   return ["--fields-file", path];
+}
+
+/**
+ * The fields-file args of a plan that can be APPROVED: its `spec_ref`, `task_criteria_map` entry and criteria-coverage
+ * dimension ref all name `refTarget`, a document that exists in the corpus (its parent requirements document), so the
+ * template's `refs-resolve` check passes at `lore set <plan> --status approved`.
+ *
+ * @param refTarget - the slug of an existing document
+ * @param options - further overrides (kind is ignored: a plan has none)
+ * @returns the two arguments to append to a `lore create plan` command
+ */
+export function planFieldsArgs(refTarget: string, options: Omit<TemplatedFillOptions, "kind" | "refTarget"> = {}): string[] {
+  return templatedFieldsArgs("plan", { ...options, refTarget, fields: { spec_ref: refTarget, task_criteria_map: [refTarget], ...(options.fields ?? {}) } });
 }
 
 /**

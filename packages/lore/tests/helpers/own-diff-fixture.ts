@@ -9,7 +9,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import type { TaskKind } from "@lore/core";
 import { patchLoreConfig } from "./patch-lore-config.js";
-import { templatedFieldsArgs } from "./templated-create.js";
+import { planFieldsArgs, templatedFieldsArgs } from "./templated-create.js";
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -107,7 +107,7 @@ export class OwnDiffFixture {
   }
 
   createPlan(title: string): string {
-    return this.parseSlug(this.mustLore(["create", "plan", "--title", title, "--parent", this.prdSlug, "--no-ai", ...templatedFieldsArgs("plan")]).stdout);
+    return this.parseSlug(this.mustLore(["create", "plan", "--title", title, "--parent", this.prdSlug, "--no-ai", ...planFieldsArgs(this.prdSlug)]).stdout);
   }
 
   /** The fixture's default plan slug. */

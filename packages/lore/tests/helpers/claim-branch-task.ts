@@ -9,7 +9,7 @@
  */
 
 import type { TaskKind } from "@lore/core";
-import { templatedFieldsArgs } from "./templated-create.js";
+import { planFieldsArgs, templatedFieldsArgs } from "./templated-create.js";
 
 /** Runs `lore <args>` in the throwaway repository; `status` is the process exit code. */
 export type LoreRunner = (args: readonly string[]) => { readonly status: number; readonly out: string };
@@ -37,7 +37,7 @@ export function claimBranchTask(run: LoreRunner, repoKey: string, branch: string
   let plan = planOfRepo.get(repoKey);
   if (plan === undefined) {
     const prd = slugOf(run, ["create", "prd", "--title", "Fixture PRD", "--no-ai", ...templatedFieldsArgs("prd")]);
-    plan = slugOf(run, ["create", "plan", "--title", "Fixture plan", "--parent", prd, "--no-ai", ...templatedFieldsArgs("plan")]);
+    plan = slugOf(run, ["create", "plan", "--title", "Fixture plan", "--parent", prd, "--no-ai", ...planFieldsArgs(prd)]);
     planOfRepo.set(repoKey, plan);
   }
   titleSeq += 1;

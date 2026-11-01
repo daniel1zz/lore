@@ -52,8 +52,7 @@ import { createApp } from "../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
 import { asSessionActor } from "../helpers/session-actor";
 
-import { ensureRequirementsDocId } from "../helpers/parented-create.js";
-// ─── Command import + invocation helpers (mirrors gate-p2-cross-tier.bun.test.ts) ──
+import { ensureRequirementsDocId } from "../helpers/parented-create.js";// ─── Command import + invocation helpers (mirrors gate-p2-cross-tier.bun.test.ts) ──
 
 type RunnableCommand = { run: (ctx: { args: Record<string, unknown>; inv?: Invocation }) => Promise<void> };
 
