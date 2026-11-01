@@ -3,14 +3,15 @@
  *
  * Purpose: give every failed finding a stable identity so a batch files ONE issue per root cause and links it to
  *   every plan that shares it, never one per plan and dimension.
- * Public surface: {@link FailedFinding}, {@link RootCause}, {@link rootCauseOf}, {@link issueTitleOf},
- *   {@link FINGERPRINT_TITLE_TAG}, {@link fingerprintTag}.
+ * Public surface: {@link FailedFinding}, {@link RootCause}, {@link rootCauseOf}, {@link splitFindingByFile},
+ *   {@link rootCausesOf}, {@link failingCausesOf}, {@link issueTitleOf}, {@link FINGERPRINT_TITLE_TAG}, {@link fingerprintTag}.
  * Invariants:
- *   - Fingerprint = SHA-256 of `<dimension>|<cause key>`. Cause key by dimension: `regression` -> the sorted set of
- *     ALL failing test files of the suite run (an attributed regression without that set is an error, never a fallback) ("main red: <files>", one fingerprint for a failing main suite);
+ *   - Fingerprint = SHA-256 of `<dimension>|<cause key>`. Cause key by dimension: `regression` charged with files ->
+ *     `file:<repo path>` for ONE file, independent of the plan and of every other file (BR-1513; label `main red: <path>`),
+ *     so a plan charged with several files has several causes ({@link splitFindingByFile}, {@link rootCausesOf});
  *     `snapshot_accuracy` -> the sorted set of contradicted rule ids; every other dimension (and a regression the
- *     suite did not measure) -> the sorted, unique STRUCTURED cites the judge named (AC ids, rule ids, paths, symbols),
- *     never the finding's wording; no cite is a VALIDATION_ERROR (the plan is re-reviewed).
+ *     selection did not charge files for) -> the sorted, unique STRUCTURED cites the judge named (AC ids, rule ids, paths,
+ *     symbols), never the finding's wording; no cite is a VALIDATION_ERROR (the plan is re-reviewed).
  *   - The causes come from the MEASURED `causes` stored on the review, never from the judge's prose, whenever the
  *     dimension has a measured cause.
  *   - The issue title starts with the dimension id (plan close covers a failed dimension by finding it in an open
@@ -20,7 +21,7 @@
  */
 
 import { createHash } from "node:crypto";
-import type { LoreError, MilestoneDimension, ReviewCauses, Result } from "@lore/core";
+import type { LoreError, MilestoneDimension, MilestoneReview, ReviewCauses, Result } from "@lore/core";
 import { err, ok } from "@lore/core";
 
 /** One failed dimension of one plan's stored review, as the filing sees it. */
@@ -66,31 +67,32 @@ function digest(dimension: MilestoneDimension, key: string): { fingerprint: stri
 }
 
 /**
- * The root cause of one failed finding.
+ * The root cause of one failed finding. A regression finding is one cause per FILE: a finding that carries several
+ * charged files is split first ({@link splitFindingByFile}); handing this function several files is a caller defect.
  *
- * @param finding - a failed dimension with its review's measured causes
- * @returns the cause, or a VALIDATION_ERROR when a measured failed regression lacks `suite_failing_files`
+ * @param finding - a failed dimension with its review's measured causes (a regression finding carries at most one file)
+ * @returns the cause, or a VALIDATION_ERROR when a regression finding still carries more than one charged file
  * @example
  * rootCauseOf({ plan: "p", dimension: "regression", reason: "x", reference: "", reviewSlug: "r",
- *   causes: { regression_files: ["a.test.ts"], suite_failing_files: ["b.test.ts", "a.test.ts"] } }); // ok, label // => "main red: a.test.ts, b.test.ts"
+ *   causes: { regression_files: ["a.test.ts"] } }); // ok, label "main red: a.test.ts", key "file:a.test.ts"
  */
 export function rootCauseOf(finding: FailedFinding): Result<RootCause, LoreError> {
   const { dimension } = finding;
-  // reason: the suite run's WHOLE failing set is the cause (#345). A failed regression finding that has a measured
-  // attribution (regression_files) but no suite_failing_files has no honest identity: the attributed subset would split
-  // one run into several issues, so it fails loud instead of falling back (repo rule: no silent fallback).
-  if (dimension === "regression" && finding.causes?.regression_files !== undefined && finding.causes.regression_files.length > 0) {
-    const files = finding.causes.suite_failing_files;
-    if (files === undefined || files.length === 0) {
+  const files = finding.causes?.regression_files;
+  if (dimension === "regression" && files !== undefined && files.length > 0) {
+    const unique = [...new Set(files)];
+    const [file] = unique;
+    // reason: BR-1513 — the identity is ONE file. A finding with several files has no single identity, and keying it by their
+    // set is the defect this rule removed (#556: one still-red file re-filed under every new set), so it fails loud.
+    if (file === undefined || unique.length !== 1) {
       return err({
         code: "VALIDATION_ERROR",
-        field: "causes.suite_failing_files",
-        message: `the stored review ${finding.reviewSlug} failed regression on a measured suite run but lacks suite_failing_files; it cannot be filed as one main-red issue`,
-        rule: "BR-1379",
+        field: "causes.regression_files",
+        message: `the regression finding of ${finding.reviewSlug} carries ${String(unique.length)} files; a root cause is one file, so the finding must be split by file first`,
+        rule: "BR-1513",
       });
     }
-    const sorted = [...new Set(files)].sort();
-    return ok({ dimension, ...digest(dimension, `files:${sorted.join(",")}`), label: `main red: ${sorted.join(", ")}` });
+    return ok({ dimension, ...digest(dimension, `file:${file}`), label: `main red: ${file}` });
   }
   const rules = finding.causes?.contradicted_rules;
   if (dimension === "snapshot_accuracy" && rules !== undefined && rules.length > 0) {
@@ -110,6 +112,48 @@ export function rootCauseOf(finding: FailedFinding): Result<RootCause, LoreError
   // on every re-review and split one defect into several issues (#405; Sentry: grouping key is not the display title).
   const display = finding.reason.replace(/\s+/g, " ").trim().slice(0, 80);
   return ok({ dimension, ...digest(dimension, `cites:${cites.join(",")}`), label: display });
+}
+
+/**
+ * Splits a regression finding into one finding per charged file (BR-1513); any other finding is returned as is.
+ *
+ * @param finding - a failed finding
+ * @returns one finding per distinct charged file, sorted by path, each carrying only its own file; `[finding]` when the
+ *   finding is not a regression or no file was charged to it (a not-measured regression stays cites-keyed)
+ */
+export function splitFindingByFile(finding: FailedFinding): FailedFinding[] {
+  const files = finding.causes?.regression_files;
+  if (finding.dimension !== "regression" || files === undefined || files.length === 0) return [finding];
+  return [...new Set(files)].sort().map((file) => ({ ...finding, causes: { ...finding.causes, regression_files: [file] } }));
+}
+
+/**
+ * Every root cause of one failed finding: one per charged file for a regression, one otherwise.
+ *
+ * @returns the causes in {@link splitFindingByFile} order, or the first VALIDATION_ERROR (a cause that cannot be identified)
+ */
+export function rootCausesOf(finding: FailedFinding): Result<RootCause[], LoreError> {
+  const causes: RootCause[] = [];
+  for (const part of splitFindingByFile(finding)) {
+    const cause = rootCauseOf(part);
+    if (!cause.ok) return cause;
+    causes.push(cause.value);
+  }
+  return ok(causes);
+}
+
+/**
+ * The root causes a stored review's failing `dimension` has today: the one list close, coverage and acceptance all read.
+ *
+ * @param planSlug - the plan under review (finding identity input; no fingerprint reads it)
+ * @param reviewSlug - the stored review's slug
+ * @param review - the stored review
+ * @param dimension - the dimension to read
+ * @returns the causes; the first VALIDATION_ERROR when one cannot be identified
+ */
+export function failingCausesOf(planSlug: string, reviewSlug: string, review: Pick<MilestoneReview, "dimensions" | "causes">, dimension: MilestoneDimension): Result<RootCause[], LoreError> {
+  const judgment = review.dimensions[dimension];
+  return rootCausesOf({ plan: planSlug, dimension, reason: judgment.reason, reference: judgment.reference, cites: judgment.cites, reviewSlug, causes: review.causes });
 }
 
 /** The issue title of a root cause: `<dimension>: <label> [fp:<12 hex>]`. */

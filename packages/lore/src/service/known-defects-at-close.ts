@@ -40,7 +40,7 @@ import {
 import { acceptedGatesOf, type GateAcceptanceLog } from "./gate-acceptance-service.js";
 import type { IssueRead } from "./milestone-review-inputs.js";
 import { issueWriteLeaseKey, type ReviewLeases } from "./review-batch-lease.js";
-import { rootCauseOf } from "./root-cause-fingerprint.js";
+import { failingCausesOf } from "./root-cause-fingerprint.js";
 
 /** Audit action of the row that records the issue writes of a close (or of a retry of earlier pending ones). */
 export const KNOWN_DEFECT_ISSUE_WRITES_AUDIT_ACTION = "known-defect-issue-writes";
@@ -110,9 +110,11 @@ export function closingFactsOf(planSlug: string, latest: ClosingReview): Partial
       facts[dimension] = { verdict: judgment.verdict, failingFingerprints: [] };
       continue;
     }
-    const cause = rootCauseOf({ plan: planSlug, dimension, reason: judgment.reason, reference: judgment.reference, cites: judgment.cites, reviewSlug: latest.doc.slug, causes: latest.review.causes });
+    // reason: BR-1513 — a regression charged with several files has one fingerprint PER file, all of them current; an entry
+    // whose file is no longer red is the one that gets detached.
+    const causes = failingCausesOf(planSlug, latest.doc.slug, latest.review, dimension);
     // reason: an unidentifiable failing cause leaves the dimension without a fact -> its entries are kept, never detached.
-    if (cause.ok) facts[dimension] = { verdict: "fail", failingFingerprints: [cause.value.fingerprint] };
+    if (causes.ok) facts[dimension] = { verdict: "fail", failingFingerprints: causes.value.map((c) => c.fingerprint) };
   }
   return facts;
 }
