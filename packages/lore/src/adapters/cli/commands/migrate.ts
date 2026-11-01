@@ -71,9 +71,6 @@ import { dirname } from "path";
 import { defineLoreCommand, exitCli } from "../cli-exit.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, findLoreDbPath, formatError, formatErrorFor, resolveActor } from "../utils.js";
-import { fileURLToPath } from "node:url";
-import { join } from "node:path";
-import { resolveAssetsRoot } from "../setup-args.js";
 import { readShippedTemplateSeeds } from "../template-seeds.js";
 import { TemplateSeedService } from "../../../service/template-seed-service.js";
 import { resolveCorpus } from "../corpus-resolution.js";
@@ -87,9 +84,6 @@ import { printLine } from "../output.js";
 import { runMigrateSchema } from "../migrate-schema.js";
 import { findLoreProjectRoot, runFragmentsMigration } from "../migrate-fragments-wiring.js";
 import { parseDoneContractDecisions } from "../done-contract-migrate-input.js";
-
-// packages/lore/src/adapters/cli/commands/migrate.ts -> repo root is 6 levels up (same as init.ts).
-const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..", "..");
 
 export default defineLoreCommand({
   meta: {
@@ -493,8 +487,7 @@ export default defineLoreCommand({
     // BR-1528 — creates, as approved corpus templates, every shipped seed whose type/kind has none; an approved
     // template is never overwritten. Preview is the default; `--apply` writes.
     if (args.version === "templates") {
-      const assetsRoot = resolveAssetsRoot({ repoRoot: REPO_ROOT, isCompiled: inv.isCompiled, execPath: inv.execPath });
-      const seeds = readShippedTemplateSeeds(assetsRoot);
+      const seeds = readShippedTemplateSeeds();
       if (!seeds.ok) {
         inv.io.stderr.write(formatErrorFor(inv, seeds.error) + "\n");
         return exitCode(seeds.error);

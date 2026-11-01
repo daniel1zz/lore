@@ -1,6 +1,5 @@
 // @spawns packages/lore/src/index.ts
 // @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
-// @reads assets/templates/**
 /**
  * @spec_ref IoC vertical-slice tech-spec §9 AC6 — end-to-end closed-loop proof that the
  * spec-production inversion-of-control slice actually works together: a non-compliant
@@ -66,8 +65,7 @@ import type { Invocation } from "@lore/core";
  */
 async function seedShippedTemplates(app: App): Promise<void> {
   if (app.templateService === undefined) throw new Error("TemplateService is not wired on this App");
-  const assetsRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "assets");
-  const seeds = readShippedTemplateSeeds(assetsRoot);
+  const seeds = readShippedTemplateSeeds();
   if (!seeds.ok) throw new Error(`reading the shipped template seeds failed: ${JSON.stringify(seeds.error)}`);
   const applied = await new TemplateSeedService(app.templateService, app.corpusService).apply(seeds.value);
   if (!applied.ok) throw new Error(`seeding the shipped templates failed: ${JSON.stringify(applied.error)}`);
@@ -195,9 +193,6 @@ afterEach(() => {
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
-const COMPLIANT_CONTENT =
-  "## Overview\n\nSome text.\n\n## Scope\n\nIn scope.\n\n## Acceptance Criteria\n\n- AC1\n";
-
 /** Create a PRD (legal spec parent), returning its slug. */
 async function createPrd(title: string): Promise<string> {
   const app = createApp(dbPath, undefined, liveAmbient(), liveWriteContext());
@@ -220,7 +215,6 @@ function parentedPayload(parentSlug: string): Record<string, unknown> {
     type: "spec",
     title: "A well-formed spec",
     parent_id: parentSlug,
-    content: COMPLIANT_CONTENT,
     extra: { spec_kind: "tech" },
   };
 }
@@ -230,7 +224,6 @@ function compliantPayload(_parentSlug: string): Record<string, unknown> {
   return {
     type: "spec",
     title: "A well-formed spec",
-    content: COMPLIANT_CONTENT,
     extra: { spec_kind: "tech" },
   };
 }

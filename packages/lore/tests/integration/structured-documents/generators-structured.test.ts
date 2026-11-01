@@ -1,5 +1,4 @@
 // @reads assets/project/lore-config-template.yaml
-// @reads assets/templates/**
 // @spawns-external git builds a throwaway git repository the test runs against
 /**
  * spec-every-document-is-stored-as-structured-fields-validated-by (BR-1528): every internal generator creates its
@@ -27,7 +26,6 @@
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -67,7 +65,7 @@ async function docOf(slug: string): Promise<DocRecord> {
  * seed bump cannot leave an assertion stale.
  */
 function seededRef(docType: string, kind?: string): string {
-  const seeds = readShippedTemplateSeeds(fileURLToPath(new URL("../../../../../assets", import.meta.url)));
+  const seeds = readShippedTemplateSeeds();
   if (!seeds.ok) throw new Error(`seededRef: ${JSON.stringify(seeds.error)}`);
   const seed = seeds.value.find((s) => s.template.doc_type === docType && (kind === undefined || s.template.kind === kind));
   if (seed === undefined) throw new Error(`seededRef: no shipped seed for ${docType}/${kind ?? "-"}`);
