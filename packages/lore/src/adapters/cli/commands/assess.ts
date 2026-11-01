@@ -757,9 +757,13 @@ async function runAcceptGate(context: Parameters<typeof invocationOf>[0], positi
       inv.io.stderr.write(formatErrorFor(inv, accepted.error) + "\n");
       return exitCode(accepted.error);
     }
-    const line = `Accepted gate ${accepted.value.dimension} of plan ${accepted.value.plan} (human decision record ${String(accepted.value.decision_record)}, issue #${String(accepted.value.issue)}, review ${accepted.value.review}); the next \`lore assess --where needs-review --close\` may archive it.`;
+    const lines = [
+      `Accepted gate ${accepted.value.dimension} of plan ${accepted.value.plan} (review ${accepted.value.review}):`,
+      ...accepted.value.accepted.map((entry) => `  ${entry.cause}: human decision record ${String(entry.decision_record)}, issue #${String(entry.issue)}`),
+      "the next `lore assess --where needs-review --close` may archive it.",
+    ];
     if (args.json === true) printLine(inv.io.stdout, JSON.stringify({ ok: true, data: accepted.value }, null, 2));
-    else printLine(inv.io.stdout, line);
+    else for (const line of lines) printLine(inv.io.stdout, line);
     return 0;
   } finally {
     app.close();

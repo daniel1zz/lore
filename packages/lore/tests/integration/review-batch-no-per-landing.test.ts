@@ -161,7 +161,7 @@ class World {
       overall: Object.values(this.shape.verdicts).includes("fail") ? "fail" : "pass",
       dimensions,
       decisions: [],
-      ...(regressionFails ? { causes: { regression_files: [RED_FILE], suite_failing_files: [RED_FILE] } } : {}),
+      ...(regressionFails ? { causes: { regression_files: [RED_FILE] } } : {}),
       ...(this.shape.verdicts.regression === "not-measured" ? { regression_causes: [...(this.shape.regressionCauses ?? ["unrunnable" as const])] } : {}),
       ...(this.shape.assessedCommit !== undefined ? { assessed_commit: this.shape.assessedCommit } : {}),
       ...(this.shape.failingFactFiles !== undefined ? { failing_fact_files: [...this.shape.failingFactFiles] } : {}),

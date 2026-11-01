@@ -228,7 +228,7 @@ describe("AC-AF-6 a failed or not-measured gate keeps the plan open", () => {
       reviewPlan: async (ref) => {
         const judged = await judge(ref);
         if (!judged.ok) return judged;
-        const review = { ...judged.value.review, causes: { regression_files: ["a.test.ts"], suite_failing_files: ["a.test.ts"] } };
+        const review = { ...judged.value.review, causes: { regression_files: ["a.test.ts"] } };
         judged.value.doc.extra["milestone_review"] = review;
         return ok({ doc: judged.value.doc, review });
       },
@@ -372,7 +372,7 @@ describe("AC-AF-6 errors never read as a pass", () => {
     const withCauses = async (ref: string) => {
       const judged = await judge(ref);
       if (!judged.ok) return judged;
-      const review = { ...judged.value.review, assessed_commit: "a".repeat(40), failing_fact_files: ["a.test.ts"], causes: { regression_files: ["a.test.ts"], suite_failing_files: ["a.test.ts"] } };
+      const review = { ...judged.value.review, assessed_commit: "a".repeat(40), failing_fact_files: ["a.test.ts"], causes: { regression_files: ["a.test.ts"] } };
       judged.value.doc.extra["milestone_review"] = review;
       return ok({ doc: judged.value.doc, review });
     };

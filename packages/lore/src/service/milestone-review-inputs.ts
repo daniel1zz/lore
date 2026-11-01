@@ -203,21 +203,33 @@ export interface PlanCloseIssuePort {
   readonly readIssue: (number: number) => Promise<Result<IssueRead, LoreError>>;
 }
 
+/** One current root cause of a failed dimension, as coverage reads it (BR-1513, BR-1421). */
+export interface FailingCause {
+  readonly dimension: string;
+  /** The full root-cause fingerprint; an entry covers this cause only when it carries the same one. */
+  readonly fingerprint: string;
+  /** The issue title this cause is filed under (`regression: main red: <path> [fp:<12 hex>]`), to name it in a refusal. */
+  readonly title: string;
+}
+
 /** Result of {@link coverFailedDimensions}. */
 export interface DimensionCoverage {
-  /** True when every failed dimension has at least one entry whose issue is open. */
+  /** True when every current root cause of every failed dimension has an entry whose issue is open. */
   readonly accepted: boolean;
-  /** Per failed dimension: the open issue numbers recorded for it. */
+  /** Per failed dimension: the open issue numbers recorded for its current causes. */
   readonly byDimension: Readonly<Record<string, readonly number[]>>;
+  /** The failed dimensions with at least one current cause that no open issue covers. */
   readonly uncovered: readonly string[];
+  /** The current causes no open entry covers, in cause order; absent when the caller named no causes (dimension-level reading). */
+  readonly uncoveredCauses?: readonly FailingCause[];
   /**
    * The uncovered dimensions that have an entry whose issue is no longer open (closed: the defect was fixed). That is
    * new input: the plan needs review again (#394).
    */
   readonly fixed: readonly string[];
-  /** Every closed issue number recorded for an uncovered failed dimension, ascending. */
+  /** Every closed issue number recorded for an uncovered cause (or uncovered dimension), ascending. */
   readonly closed: readonly number[];
-  /** Every issue number that covers some dimension, ascending. */
+  /** Every issue number that covers some cause, ascending. */
   readonly issues: readonly number[];
 }
 
@@ -225,32 +237,67 @@ export interface DimensionCoverage {
 export interface KnownDefectLive {
   readonly number: number;
   readonly dimension: string;
+  /** The root-cause fingerprint the entry is recorded for; read only when the dimension's current causes are named. */
+  readonly fingerprint?: string;
   readonly state: "open" | "closed";
 }
 
 /**
- * Accepted with known defects (Part D, BR-1379, BR-1421): a failed dimension is covered by a recorded known-defect
- * entry FOR THAT DIMENSION whose issue is open. The issue title is never read, and an entry covers only its own dimension.
+ * Accepted with known defects (Part D, BR-1379, BR-1421, BR-1513): a failed dimension is covered when EVERY current root cause
+ * of it has a recorded known-defect entry for THAT cause whose issue is open. The issue title is never read, an entry covers
+ * only its own dimension, and (when the causes are named) only its own fingerprint, so an open issue of one red file never
+ * covers a newly red one. A dimension whose causes are not named is read per dimension, as before.
  *
  * @param failed - the failed dimension ids of the current review
  * @param entries - the plan's recorded known defects, each with the issue's live state (read by number)
- * @returns accepted only when `failed` is non-empty and every entry is covered
+ * @param causes - the current root causes of the failed dimensions (`failingCausesOf`); absent = dimension-level reading
+ * @returns accepted only when `failed` is non-empty and every cause is covered
  */
-export function coverFailedDimensions(failed: readonly string[], entries: readonly KnownDefectLive[]): DimensionCoverage {
+export function coverFailedDimensions(failed: readonly string[], entries: readonly KnownDefectLive[], causes?: readonly FailingCause[]): DimensionCoverage {
   const byDimension: Record<string, number[]> = {};
   const uncovered: string[] = [];
+  const uncoveredCauses: FailingCause[] = [];
   const fixed: string[] = [];
   const closed = new Set<number>();
   for (const dimension of failed) {
     const mine = entries.filter((e) => e.dimension === dimension);
-    const numbers = [...new Set(mine.filter((e) => e.state === "open").map((e) => e.number))];
-    byDimension[dimension] = numbers;
-    if (numbers.length > 0) continue;
-    uncovered.push(dimension);
-    const closedHere = mine.filter((e) => e.state === "closed");
-    if (closedHere.length > 0) fixed.push(dimension);
-    for (const e of closedHere) closed.add(e.number);
+    const named = (causes ?? []).filter((c) => c.dimension === dimension);
+    if (named.length === 0) {
+      const numbers = [...new Set(mine.filter((e) => e.state === "open").map((e) => e.number))];
+      byDimension[dimension] = numbers;
+      if (numbers.length > 0) continue;
+      uncovered.push(dimension);
+      const closedHere = mine.filter((e) => e.state === "closed");
+      if (closedHere.length > 0) fixed.push(dimension);
+      for (const e of closedHere) closed.add(e.number);
+      continue;
+    }
+    const covering = new Set<number>();
+    let dimensionUncovered = false;
+    let dimensionFixed = false;
+    for (const cause of named) {
+      const forCause = mine.filter((e) => e.fingerprint === cause.fingerprint);
+      const open = forCause.filter((e) => e.state === "open");
+      for (const e of open) covering.add(e.number);
+      if (open.length > 0) continue;
+      dimensionUncovered = true;
+      uncoveredCauses.push(cause);
+      const closedHere = forCause.filter((e) => e.state === "closed");
+      if (closedHere.length > 0) dimensionFixed = true;
+      for (const e of closedHere) closed.add(e.number);
+    }
+    byDimension[dimension] = [...covering].sort((x, y) => x - y);
+    if (dimensionUncovered) uncovered.push(dimension);
+    if (dimensionFixed) fixed.push(dimension);
   }
   const issues = [...new Set(Object.values(byDimension).flat())].sort((a, b) => a - b);
-  return { accepted: failed.length > 0 && uncovered.length === 0, byDimension, uncovered, fixed, closed: [...closed].sort((a, b) => a - b), issues };
+  return {
+    accepted: failed.length > 0 && uncovered.length === 0,
+    byDimension,
+    uncovered,
+    ...(causes !== undefined ? { uncoveredCauses } : {}),
+    fixed,
+    closed: [...closed].sort((a, b) => a - b),
+    issues,
+  };
 }
