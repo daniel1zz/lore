@@ -409,6 +409,57 @@ export interface CheckOutcomeInput {
   readonly ts: string;
 }
 
+// ─── Judge verdicts (migration-049, BR-1535) ───────────────────────────────
+
+/**
+ * One stored judge verdict of one unit (`judge_verdicts`): the raw per-unit answer under the sha256 key of the unit's inputs.
+ * `raw_answer` is stored as the judge's answer was normalised to JSON text; a row whose text no longer parses is replaced by
+ * compare-and-swap on that exact text. `last_read_at` is refreshed by every review that reads the row; expiry reads only it.
+ */
+export interface JudgeVerdictRow {
+  readonly key: string;
+  readonly unit_kind: "file" | "criterion";
+  /** The file's path or `<spec slug>:<ac id>`. */
+  readonly unit_id: string;
+  readonly raw_answer: string;
+  readonly provider: string;
+  readonly model: string;
+  /** sha256 of the unit-instruction template source the key was made with (informational: expiry never reads it). */
+  readonly template_hash: string;
+  /** The review token of the review that first produced the answer. */
+  readonly first_review: string;
+  /** ISO 8601 time. */
+  readonly created_at: string;
+  /** ISO 8601 time of the last review that read (or wrote) the row. */
+  readonly last_read_at: string;
+}
+
+/** Raw `judge_verdicts` row; every column is already a string. */
+export type JudgeVerdictRawRow = JudgeVerdictRow;
+
+/** Maps a raw `judge_verdicts` row to a record; an unknown `unit_kind` throws (the caller's `wrapStoreError` makes it STORE_ERROR). */
+export function rowToJudgeVerdict(row: Record<string, unknown>): JudgeVerdictRow {
+  const text = (name: string): string => {
+    const value = row[name];
+    if (typeof value !== "string") throw new Error(`judge_verdicts: column ${name} is not text`);
+    return value;
+  };
+  const kind = text("unit_kind");
+  if (kind !== "file" && kind !== "criterion") throw new Error(`judge_verdicts: unknown unit_kind "${kind}"`);
+  return {
+    key: text("key"),
+    unit_kind: kind,
+    unit_id: text("unit_id"),
+    raw_answer: text("raw_answer"),
+    provider: text("provider"),
+    model: text("model"),
+    template_hash: text("template_hash"),
+    first_review: text("first_review"),
+    created_at: text("created_at"),
+    last_read_at: text("last_read_at"),
+  };
+}
+
 // ─── Suite results (migration-043, BR-1497) ────────────────────────────────
 
 const suiteResultCommandSchema = z.object({ command: z.string().min(1), exit_code: z.number().int(), output_tail: z.string() });

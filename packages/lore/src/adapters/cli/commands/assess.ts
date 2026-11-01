@@ -69,7 +69,7 @@ import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 import { requireBulkLifecycleService } from "../../bulk-wiring.js";
 import { resolveBulkSelector, type BulkSelector } from "../../../service/bulk-lifecycle-service.js";
-import { failedDimensions, type MilestoneReview, type RetiredAcRef } from "@lore/core";
+import { failedDimensions, renderUnitCounts, type MilestoneReview, type RetiredAcRef } from "@lore/core";
 import type { LoreError } from "@lore/core";
 
 /** One plan's row of the batch result. */
@@ -84,6 +84,8 @@ interface AssessRow {
   readonly retired_acs?: readonly RetiredAcRef[];
   /** The one pending owner decision that confirms them (`lore pending --ask`); absent when none is open. */
   readonly pending_decision?: number;
+  /** Fresh and reused judged-unit counts per dimension (`renderUnitCounts`); absent on an ERROR or SKIPPED row. */
+  readonly units?: string;
 }
 
 function errorRow(plan: string, error: LoreError): AssessRow {
@@ -100,6 +102,8 @@ function passFailRow(plan: string, reviewSlug: string, review: MilestoneReview):
     failed,
     diff_source: review.diff_source,
     reason: failed.length === 0 ? "no dimension failed" : `failed: ${failed.join(", ")}`,
+    // reason: BR-1535 S6 — the fresh and reused unit counts per dimension, printed with the row and kept in `--json`.
+    units: renderUnitCounts(review),
   };
 }
 
@@ -124,6 +128,11 @@ export default defineLoreCommand({
       type: "boolean",
       description:
         "File the failed findings by root cause: ONE issue per fingerprint (searched among open issues first, never duplicated), linked to every plan that shares it",
+    },
+    rejudge: {
+      type: "boolean",
+      description:
+        "Ignore the stored per-unit judge verdicts for this review and ask the judge about every unit again (fresh answers are still stored, replacing nothing): use it when a stored verdict is suspected wrong",
     },
     close: {
       type: "boolean",
@@ -262,7 +271,8 @@ export default defineLoreCommand({
       const refs = { ok: true as const, value: planRefs };
 
       // reason: the measurements, the judge call and the issue filing are one module shared with the review batch and `lore plan close`
-      const wiring = createAssessWiring({ app, inv, actor, reviewService, slots });
+      // reason: BR-1535 S5 — `--rejudge` ignores stored unit verdicts for this review; fresh answers are still stored.
+      const wiring = createAssessWiring({ app, inv, actor, reviewService, slots, ...(args.rejudge === true ? { rejudge: true } : {}) });
       const { measureSuite, reviewOne } = wiring;
       const filing = createAssessFiling({ app, inv, actor, upstream: issueUpstream, leases });
 
@@ -397,7 +407,7 @@ export default defineLoreCommand({
               r.outcome,
               r.plan,
               r.review ?? "-",
-              "filed_issues" in r && r.filed_issues !== undefined ? `${r.reason}; issues ${r.filed_issues.map((n) => `#${String(n)}`).join(", ")}` : r.reason,
+              `${"filed_issues" in r && r.filed_issues !== undefined ? `${r.reason}; issues ${r.filed_issues.map((n) => `#${String(n)}`).join(", ")}` : r.reason}${r.units !== undefined ? `; units ${r.units}` : ""}`,
             ]),
           ),
         );

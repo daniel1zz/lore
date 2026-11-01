@@ -110,6 +110,8 @@ export interface AssessWiringInput {
    * the `slot*` decorators of this one value, so no review run bypasses it.
    */
   readonly slots: ReviewTestSlots;
+  /** `lore assess --rejudge` (BR-1535 S5): ignore the stored per-unit judge verdicts and ask the judge again; absent = reuse them. */
+  readonly rejudge?: boolean;
 }
 
 /**
@@ -119,7 +121,7 @@ export interface AssessWiringInput {
  * @returns the closures; they share the assessed commit and the criteria measured once in the suite's worktree
  */
 export function createAssessWiring(input: AssessWiringInput): AssessWiring {
-  const { app, inv, actor, reviewService, slots } = input;
+  const { app, inv, actor, reviewService, slots, rejudge } = input;
 
   // reason: main's head as the batch resolved it once (set by `measureSuite`); the regression head recheck reads that commit, never a newer main.
   let assessedCommit: string | undefined;
@@ -344,6 +346,8 @@ export function createAssessWiring(input: AssessWiringInput): AssessWiring {
       facts,
       ...(rerunCriterion !== undefined ? { rerunCriterion } : {}),
       ...(derivation.status === "derived" ? { diffText: derivation.diff_text } : {}),
+      // reason: BR-1535 S5 — `--rejudge` ignores stored unit verdicts for this review; fresh answers are still stored.
+      ...(rejudge === true ? { rejudge: true } : {}),
       diffSource: describeDiffSource(diffSource),
       maxDiffChars: app.aiProviderService.assessMaxDiffChars,
       ...(suiteOfPlan !== undefined ? { suite: suiteOfPlan } : {}),

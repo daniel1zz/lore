@@ -89,6 +89,9 @@ export class HttpAIProvider implements AIProvider {
    */
   public readonly modelId: string;
 
+  /** A call's `model` replaces the configured one in the request body, so the model that answers is knowable (BR-1535). */
+  public readonly acceptsModelOverride = true;
+
   constructor(
     /** Registry key — returned in GenerateOutput.provider_name */
     public readonly name: string,
@@ -123,7 +126,8 @@ export class HttpAIProvider implements AIProvider {
 
     // Anthropic Messages request body (SPEC-020 §9.3)
     const requestBody = {
-      model: this.cfg.model,
+      // reason: BR-1535 — a caller that names the answering model (`ai.assess.model`) gets it; otherwise the provider's configured model.
+      model: input.model ?? this.cfg.model,
       max_tokens: this.cfg.max_tokens,
       messages: [{ role: "user" as const, content: input.prompt }],
     };
@@ -241,6 +245,8 @@ export class HttpAIProvider implements AIProvider {
       duration_ms,
       exit_code: 0,
       provider_name: this.name,
+      // reason: BR-1535 — the response's own `model` field is the model that answered.
+      model: parsed.data.model,
       ...(parsed.data.usage !== undefined
         ? {
             usage: {

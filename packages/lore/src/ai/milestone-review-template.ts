@@ -26,8 +26,46 @@ import { z } from "zod";
 import { JUDGED_DIMENSIONS, type JudgedDimension, type MilestoneDecisionRef, type MilestoneFacts } from "@lore/core";
 import type { CitedRuleStateRow } from "../service/milestone-review.js";
 
-/** Stamped on every stored review (`prompt_version`). milestone-6: judgment layer only, facts table, file chunks. */
-export const MILESTONE_REVIEW_PROMPT_VERSION = "milestone-6";
+/**
+ * Stamped on every stored review (`prompt_version`). milestone-6: judgment layer only, facts table, file chunks. milestone-7: every
+ * call also answers per unit (a verdict per changed file, one per AI criterion) and is told which units are already judged (BR-1535).
+ * A unit's verdict key does NOT read this string: it reads {@link UNIT_INSTRUCTION_TEMPLATE}'s text, so a template edit
+ * invalidates stored verdicts without anyone bumping a version.
+ */
+export const MILESTONE_REVIEW_PROMPT_VERSION = "milestone-7";
+
+/**
+ * The per-unit instructions, unfilled (BR-1535, spec S2). The same text goes into the full, chunk and summary calls, and its
+ * sha256 is one input of every unit's verdict key. Never interpolate a plan, file or criterion into it: that would make the
+ * key depend on the call's context, which the spec forbids.
+ */
+export const UNIT_INSTRUCTION_TEMPLATE = [
+  "Besides the plan-level dimensions, answer each unit listed under `# Units` that is marked ASK, and only those.",
+  "- A file unit: add one entry to `files`: {\"path\": \"<file>\", \"security\": {verdict, reason, reference, cites}, \"concurrency_safety\": {verdict, reason, reference, cites}}.",
+  "  Judge ONLY that file's own net diff. security: does the change open a path for untrusted input, leaked credentials or an unchecked privilege?",
+  "  concurrency_safety: can two sessions, writers or processes doing this at once corrupt state or lose a write? A fail cites the file path or a symbol in it.",
+  "- A criterion unit: add one entry to `criteria`: {\"spec\": \"<spec slug>\", \"ac\": \"<AC id>\", \"verdict\": \"pass|fail\", \"reason\": \"...\"}, judged against its rubric and the files it covers.",
+  "A unit marked ALREADY JUDGED has a stored verdict, shown with it. Do not answer it again. Its diff is still shown so that you can reason across files.",
+  "The dimensions `security` and `concurrency_safety` stay the verdict on EVERYTHING this call shows, exactly as the dimension guide above asks:",
+  "fail them for any defect, in one file or across files, including a flow that starts in one file and ends in another and a flow through an already judged file,",
+  "and name the files and symbols of the whole flow in `cites`. The per-file entries only add each unit's own verdict; they never replace or soften the dimension verdict.",
+  "Decide the dimensions by tracing across files, not file by file: for each input, identity or shared state, who produces it, who checks it and who relies on it.",
+  "A file that relies on a value no file in this diff verifies is a finding for the dimension even when each file passes on its own.",
+].join("\n");
+
+/** One unit of a call as the prompt lists it: asked, or already judged with its stored answer (the stored raw JSON). */
+export interface PromptUnit {
+  /** A file's path, or `<spec slug>:<ac id>`. */
+  readonly id: string;
+  /** The stored answer when the unit is reused; absent = the call must answer it. */
+  readonly reusedAnswer?: string;
+}
+
+/** The units one call lists: the changed files whose diff it shows, and the criteria it may answer. */
+export interface PromptUnits {
+  readonly files: readonly PromptUnit[];
+  readonly criteria: readonly PromptUnit[];
+}
 
 /**
  * Which call this prompt is. `full`: every judged dimension on the whole diff (one call). `chunk`: security and
@@ -111,9 +149,26 @@ export interface MilestoneReviewPromptInput {
   readonly unseenFiles?: readonly string[];
   /** The batch's full-suite run as it concerns this plan (`renderSuiteSection`); absent = a bare prompt build. */
   readonly suiteSection?: string;
+  /** The unit instructions' text (default {@link UNIT_INSTRUCTION_TEMPLATE}); the judgment layer passes the same text it keys on. */
+  readonly unitInstructions?: string;
+  /** The units this call lists (BR-1535); absent = a bare prompt build that lists every file-less unit-free call. */
+  readonly units?: PromptUnits;
+  /** The dimension guide (default {@link DIMENSION_GUIDE}); the judgment layer passes the same text it keys on. */
+  readonly dimensionGuide?: Readonly<Record<JudgedDimension, string>>;
 }
 
-const DIMENSION_GUIDE: Readonly<Record<JudgedDimension, string>> = {
+/**
+ * The template source a unit's verdict key reads (BR-1535 S2): the unit instructions AND the dimension guide they refer to, unfilled.
+ * Editing either invalidates every stored verdict, without anybody bumping a version string.
+ *
+ * @param unitInstructions - the unfilled per-unit instructions
+ * @param guide - the dimension guide (default the shipped one)
+ */
+export function unitTemplateSourceOf(unitInstructions: string, guide: Readonly<Record<JudgedDimension, string>> = DIMENSION_GUIDE): string {
+  return JSON.stringify({ unitInstructions, dimensionGuide: Object.fromEntries(Object.entries(guide).sort(([a], [b]) => a.localeCompare(b))) });
+}
+
+export const DIMENSION_GUIDE: Readonly<Record<JudgedDimension, string>> = {
   spec_conformance:
     "Does the landed work do what the spec and plan say, no less and no more? The facts table lists files landings " +
     "touched outside their task's anchors: a helper may legitimately sit outside, but a file that adds behaviour the " +
@@ -241,10 +296,18 @@ function renderCriteria(input: MilestoneReviewPromptInput): string {
   const criteria = input.facts?.ai_criteria ?? [];
   if (criteria.length === 0) return "None.";
   return [
-    "Give ONE verdict (pass or fail) and a reason for each criterion below, judged against its rubric, in `criteria`.",
+    "Give ONE verdict (pass or fail) and a reason for each criterion below that is marked ASK under `# Units`, judged against its rubric, in `criteria`.",
     "",
     criteria.map((c) => `## ${c.spec}:${c.ac}\n  rubric: ${c.rubric}`).join("\n\n"),
   ].join("\n");
+}
+
+/** The `# Units` list: one line per unit, `ASK` or `ALREADY JUDGED <stored answer>`. A line's format is read by tests; keep it stable. */
+function renderUnits(units: PromptUnits | undefined): string {
+  const line = (kind: "file" | "criterion", u: PromptUnit): string =>
+    `- ${kind} ${u.id}: ${u.reusedAnswer === undefined ? "ASK" : `ALREADY JUDGED ${u.reusedAnswer}`}`;
+  const lines = [...(units?.files ?? []).map((u) => line("file", u)), ...(units?.criteria ?? []).map((u) => line("criterion", u))];
+  return lines.length === 0 ? "No unit is listed in this call." : lines.join("\n");
 }
 
 /**
@@ -258,8 +321,13 @@ function renderCriteria(input: MilestoneReviewPromptInput): string {
  */
 export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): string {
   const asked = askedDimensionsOf(input.mode);
-  const dims = asked.map((d) => `- ${d}: ${DIMENSION_GUIDE[d]}`).join("\n");
-  const asksCriteria = input.mode !== "chunk" && (input.facts?.ai_criteria ?? []).length > 0;
+  const guide = input.dimensionGuide ?? DIMENSION_GUIDE;
+  const dims = asked.map((d) => `- ${d}: ${guide[d]}`).join("\n");
+  // reason: BR-1535 — a call answers only the units marked ASK; with no units given (a bare prompt build) every criterion is asked as before.
+  const asksCriteria =
+    input.mode !== "chunk" &&
+    (input.units === undefined ? (input.facts?.ai_criteria ?? []).length > 0 : input.units.criteria.some((u) => u.reusedAnswer === undefined));
+  const asksFiles = input.units?.files.some((u) => u.reusedAnswer === undefined) === true;
   const asksDecisions = input.mode !== "chunk" && (input.recordedDecisions ?? []).length > 0;
   const tasks = input.tasks
     .map((t) => `## Task ${t.slug} (${t.status}): ${t.title}\n${t.content}\nEvidence:\n${renderEvidence(t.evidence)}`)
@@ -269,16 +337,25 @@ export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): s
       ? "None."
       : input.decisions.map((d) => `- ${d.class} on ${d.document}: ${d.summary}`).join("\n");
   const spec = input.spec === undefined ? "The plan has no spec." : `# Spec ${input.spec.slug}: ${input.spec.title}\n${input.spec.content}`;
-  const shape =
-    '{"dimensions": {' +
-    asked.map((d) => `"${d}": {"verdict": "pass|fail|na", "reason": "...", "reference": "...", "cites": ["..."]}`).join(", ") +
-    "}" +
-    (asksCriteria ? ', "criteria": [{"spec": "<spec slug>", "ac": "<AC id>", "verdict": "pass|fail", "reason": "..."}]' : "") +
-    (asksDecisions
-      ? ', "decisions": [{"decision": "<slug@version>", "premises_supported": [true|false per premise, in order], ' +
-        '"meaning_unchanged": true|false (rule rewordings only), "better_option": "<option>" (only when one was clearly better), "reason": "..."}]'
-      : "") +
-    "}";
+  // reason: BR-1535 — the shape is laid out one member per line with its nesting visible; on one line a long per-file answer was measured to
+  // drop the closing brace of `dimensions` before `files` (invalid JSON twice in a row, a failed review).
+  const verdictShape = '{"verdict": "pass|fail|na", "reason": "...", "reference": "...", "cites": ["..."]}';
+  const members: string[] = [
+    `  "dimensions": {\n${asked.map((d) => `    "${d}": ${verdictShape}`).join(",\n")}\n  }`,
+  ];
+  if (asksFiles) members.push(`  "files": [\n    {"path": "<file>",\n     "security": ${verdictShape},\n     "concurrency_safety": ${verdictShape}}\n  ]`);
+  if (asksCriteria) members.push('  "criteria": [{"spec": "<spec slug>", "ac": "<AC id>", "verdict": "pass|fail", "reason": "..."}]');
+  if (asksDecisions) {
+    members.push(
+      '  "decisions": [{"decision": "<slug@version>", "premises_supported": [true|false per premise, in order], ' +
+        '"meaning_unchanged": true|false (rule rewordings only), "better_option": "<option>" (only when one was clearly better), "reason": "..."}]',
+    );
+  }
+  const shape = `{\n${members.join(",\n")}\n}`;
+  // reason: BR-1535 — the unit sections come LAST, after the diff, so the dimension framing and the diff read as they did before per-unit
+  // answers. A/B on the #560/#564 plan with the `sonnet` judge: the old shape failed the cross-file flow in 5 of 5 runs, the unit sections in
+  // front of the plan in 2 of 6, the sections last in 3 of 5 completed runs, sections last plus the cross-file tracing instruction in 5 of 5.
+  const unitSection = ["", "# Unit instructions", input.unitInstructions ?? UNIT_INSTRUCTION_TEMPLATE, "", "# Units", renderUnits(input.units)];
   const head = [
     `You are the milestone reviewer for a finished plan. Judge ONLY the dimensions listed below, each separately: ${asked.join(", ")}.`,
     "Everything else (criteria attestation, regression, cited-rule state) was measured by tools and appears in the facts table; do not judge it.",
@@ -300,7 +377,7 @@ export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): s
     "",
   ];
   if (input.mode === "chunk") {
-    return [...head, "# Facts table", renderFacts(input), "", "# Diff chunk", renderDiffSection(input)].join("\n");
+    return [...head, "# Facts table", renderFacts(input), "", "# Diff chunk", renderDiffSection(input), ...unitSection].join("\n");
   }
   return [
     ...head,
@@ -321,5 +398,6 @@ export function buildMilestoneReviewPrompt(input: MilestoneReviewPromptInput): s
     "",
     "# Final state of each changed file (net diff across the plan's landings)",
     renderDiffSection(input),
+    ...unitSection,
   ].join("\n");
 }

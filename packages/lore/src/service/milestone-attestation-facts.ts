@@ -54,6 +54,8 @@ export interface CriterionHolder {
 export interface CriterionScope {
   readonly doc_slug: string;
   readonly ac_id: string;
+  /** The criterion's statement; an AI criterion's verdict key reads it with the rubric (BR-1535). */
+  readonly statement?: string;
   readonly mode: "script" | "ai" | "human";
   /** The AI rubric (mode `ai` only). */
   readonly rubric?: string;
@@ -133,6 +135,7 @@ export function planCriterionScopes(spec: DocRecord | undefined, tasks: readonly
     scopes.push({
       doc_slug: spec.slug,
       ac_id: criterion.id,
+      statement: criterion.statement,
       mode: criterion.verify.mode,
       ...(criterion.verify.mode === "ai" ? { rubric: criterion.verify.rubric } : {}),
       ...(criterion.verify.mode === "script" ? { command: criterion.verify.command } : {}),
@@ -398,7 +401,9 @@ export async function measureCriteriaAtHead(input: MeasureCriteriaAtHeadInput): 
   const aiCriteria: AiCriterionInput[] = [];
   const scripts: CriterionScope[] = [];
   for (const scope of input.scopes) {
-    if (scope.mode === "ai") aiCriteria.push({ spec: scope.doc_slug, ac: scope.ac_id, rubric: scope.rubric ?? "" });
+    if (scope.mode === "ai") {
+      aiCriteria.push({ spec: scope.doc_slug, ac: scope.ac_id, rubric: scope.rubric ?? "", ...(scope.statement !== undefined ? { statement: scope.statement } : {}) });
+    }
     else if (scope.mode === "script") scripts.push(scope);
   }
   if (scripts.length === 0) {

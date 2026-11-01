@@ -51,6 +51,7 @@ import { MIGRATION_045_SQL } from "./migrations/migration-045.js";
 import { MIGRATION_046_SQL } from "./migrations/migration-046.js";
 import { MIGRATION_047_ADD_COLUMNS, MIGRATION_047_SQL } from "./migrations/migration-047.js";
 import { MIGRATION_048_ADD_COLUMNS, MIGRATION_048_SQL } from "./migrations/migration-048.js";
+import { MIGRATION_049_SQL } from "./migrations/migration-049.js";
 import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migration-017.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
@@ -178,6 +179,7 @@ import type {
   TraceDenyByCheckpoint,
   SuiteResultRecord,
   SuiteFileRunRecord,
+  JudgeVerdictRow,
   CheckOutcomeInput,
   CheckOutcomeStat,
   PendingAskInput,
@@ -250,6 +252,7 @@ import {
   buildNonLiveRuleRefusal,
   rowToSuiteResult,
   rowToSuiteFileRun,
+  rowToJudgeVerdict,
   suiteResultJsonColumns,
 } from "./store-shared.js";
 import {
@@ -1327,6 +1330,11 @@ export class TursoStore implements StoreInterface {
           if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
         }
         await this.client.executeMultiple(MIGRATION_048_SQL);
+      }
+
+      if (currentVersion < 49) {
+        // reason: migration-049 creates judge_verdicts (BR-1535).
+        await this.client.executeMultiple(MIGRATION_049_SQL);
       }
     })();
 
@@ -4527,6 +4535,84 @@ export class TursoStore implements StoreInterface {
       const rs = await this.client.execute({ sql: "SELECT * FROM suite_results WHERE id = ?", args: [id] });
       const row = rs.rows[0];
       return ok(row === undefined ? null : this.suiteResultFromRow(row));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async getJudgeVerdict(key: string, readAt: string): Promise<Result<JudgeVerdictRow | null, LoreError>> {
+    try {
+      await this.ensureReady();
+      // reason: one write batch (implicit transaction): the last_read_at refresh and the read see the same row (BR-1535).
+      const results = await this.client.batch(
+        [
+          { sql: "UPDATE judge_verdicts SET last_read_at = ? WHERE key = ?", args: [readAt, key] },
+          { sql: "SELECT * FROM judge_verdicts WHERE key = ?", args: [key] },
+        ],
+        "write",
+      );
+      const row = results[1]?.rows[0];
+      return ok(row === undefined ? null : rowToJudgeVerdict(row as unknown as Record<string, unknown>));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async insertJudgeVerdictIfAbsent(row: JudgeVerdictRow): Promise<Result<JudgeVerdictRow, LoreError>> {
+    try {
+      await this.ensureReady();
+      const results = await this.client.batch(
+        [
+          {
+            sql: `INSERT OR IGNORE INTO judge_verdicts (key, unit_kind, unit_id, raw_answer, provider, model, template_hash, first_review, created_at, last_read_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [row.key, row.unit_kind, row.unit_id, row.raw_answer, row.provider, row.model, row.template_hash, row.first_review, row.created_at, row.last_read_at],
+          },
+          { sql: "SELECT * FROM judge_verdicts WHERE key = ?", args: [row.key] },
+        ],
+        "write",
+      );
+      const stored = results[1]?.rows[0];
+      if (stored === undefined) return err({ code: "STORE_ERROR", message: `judge_verdicts: no row under ${row.key} after insert` });
+      return ok(rowToJudgeVerdict(stored as unknown as Record<string, unknown>));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async replaceJudgeVerdictIfEquals(key: string, expectedRawAnswer: string, row: JudgeVerdictRow): Promise<Result<JudgeVerdictRow, LoreError>> {
+    try {
+      await this.ensureReady();
+      const results = await this.client.batch(
+        [
+          {
+            sql: `UPDATE judge_verdicts SET unit_kind = ?, unit_id = ?, raw_answer = ?, provider = ?, model = ?, template_hash = ?, first_review = ?, created_at = ?, last_read_at = ?
+                  WHERE key = ? AND raw_answer = ?`,
+            args: [row.unit_kind, row.unit_id, row.raw_answer, row.provider, row.model, row.template_hash, row.first_review, row.created_at, row.last_read_at, key, expectedRawAnswer],
+          },
+          {
+            sql: `INSERT OR IGNORE INTO judge_verdicts (key, unit_kind, unit_id, raw_answer, provider, model, template_hash, first_review, created_at, last_read_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [key, row.unit_kind, row.unit_id, row.raw_answer, row.provider, row.model, row.template_hash, row.first_review, row.created_at, row.last_read_at],
+          },
+          { sql: "SELECT * FROM judge_verdicts WHERE key = ?", args: [key] },
+        ],
+        "write",
+      );
+      const stored = results[2]?.rows[0];
+      if (stored === undefined) return err({ code: "STORE_ERROR", message: `judge_verdicts: no row under ${key} after replace` });
+      return ok(rowToJudgeVerdict(stored as unknown as Record<string, unknown>));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async pruneJudgeVerdictsNotReadSince(cutoff: string): Promise<Result<number, LoreError>> {
+    try {
+      await this.ensureReady();
+      // reason: BR-1535 — deletion is by last-read age only; never by template_hash, provider or model.
+      const rs = await this.client.execute({ sql: "DELETE FROM judge_verdicts WHERE last_read_at < ?", args: [cutoff] });
+      return ok(rs.rowsAffected);
     } catch (e) {
       return wrapStoreError(e);
     }

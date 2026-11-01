@@ -73,7 +73,7 @@ describe("migration 048", () => {
     expect(tables(before)).not.toContain("template_revisions");
     before.close();
 
-    new SQLiteStore(path, { migrate: true }).close();
+    new SQLiteStore(path, { migrate: true, schemaCeiling: 48 }).close();
 
     const after = new Database(path);
     expect(after.query("PRAGMA user_version").get()).toEqual({ user_version: 48 });
@@ -87,8 +87,8 @@ describe("migration 048", () => {
   });
 
   it("REGRESSION + STATE: the legacy judgment survives with NULL columns, and a second migrate open changes nothing", () => {
-    new SQLiteStore(path, { migrate: true }).close();
-    new SQLiteStore(path, { migrate: true }).close();
+    new SQLiteStore(path, { migrate: true, schemaCeiling: 48 }).close();
+    new SQLiteStore(path, { migrate: true, schemaCeiling: 48 }).close();
     const db = new Database(path);
     expect(db.query("SELECT id, template_ref, missing_dimensions FROM review_judgments").all()).toEqual([
       { id: "j-legacy", template_ref: null, missing_dimensions: null },
@@ -98,7 +98,7 @@ describe("migration 048", () => {
   });
 
   it("NEGATIVE: one pending revision per template (a new one after approval is fine); an accepted proposal needs a dimension id", () => {
-    new SQLiteStore(path, { migrate: true }).close();
+    new SQLiteStore(path, { migrate: true, schemaCeiling: 48 }).close();
     const db = new Database(path);
     const rev = (id: string, status: string) =>
       db.run("INSERT INTO template_revisions (id, template_slug, status, base_version, created_at, resolved_at) VALUES (?, 'tpl', ?, 1, ?, ?)", [
