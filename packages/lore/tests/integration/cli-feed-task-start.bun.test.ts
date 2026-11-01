@@ -507,10 +507,17 @@ describe("STATE — workflow.task_feed.* config override clips the objective sec
 // ─── REGRESSION — spec-create / session-resume / phase-start unchanged (AC-070-7) ──
 
 describe("REGRESSION — spec-create / session-resume / phase-start outputs are unchanged after the table-driven dispatch refactor", () => {
-  it("spec-create with no approved skill still prints the one-line note, exit 0", async () => {
+  it("spec-create with no approved template prints the template-slice source line and an explicit no-template notice, exit 0", async () => {
     const result = await runLore(["feed", "spec-create"], tmpDir);
     expect(result.exitCode).toBe(0);
-    expect(result.stdout.trim()).toBe("no approved governing skill for spec");
+    expect(result.stdout.trim()).toBe(
+      [
+        "[source: template lookup, trust: team-authored]",
+        "",
+        "## Rule",
+        "(No rule could be read from an approved template: no approved template for spec/feature: create one (lore create template), then review and approve it)",
+      ].join("\n"),
+    );
   });
 
   it("session-resume with no handoff recorded still prints '(no handoff recorded)', exit 0", async () => {
