@@ -279,7 +279,9 @@ describe("AC-DCS2-14: the execution log is appended by lore and never rewrites t
     // the log is not the only thing a written entry may have changed: the body and title of every version are the first version's
     expect(await bodyFacts(world, x.slug)).toEqual({ ...before, versions: expect.any(Number) });
     expect((await bodyFacts(world, x.slug)).versions).toBeGreaterThan(before.versions);
-    // a second integrate of the same branch adds nothing to the log
+    // a second integrate of the same branch adds nothing to the log. The archive removed the task's worktree and branch, so the branch is
+    // named again at the tip it landed (a landed tip is already on main: the integrate has nothing to land and must not log it twice).
+    gitIn(fixture.dir, ["branch", x.tree.branch, tip]);
     const again = await integrateBranch(world, x.tree.branch);
     expect(again.exitCode, again.text).toBe(0);
     expect(logOf((await fixture.readTask(x.slug)).extra)).toEqual(log);
