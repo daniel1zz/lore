@@ -148,6 +148,7 @@ import { type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-r
 import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-archive.js";
 import { isPlanMember } from "./plan-membership.js";
 import { bodyDiffers, RecordLockService, type RecordEditOp } from "./record-lock-service.js";
+import { guardLegacyFrozenWrite } from "./legacy-freeze.js";
 import {
   guardStructuredRowWrite,
   prepareStructuredCreate,
@@ -286,6 +287,11 @@ export interface SetOptions extends WriteActorOpts {
    * revalidate against it (a newly required dimension must then be answered, or the write is refused).
    */
   readonly templateVersion?: "latest";
+  /**
+   * `lore convert`: the patch's `extra.fields` / `extra.dimensions` turn an unconverted document into a templated one
+   * (latest approved template pinned, content validated, body rendered). Refused for an already templated document.
+   */
+  readonly convertToTemplate?: boolean;
 }
 
 /**
@@ -1612,6 +1618,10 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     if (refusal !== undefined) return refusal;
     const { doc, patch } = request;
     if (patchedFieldsUnchanged(doc, patch)) return ok({ doc, written: false });
+
+    // AC-ST-7 — a legacy-frozen document's content, criteria, anchors and fields are never rewritten by a service either.
+    const frozen = guardLegacyFrozenWrite(doc, patch, "row");
+    if (!frozen.ok) return frozen;
 
     // BR-1528/BR-1529 — the row route carries lifecycle, link and anchor writes; it must not become a way to store a
     // body or invalid fields on a templated document.
@@ -3309,13 +3319,28 @@ full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
     // is revalidated against the PINNED template and re-rendered. From here on the patch carries the rendered text, so
     // every gate below (record lock, demotion, spec-promote) judges what will actually be stored. A legacy document
     // (no template_ref) passes through untouched.
+    // AC-ST-7 — a legacy-frozen document refuses every edit but a lifecycle transition; checked before anything is prepared.
+    const frozenRefusal = guardLegacyFrozenWrite(
+      existing,
+      {
+        content: parsedPatchInput.data.content,
+        title: parsedPatchInput.data.title,
+        priority: parsedPatchInput.data.priority,
+        tags: parsedPatchInput.data.tags,
+        slug: parsedPatchInput.data.slug,
+        extra: parsedPatchInput.data.extra,
+      },
+      "set",
+    );
+    if (!frozenRefusal.ok) return frozenRefusal;
+
     let parsedPatch = parsedPatchInput;
     if (this.structuredWrite !== undefined) {
       const structured = await prepareStructuredUpdate(
         this.structuredWrite,
         existing,
         { content: parsedPatchInput.data.content, extra: parsedPatchInput.data.extra },
-        { fieldsPatch: opts?.fieldsPatch, templateVersion: opts?.templateVersion },
+        { fieldsPatch: opts?.fieldsPatch, templateVersion: opts?.templateVersion, convert: opts?.convertToTemplate },
       );
       if (!structured.ok) return structured;
       if (structured.value !== null) {
