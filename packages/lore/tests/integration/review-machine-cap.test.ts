@@ -19,11 +19,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { err, ok, parseConfig, resolveMachineTestSlots, MILESTONE_DIMENSIONS, type DocRecord, type LoreError, type MilestoneReview, type PlanBundle, type Result } from "@lore/core";
-import { REVIEW_BATCH_HANDOFF_ENV, readBatchHandoff, spawnDetachedReviewBatch } from "../../src/adapters/cli/review-batch-wiring.js";
+import { REVIEW_BATCH_HANDOFF_ENV, readBatchHandoff, refuseBatchLeaseForRead, spawnDetachedReviewBatch } from "../../src/adapters/cli/review-batch-wiring.js";
 import { describeBatchStart } from "../../src/service/integrate-service.js";
 import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/service/issue-filing-service.js";
 import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint } from "../../src/service/milestone-review.js";
-import { ReviewBatchRunner, ReviewTriggerService, type BatchHandoff, type BatchRunPorts, type MachineBatchPorts } from "../../src/service/review-batch-service.js";
+import { ReviewBatchRunner, ReviewTriggerService, type BatchHandoff, type BatchLeasePort, type BatchRunPorts, type MachineBatchPorts } from "../../src/service/review-batch-service.js";
 import { ReviewLeases, planLeaseKey, type LeaseOutcome } from "../../src/service/review-batch-lease.js";
 import type { LocalProcessIdentity, ProcessProbe } from "../../src/service/review-lease-liveness.js";
 import type { ReviewTestSlots } from "../../src/service/review-test-slots.js";
@@ -164,7 +164,7 @@ class Batches {
     return ok(coverFailedDimensions(failed, entries));
   };
 
-  trigger(batchLease?: ReviewLeases, spawn: (handoff: BatchHandoff | undefined) => Result<{ pid: number | undefined }, LoreError> = () => ok({ pid: 4242 })): ReviewTriggerService {
+  trigger(batchLease: BatchLeasePort = refuseBatchLeaseForRead, spawn: (handoff: BatchHandoff | undefined) => Result<{ pid: number | undefined }, LoreError> = () => ok({ pid: 4242 })): ReviewTriggerService {
     return new ReviewTriggerService({
       listPlans: async () => ok([...this.plans.values()].filter((p) => !p.archived).map((p) => p.bundle.plan)),
       getPlanBundle: async (ref) => ok(this.find(ref).bundle),
@@ -172,7 +172,7 @@ class Batches {
       pendingDecisionSubjects: async () => ok(new Set<string>()),
       issueCoverage: this.coverage,
       spawnBatch: spawn,
-      ...(batchLease !== undefined ? { batchLease } : {}),
+      batchLease,
     });
   }
 
