@@ -17,6 +17,7 @@
  */
 
 import { patchLoreConfig } from "./patch-lore-config.js";
+import { templatedFieldsArgs } from "./templated-create.js";
 import { Database } from "bun:sqlite";
 import { appendFileSync, chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -133,7 +134,7 @@ out({ state: issue.state, state_reason: issue.reason, labels: issue.labels.map((
  */
 export async function makeIssueFixture(
   issues: readonly StubIssue[],
-  options: { readonly pageSize?: number; readonly dirsToClean: string[]; readonly withRootPrd?: boolean },
+  options: { readonly pageSize?: number; readonly dirsToClean: string[]; readonly withRootPrd?: boolean; readonly requireCreate?: boolean },
 ): Promise<IssueFixture> {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "lore-issue-corpus-")));
   const stubDir = realpathSync(mkdtempSync(join(tmpdir(), "lore-issue-stub-")));
@@ -192,10 +193,10 @@ export async function makeIssueFixture(
   await must(["init"]);
   patchLoreConfig(
     dir,
-    ["workflow:", "  gates:", "    plan-promote:", "      enabled: false", "    plan-close:", "      enabled: false", "  review:", "    judgment_required_types: []", "feedback:", "  upstream:", `    repo: ${STUB_REPO}`, ""].join("\n"),
+    ["workflow:", "  gates:", "    plan-promote:", "      enabled: false", "    plan-close:", "      enabled: false", "  review:", "    judgment_required_types: []", ...(options.requireCreate === true ? ["  structured_documents:", "    require_create: true"] : []), "feedback:", "  upstream:", `    repo: ${STUB_REPO}`, ""].join("\n"),
   );
   if (options.withRootPrd !== false) {
-    await must(["create", "prd", "--title", "Issue Fixture PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"]);
+    await must(["create", "prd", "--title", "Issue Fixture PRD", "--no-ai", "--json", ...templatedFieldsArgs("prd")]);
   }
   writeFileSync(join(stubDir, "gh.log"), "");
 

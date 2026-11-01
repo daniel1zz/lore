@@ -18,7 +18,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { leavesUnder } from "../../src/service/leaf-coverage";
 import { createItemsCorpus, type ItemsCorpus, type StoredNode } from "../helpers/baseline-items-corpus";
@@ -33,10 +33,21 @@ const DECIDED = ["--reason", "exercise the pending revision", "--premise", "the 
 
 let corpus: ItemsCorpus;
 let otherLeaf = "";
+let editSeq = 0;
 
 /** The node-part fields the pending revision carries (its `revision_id` aside). */
 function nodeFields(node: StoredNode): string[] {
   return Object.keys(node.extra.pending?.node ?? {}).filter((k) => k !== "revision_id");
+}
+
+/**
+ * A body edit of the templated leaf: its text is rendered from its fields (`set --content` is refused), so the edit
+ * rewrites the `statement` field through a fields file.
+ */
+function statementEdit(text: string): string[] {
+  const path = join(corpus.dir, `statement-${String(++editSeq)}.json`);
+  writeFileSync(path, JSON.stringify({ fields: { statement: text } }));
+  return ["--fields-file", path];
 }
 
 /** The tree line of the leaf. */
@@ -117,7 +128,7 @@ describe("AC-BIA-5: node status is derived from its items", () => {
 
   it("HAPPY/NEGATIVE: a body edit records ONE pending revision; the stored body and title stay approved", async () => {
     const before = corpus.node(corpus.leaf);
-    const set = await corpus.lore(["set", corpus.leaf, "--content", "A rewritten body that nobody has approved.", ...DECIDED]);
+    const set = await corpus.lore(["set", corpus.leaf, ...statementEdit("A rewritten body that nobody has approved."), ...DECIDED]);
     expect(set.exitCode).toBe(0);
     const node = corpus.node(corpus.leaf);
     expect(node.content).toBe(before.content);
@@ -193,7 +204,7 @@ describe("AC-BIA-5: node status is derived from its items", () => {
   }, TIMEOUT_MS);
 
   it("REGRESSION: an export mirror shows the approved text, never the pending revision as if it were approved", async () => {
-    await corpus.must(["set", corpus.leaf, "--content", "PENDING-BODY-NOBODY-APPROVED", ...DECIDED]);
+    await corpus.must(["set", corpus.leaf, ...statementEdit("PENDING-BODY-NOBODY-APPROVED"), ...DECIDED]);
     await corpus.must(["rule", "add", corpus.leaf, "--statement", "PENDING-RULE-NOBODY-APPROVED", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "e", ...DECIDED]);
     const exported = await corpus.lore(["export-docs", "--type", "baseline", "--force"]);
     expect(exported.exitCode).toBe(0);

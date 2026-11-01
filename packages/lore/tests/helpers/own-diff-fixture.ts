@@ -9,6 +9,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import type { TaskKind } from "@lore/core";
 import { patchLoreConfig } from "./patch-lore-config.js";
+import { planFieldsArgs, templatedFieldsArgs } from "./templated-create.js";
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -62,7 +63,7 @@ export class OwnDiffFixture {
       this.dir,
       ["workflow:", "  review:", "    judgment_required_types: []", "  integrate:", '    floor_command: "true"', ...extraConfig, ""].join("\n"),
     );
-    this.prdSlug = this.parseSlug(this.mustLore(["create", "prd", "--title", "Own diff PRD", "--content", "root", "--no-ai"]).stdout);
+    this.prdSlug = this.parseSlug(this.mustLore(["create", "prd", "--title", "Own diff PRD", "--no-ai", ...templatedFieldsArgs("prd")]).stdout);
     this.planSlug = this.createPlan("Own diff plan");
   }
 
@@ -106,7 +107,7 @@ export class OwnDiffFixture {
   }
 
   createPlan(title: string): string {
-    return this.parseSlug(this.mustLore(["create", "plan", "--title", title, "--parent", this.prdSlug, "--content", "x", "--no-ai"]).stdout);
+    return this.parseSlug(this.mustLore(["create", "plan", "--title", title, "--parent", this.prdSlug, "--no-ai", ...planFieldsArgs(this.prdSlug)]).stdout);
   }
 
   /** The fixture's default plan slug. */
@@ -169,7 +170,7 @@ export class OwnDiffFixture {
    */
   createTask(title: string, anchors: readonly string[], kind: TaskKind, plan: string = this.planSlug): string {
     this.taskSeq += 1;
-    const args = ["create", "task", "--title", `${title} ${this.taskSeq}`, "--kind", kind, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"];
+    const args = ["create", "task", "--title", `${title} ${this.taskSeq}`, "--kind", kind, "--parent", plan, "--plan-id", plan, "--no-ai", ...templatedFieldsArgs("task")];
     for (const anchor of anchors) args.push("--anchor", anchor);
     return this.parseSlug(this.mustLore(args).stdout);
   }

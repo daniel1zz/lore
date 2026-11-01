@@ -23,7 +23,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { asyncLoreRunnerFor, ensureLiveRuleViaAsyncCli } from "../../helpers/cli-live-rule.js";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
-import { createStructuredRig, installTemplate, writeFieldsFile, type StructuredRig } from "../../helpers/structured-corpus.js";
+import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
+import { createStructuredRig, installTemplate, removeSeededTemplates, writeFieldsFile, type StructuredRig } from "../../helpers/structured-corpus.js";
 
 const AC = "AC-1";
 let rig: StructuredRig;
@@ -115,12 +116,15 @@ async function findingsOf(slug: string): Promise<{ check: string; entry: string 
 }
 
 beforeAll(async () => {
-  rig = await createStructuredRig("lore-cross-field", { templates: "none" });
+  // reason: the live-rule fixture creates its baseline tree from the SHIPPED templates, so it runs before they are removed
+  rig = await createStructuredRig("lore-cross-field");
   patchLoreConfig(rig.dir, { workflow: { review: { judgment_required_types: [] } } });
+  const runner = asyncLoreRunnerFor((args) => rig.lore(args), rig.dir);
+  const prd = await ensureRequirementsDocSlugAsync(async (args) => await rig.lore(args));
+  ruleId = await ensureLiveRuleViaAsyncCli(runner, rig.dir, prd);
+  await removeSeededTemplates(rig);
   await installTemplate(rig, "Cross field tech template", crossFieldTemplate("tech", ALL_CHECKS));
   await installTemplate(rig, "Cross field design template", crossFieldTemplate("design", []));
-  await must(["create", "prd", "--title", "Cross field product", "--content", "# P\n\nA product.\n"]);
-  ruleId = await ensureLiveRuleViaAsyncCli(asyncLoreRunnerFor((args) => rig.lore(args), rig.dir), rig.dir);
 }, 420_000);
 
 afterAll(() => rig.cleanup());

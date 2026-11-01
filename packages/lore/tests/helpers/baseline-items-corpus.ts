@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveConfig } from "@lore/core/node";
 import { runLoreInProcess } from "./run-lore-in-process";
+import { templatedFieldsArgs } from "./templated-create";
 
 /** What one `lore` run produced. */
 export interface LoreResult {
@@ -89,7 +90,7 @@ function writeAiDouble(dir: string): string {
  * @param prefix - temp directory name prefix
  * @throws Error when any fixture command fails
  */
-export async function createItemsCorpus(prefix: string): Promise<ItemsCorpus> {
+export async function createItemsCorpus(prefix: string, options: { requireCreate?: boolean } = {}): Promise<ItemsCorpus> {
   const dir = mkdtempSync(join(tmpdir(), `${prefix}-`));
   const run = (args: readonly string[], session?: string): Promise<LoreResult> =>
     runLoreInProcess([...args], {
@@ -118,11 +119,12 @@ export async function createItemsCorpus(prefix: string): Promise<ItemsCorpus> {
       templates: {},
       telemetry: false,
     },
+    ...(options.requireCreate === true ? { workflow: { structured_documents: { require_create: true } } } : {}),
   } as never);
 
-  const prd = slugOf(await must(["create", "prd", "--title", "Items fixture product", "--no-ai", "--content", "# Items fixture\n\nA product.\n"]));
-  const root = slugOf(await must(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "Items root"]));
-  const branch = slugOf(await must(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "Items branch"]));
+  const prd = slugOf(await must(["create", "prd", "--title", "Items fixture product", "--no-ai", ...templatedFieldsArgs("prd")]));
+  const root = slugOf(await must(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "Items root", ...templatedFieldsArgs("baseline", { kind: "root" })]));
+  const branch = slugOf(await must(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "Items branch", ...templatedFieldsArgs("baseline", { kind: "branch" })]));
   // a node is born draft (its own part awaits a first approval); the ancestors are approved so the suites start from an approved tree
   for (const node of [root, branch]) {
     await must(["review", node]);
@@ -160,7 +162,7 @@ export async function createItemsCorpus(prefix: string): Promise<ItemsCorpus> {
       await must(["approve", slug]);
     },
     async addLeaf(title) {
-      const slug = slugOf(await must(["baseline", "add", branch, "--node", "leaf", "--label", title, "--title", title]));
+      const slug = slugOf(await must(["baseline", "add", branch, "--node", "leaf", "--label", title, "--title", title, ...templatedFieldsArgs("baseline", { kind: "leaf" })]));
       await corpus.approveAll(slug);
       return slug;
     },
@@ -169,7 +171,7 @@ export async function createItemsCorpus(prefix: string): Promise<ItemsCorpus> {
     },
   };
 
-  const leaf = slugOf(await must(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "Items leaf"]));
+  const leaf = slugOf(await must(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "Items leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })]));
   await must(["rule", "add", leaf, "--statement", APPROVED_STATEMENT, ...RULE_ARGS]);
   await corpus.approveAll(leaf);
   return { ...corpus, leaf };

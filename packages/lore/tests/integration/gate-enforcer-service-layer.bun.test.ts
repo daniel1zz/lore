@@ -58,7 +58,9 @@ import { citeSpecWithLiveRule } from "../helpers/app-live-rule.js";
 import { liveAmbient, liveWriteContext } from "../live-invocation.js";
 import { runOfName } from "../helpers/test-run-identity.js";
 
-import { ensureRequirementsDocId } from "../helpers/parented-create.js";
+import { ensureRequirementsDocId, insertRequirementsDocWithoutHistory } from "../helpers/parented-create.js";
+import { SQLiteStore } from "../../src/store/sqlite-store.js";
+import { actedStore } from "../live-invocation.js";
 // ─── Project setup ────────────────────────────────────────────────────────────
 
 let tmpDir: string;
@@ -202,8 +204,12 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
       const app = openApp();
       try {
 
+        // reason: this case asserts NO template is approved in the corpus, so its parent is inserted straight into the store;
+        // `ensureRequirementsDocId` would seed the shipped templates to create the parent structured.
+        const parentStore = actedStore(new SQLiteStore(dbPath()));
+        const parentId = await insertRequirementsDocWithoutHistory(parentStore).finally(() => parentStore.close());
         const skillCreate = await app.corpusService.create({
-          parent_id: await ensureRequirementsDocId(app.corpusService), type: "knowledge",
+          parent_id: parentId, type: "knowledge",
           title: "Write-spec rules (D3 test)",
           content: "## Rule\n\nEvery spec needs a `## ` heading skeleton.",
           extra: { sub_type: "skill", skill: { applies_to: "spec" } },

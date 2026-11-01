@@ -9,6 +9,7 @@
  */
 
 import type { TaskKind } from "@lore/core";
+import { planFieldsArgs, templatedFieldsArgs } from "./templated-create.js";
 
 /** Runs `lore <args>` in the throwaway repository; `status` is the process exit code. */
 export type LoreRunner = (args: readonly string[]) => { readonly status: number; readonly out: string };
@@ -35,12 +36,12 @@ function slugOf(run: LoreRunner, args: readonly string[]): string {
 export function claimBranchTask(run: LoreRunner, repoKey: string, branch: string, kind: TaskKind): string {
   let plan = planOfRepo.get(repoKey);
   if (plan === undefined) {
-    const prd = slugOf(run, ["create", "prd", "--title", "Fixture PRD", "--content", "root", "--no-ai"]);
-    plan = slugOf(run, ["create", "plan", "--title", "Fixture plan", "--parent", prd, "--content", "x", "--no-ai"]);
+    const prd = slugOf(run, ["create", "prd", "--title", "Fixture PRD", "--no-ai", ...templatedFieldsArgs("prd")]);
+    plan = slugOf(run, ["create", "plan", "--title", "Fixture plan", "--parent", prd, "--no-ai", ...planFieldsArgs(prd)]);
     planOfRepo.set(repoKey, plan);
   }
   titleSeq += 1;
-  const task = slugOf(run, ["create", "task", "--title", `Fixture task ${titleSeq}`, "--kind", kind, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"]);
+  const task = slugOf(run, ["create", "task", "--title", `Fixture task ${titleSeq}`, "--kind", kind, "--parent", plan, "--plan-id", plan, "--no-ai", ...templatedFieldsArgs("task")]);
   const claimed = run(["claim", task, "--worktree", branch]);
   if (claimed.status !== 0) throw new Error(`lore claim ${task} --worktree ${branch} exited ${claimed.status}: ${claimed.out}`);
   return task;
