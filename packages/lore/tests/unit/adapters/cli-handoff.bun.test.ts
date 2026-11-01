@@ -1,5 +1,5 @@
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
+// @reads assets/templates/**
 /**
  * `lore handoff` / `lore create knowledge --sub-type handoff` — CLI-adapter exit-code
  * contract tests (SPEC-041 §3 D4, D6; §4 AC-SL-4 CLI half, AC-SL-9).
@@ -37,6 +37,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { seedTemplatesWith } from "../../helpers/structured-docs.js";
 
 import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
@@ -74,6 +75,8 @@ async function initCorpus(tmpDir: string): Promise<void> {
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
+  // BR-1528: a handoff is created structured through the approved `knowledge/handoff` template, so the corpus needs it.
+  await seedTemplatesWith((args) => runLore(args, tmpDir));
 }
 
 async function createPlan(tmpDir: string, title: string): Promise<string> {

@@ -1,4 +1,3 @@
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
  * spec-defect-clusters-round-2-part-b-review-pending-queue-corpus D10 — review command output states what

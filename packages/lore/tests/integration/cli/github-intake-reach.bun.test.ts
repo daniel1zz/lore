@@ -245,6 +245,11 @@ function makeReporter(prefix: string): ReporterFixture {
   if (initResult.exitCode !== 0) {
     throw new Error(`reporter 'lore init' failed (exit ${initResult.exitCode}): ${initResult.stderr}`);
   }
+  // BR-1528: the report body is rendered from the approved `issue-report` template, so the reporter corpus carries the seeds.
+  const seededResult = run(["migrate", "templates", "--apply"], { cwd: root });
+  if (seededResult.exitCode !== 0) {
+    throw new Error(`reporter 'lore migrate templates --apply' failed (exit ${seededResult.exitCode}): ${seededResult.stderr}`);
+  }
 
   const prdResult = run(
     [

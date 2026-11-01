@@ -1,6 +1,5 @@
 // @reads scripts/check-unclaimed-oracle.ts
 // @reads assets/project/lore-config-template.yaml
-// @reads assets/governance/write-spec-rule.md
 /**
  * `lore invalidate` / `lore create --supersedes` / `--include-invalid` / `lore status`
  * warning — CLI-adapter exit-code + wiring contract tests (SPEC-043 §Design Decisions

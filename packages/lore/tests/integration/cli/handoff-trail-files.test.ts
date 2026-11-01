@@ -93,6 +93,9 @@ beforeAll(() => {
   registerRun("cc:trail-gaps");
   // reason: BR-709 — a handoff is filed under the requirements document when it names no plan, so the corpus needs one.
   ensureRequirementsDocSlug((args) => lore(args, RUN));
+  // BR-1528: a handoff is created structured through the approved `knowledge/handoff` template.
+  const seeded = lore(["migrate", "templates", "--apply"], RUN);
+  if (seeded.exitCode !== 0) throw new Error(`lore migrate templates --apply failed: ${seeded.stderr}${seeded.stdout}`);
 
   // Session trail-s1: 6 distinct files over 2 turns; src/b.ts appears in both turns with two sources.
   writeTurn("trail-s1", "turn-1", 200, RUN_FILES);

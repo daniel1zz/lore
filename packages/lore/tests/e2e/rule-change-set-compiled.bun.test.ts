@@ -1,5 +1,4 @@
 // @reads assets/project/lore-config-template.yaml
-// @reads assets/governance/write-spec-rule.md
 /**
  * rule-change-set-compiled.bun.test.ts — AC-CS-3: a spec's rule change set, from proposal to landing, observed
  * from the REAL compiled binary on a throwaway corpus with the citation gate ENFORCING.

@@ -109,6 +109,9 @@ beforeAll(() => {
     corpus,
   );
   if (prd.exitCode !== 0) throw new Error(`root PRD creation failed (exit ${prd.exitCode}): ${prd.stderr}`);
+  // BR-1528: the report body is rendered from the approved `issue-report` template (setup, so before the counts below).
+  const seeded = runLore(["migrate", "templates", "--apply"], corpus);
+  if (seeded.exitCode !== 0) throw new Error(`'lore migrate templates --apply' failed (exit ${seeded.exitCode}): ${seeded.stderr}`);
   patchLoreConfig(corpus, `feedback:\n  upstream:\n    repo: ${REPO}\n`);
 }, 120_000);
 

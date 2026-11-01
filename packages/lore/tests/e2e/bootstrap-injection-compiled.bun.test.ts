@@ -1,5 +1,4 @@
 // @reads assets/project/lore-config-template.yaml
-// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref SPEC-080 §Projection Contract, §Public Interface — task
  *   task-skill-test-t6-compiled-binary-e2e-injection-knobs-json-pin,

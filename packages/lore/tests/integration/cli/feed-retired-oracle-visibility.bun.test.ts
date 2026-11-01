@@ -1,4 +1,3 @@
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
  * AC-DC-11 — the retired-oracle signal reaches the FEED surface (spec-the-defect-

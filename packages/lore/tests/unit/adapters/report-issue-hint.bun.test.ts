@@ -1,4 +1,3 @@
-// @reads assets/governance/write-spec-rule.md
 // @reads assets/project/lore-config-template.yaml
 /**
  * @spec_ref SPEC-073 §Design, §Acceptance Criteria AC-073-1/2/3; SPEC-OOB (out-of-box

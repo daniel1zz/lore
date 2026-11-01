@@ -1,4 +1,5 @@
 // @reads assets/project/lore-config-template.yaml
+// @reads assets/templates/**
 // @spawns-external git builds a throwaway git repository the test runs against
 /**
  * AC-PAR-3 — an ad-hoc task with a non-empty criteria scope records its governing spec, and every reader of its
@@ -32,6 +33,7 @@ import { join } from "node:path";
 import { extractEvidence, type DocRecord } from "@lore/core";
 import { createLiveApp } from "../../helpers/live-app.js";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process.js";
+import { seedTemplatesInApp } from "../../helpers/structured-docs.js";
 import { actedStore, liveIo } from "../../live-invocation.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { startHttpServer } from "../../../src/adapters/http/index.js";
@@ -404,10 +406,12 @@ describe("lore assess refresh tasks record the criterion's spec and are reused b
   let rdir: string;
   let app: App;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     rdir = realpathSync(mkdtempSync(join(tmpdir(), "lore-adhoc-governing-spec-refresh-")));
     mkdirSync(join(rdir, ".lore"), { recursive: true });
     app = createLiveApp(join(rdir, ".lore", "lore.db"));
+    // BR-1528: the refresh task is created structured through the approved `task` template.
+    await seedTemplatesInApp(app);
   });
 
   afterAll(() => {

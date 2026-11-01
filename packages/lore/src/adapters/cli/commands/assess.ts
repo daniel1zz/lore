@@ -234,7 +234,8 @@ export default defineLoreCommand({
           return ASSESS_EXIT_LEASE_HELD;
         }
         batchLease = granted.value.handle;
-        printLine(inv.io.stdout, `review batch holds ${key}${machine === UNKNOWN_MACHINE_ID ? " (machine identity unreadable: every such process shares this key)" : ""}`);
+        // reason: stderr is the notice channel; stdout must stay pure JSON under --json.
+        printLine(inv.io.stderr, `review batch holds ${key}${machine === UNKNOWN_MACHINE_ID ? " (machine identity unreadable: every such process shares this key)" : ""}`);
       }
       let planRefs: string[];
       if (needsReview) {

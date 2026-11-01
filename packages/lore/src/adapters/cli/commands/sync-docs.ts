@@ -115,10 +115,19 @@ export default defineLoreCommand({
           const filename = entry.file.split("/").pop() ?? entry.file;
           inv.io.stdout.write(`    ${filename}  →  ${entry.slug}\n`);
         }
-        inv.io.stdout.write(
-          `  To push file → corpus, manually strip the YAML frontmatter and run:\n` +
-            `    lore set <slug> --content-file <stripped-file>\n`,
-        );
+        if (report.matched_drift.some((entry) => entry.structured !== true)) {
+          inv.io.stdout.write(
+            `  To push file → corpus, manually strip the YAML frontmatter and run:\n` +
+              `    lore set <slug> --content-file <stripped-file>\n`,
+          );
+        }
+        if (report.matched_drift.some((entry) => entry.structured === true)) {
+          // reason: a structured file's content is its `fields:`; the corpus body of a templated document is rendered, so a body is refused.
+          inv.io.stdout.write(
+            `  A file with front matter \`fields:\` differs in its fields; to push it, write them to a file (\`fields:\` and \`dimensions:\`) and run:\n` +
+              `    lore set <slug> --fields-file <fields-file>\n`,
+          );
+        }
       }
 
       if (report.errors.length > 0) {

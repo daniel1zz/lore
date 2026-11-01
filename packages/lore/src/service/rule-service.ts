@@ -144,6 +144,13 @@ export interface AddNodeInput {
   label: string;
   title: string;
   content: string;
+  /**
+   * BR-1528: the node's structured content (`extra.fields`) and dimension answers, validated by the create path against the
+   * approved template of the node's kind (`baseline/root|branch|leaf` ...). When `fields` is given the node is created
+   * structured and its body is rendered from them, so `content` must be empty.
+   */
+  fields?: Record<string, unknown>;
+  dimensions?: unknown[];
 }
 
 /** Create port: the production wiring injects `corpusService.create` so gates and provenance guards apply. */
@@ -508,7 +515,14 @@ export class RuleService {
         parent_id: parentDoc.value.id,
         // reason: `tree` is written only for the architecture tree — an absent tree means business, so a
         // business node's stored `extra` stays byte-identical to what it was before the architecture tree.
-        extra: { ...(input.tree === "architecture" ? { tree: "architecture" } : {}), node: node.data, label: input.label },
+        // reason: BR-1528 — `fields`/`dimensions` are written only when supplied; the create path then validates them against
+        // the node kind's template and renders the body (a supplied body is refused there, loudly).
+        extra: {
+          ...(input.tree === "architecture" ? { tree: "architecture" } : {}),
+          node: node.data,
+          label: input.label,
+          ...(input.fields !== undefined ? { fields: input.fields, dimensions: input.dimensions ?? [] } : {}),
+        },
       } as CreateDocInput,
       opts?.by !== undefined ? { by: opts.by } : undefined,
     );

@@ -3,7 +3,6 @@
 // @spawns-external sh the main-guard fixture resolves the real git path through sh
 // @reads assets/project/reference-transaction
 // @reads assets/project/lore-config-template.yaml
-// @reads assets/governance/write-spec-rule.md
 /**
  * @spec_ref spec-session-start-injection-carries-only-the-session-s-own — AC-SI-2, AC-SI-4.
  *

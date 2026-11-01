@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/templates/**
 /**
  * AC-PAR-2 — every internal creator passes its parent explicitly (BR-709), because `CorpusService.create` refuses a
  * knowledge record without one:
@@ -71,6 +72,8 @@ describe("AC-PAR-2: lore handoff files under its plan, else the requirements doc
   let corpus: PartyCorpus;
   beforeEach(() => {
     corpus = createPartyCorpus("internal-creators-handoff");
+    // BR-1528: a handoff is created structured through the approved `knowledge/handoff` template.
+    corpus.setup(["migrate", "templates", "--apply"], RUN);
   });
   afterEach(() => corpus.cleanup());
 

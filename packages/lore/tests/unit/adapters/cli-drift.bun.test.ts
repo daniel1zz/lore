@@ -1,6 +1,5 @@
 // @reads scripts/check-unclaimed-oracle.ts
 // @reads assets/project/lore-config-template.yaml
-// @reads assets/governance/write-spec-rule.md
 /**
  * `lore status --check-tree` / `--check-drift` composition, `lore anchor` spec-target
  * dispatch (exercised indirectly via `lore create spec --code-anchor`), and the

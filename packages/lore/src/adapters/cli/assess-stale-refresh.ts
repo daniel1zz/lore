@@ -28,6 +28,7 @@ import type { CriterionRerunPort } from "../../service/decision-recheck.js";
 import type { StaleAcRefresherPort } from "../../service/milestone-review-inputs.js";
 import type { VerifyPlanResult, VerifyRunnerService } from "../../service/verify-runner-service.js";
 import type { App } from "../../app.js";
+import { adhocVerifyTaskFields, withGeneratedFields } from "../../service/generated-fields.js";
 
 /** Dependencies of {@link createVerifyStaleRefresher}. */
 export interface VerifyStaleRefresherDeps {
@@ -106,15 +107,18 @@ function createAppStaleRefresherDeps(
       return ok(spec.value.doc);
     },
     createAdhocTask: (title, acId, spec) =>
+      // reason: BR-1528 — created structured through the `task` template; the body is rendered from the fields.
       app.corpusService.create(
-        {
-          type: "task",
-          title,
-          content: `Re-verifies ${acId} of ${spec.slug} for the milestone review.`,
-          priority: "low",
-          // AC-DCS1-4 (BR-1488): a re-verification proves something at main's head and changes nothing — a `check` task.
-          extra: { adhoc: true, ac_scope: [acId], governing_spec: spec.id, kind: "check" },
-        },
+        withGeneratedFields(
+          {
+            type: "task",
+            title,
+            priority: "low",
+            // AC-DCS1-4 (BR-1488): a re-verification proves something at main's head and changes nothing — a `check` task.
+            extra: { adhoc: true, ac_scope: [acId], governing_spec: spec.id, kind: "check" },
+          },
+          adhocVerifyTaskFields({ acId, specSlug: spec.slug }),
+        ),
         { by: opts.by },
       ),
     executionRoot: opts.executionRoot,

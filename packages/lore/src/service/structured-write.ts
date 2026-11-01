@@ -30,7 +30,8 @@ export interface StructuredWriteDeps {
   /**
    * When true a NEW document of any type must be created structured (BR-1528); when false only a create that
    * supplies `extra.fields` (or a `template_ref`) is structured and a plain create keeps today's free body.
-   * Source: `workflow.structured_documents.require_create` (default false until the open documents are converted).
+   * Source: `workflow.structured_documents.require_create` (default false until the open documents are converted;
+   * a later task deletes the switch after the test migration).
    */
   readonly requireStructuredCreate: boolean;
 }
@@ -145,6 +146,33 @@ export async function prepareStructuredCreate(
   return ok({ extra, content: rendered.value });
 }
 
+/** The conversion of a legacy document: pin the latest approved template, validate the drafted content, render it. */
+async function prepareConversion(
+  deps: StructuredWriteDeps,
+  existing: DocRecord,
+  patch: { readonly content?: string | undefined; readonly extra?: Record<string, unknown> | undefined },
+  storedRef: string | undefined,
+): Promise<Result<StructuredOutcome | null, LoreError>> {
+  if (storedRef !== undefined) {
+    return err(validationError("extra.template_ref", `${existing.slug} is already converted (${storedRef}); edit it with --fields-file`));
+  }
+  const extraIn = patch.extra;
+  if (extraIn === undefined || !isRecord(extraIn["fields"])) {
+    return err(validationError("extra.fields", `converting ${existing.slug} needs the drafted fields`));
+  }
+  const kind = documentKindOf({ type: existing.type, extra: extraIn });
+  const resolved = await deps.templates.resolveTemplate(existing.type, kind);
+  if (!resolved.ok) return resolved;
+  const extra: Record<string, unknown> = {
+    ...extraIn,
+    template_ref: resolved.value.ref,
+    dimensions: extraIn["dimensions"] ?? [],
+  };
+  const rendered = await validateAndRender(deps, { slug: existing.slug, type: existing.type, extra });
+  if (!rendered.ok) return rendered;
+  return ok({ extra, content: rendered.value });
+}
+
 /**
  * Prepare a change to an EXISTING document.
  *
@@ -159,9 +187,15 @@ export async function prepareStructuredUpdate(
   deps: StructuredWriteDeps,
   existing: DocRecord,
   patch: { readonly content?: string | undefined; readonly extra?: Record<string, unknown> | undefined },
-  request: { readonly fieldsPatch?: FieldsPatch | undefined; readonly templateVersion?: "latest" | undefined },
+  request: {
+    readonly fieldsPatch?: FieldsPatch | undefined;
+    readonly templateVersion?: "latest" | undefined;
+    /** `lore convert`: turn an unconverted document into a templated one from `patch.extra.fields` / `dimensions`. */
+    readonly convert?: boolean | undefined;
+  },
 ): Promise<Result<StructuredOutcome | null, LoreError>> {
   const storedRef: unknown = existing.extra["template_ref"];
+  if (request.convert === true) return prepareConversion(deps, existing, patch, typeof storedRef === "string" && storedRef !== "" ? storedRef : undefined);
   const suppliedRef: unknown = patch.extra?.["template_ref"];
   const templated = typeof storedRef === "string" && storedRef !== "";
   const wantsStructure = request.fieldsPatch !== undefined || request.templateVersion !== undefined || typeof suppliedRef === "string";

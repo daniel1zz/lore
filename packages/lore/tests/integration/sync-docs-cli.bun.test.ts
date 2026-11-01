@@ -1,4 +1,5 @@
 // @spawns packages/lore/src/index.ts
+// @reads assets/templates/**
 /**
  * Integration tests for `lore sync-docs` CLI subcommand.
  * Uses real CLI invocations against isolated temp directories with real lore.db.
@@ -14,6 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { fillShippedTemplate } from "../helpers/structured-corpus-wiring.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -57,6 +59,11 @@ function writeSpecFile(
     tags?: string[];
     priority?: string;
     body?: string;
+    /**
+     * A structured file (BR-1528): the content is the front matter's `fields:` / `dimensions:`, filled from the shipped
+     * `spec/feature` seed with this text as the goal statement (what a drift test changes), and the body is empty.
+     */
+    structured?: string;
   },
 ): void {
   const fm: string[] = ["---"];
@@ -65,8 +72,13 @@ function writeSpecFile(
   if (opts.parent !== undefined) fm.push(`parent: "${opts.parent}"`);
   if (opts.priority !== undefined) fm.push(`priority: ${opts.priority}`);
   if (opts.tags !== undefined) fm.push(`tags: [${opts.tags.map((t) => `"${t}"`).join(", ")}]`);
+  if (opts.structured !== undefined) {
+    const filled = fillShippedTemplate("spec", "feature");
+    fm.push(`fields: ${JSON.stringify({ ...filled.fields, goal: { statement: opts.structured, measure: "a measured outcome" } })}`);
+    fm.push(`dimensions: ${JSON.stringify(filled.dimensions)}`);
+  }
   fm.push("---");
-  const body = opts.body ?? `# ${opts.title}\n\nSpec body content.`;
+  const body = opts.structured !== undefined ? "" : (opts.body ?? `# ${opts.title}\n\nSpec body content.`);
   writeFileSync(join(dir, filename), fm.join("\n") + "\n" + body, "utf8");
 }
 
@@ -113,6 +125,9 @@ beforeEach(() => {
     throw new Error(`lore init failed: ${initResult.stderr}`);
   }
   disableAllGates(tmpDir);
+  // BR-1528: a new spec is created structured through the approved `spec/feature` template.
+  const seeded = runLore(["migrate", "templates", "--apply"], tmpDir);
+  if (seeded.exitCode !== 0) throw new Error(`lore migrate templates --apply failed: ${seeded.stderr}`);
   // Create a PRD so specs have a parent.
   // reason: --no-ai skips the AI generation step (AC-AI-2) and uses a blank document,
   // which is sufficient for testing the sync-docs parent resolution logic.
@@ -136,21 +151,9 @@ describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-1 e2e �
     const specDir = join(tmpDir, "docs", "requirements", "spec");
     mkdirSync(specDir, { recursive: true });
 
-    writeSpecFile(specDir, "SPEC-001.md", {
-      title: "Auth Spec",
-      parent: "Integration PRD",
-      body: "# Auth Spec\n\nBody content.",
-    });
-    writeSpecFile(specDir, "SPEC-002.md", {
-      title: "Storage Spec",
-      parent: "Integration PRD",
-      body: "# Storage Spec\n\nBody content.",
-    });
-    writeSpecFile(specDir, "SPEC-003.md", {
-      title: "API Spec",
-      parent: "Integration PRD",
-      body: "# API Spec\n\nBody content.",
-    });
+    writeSpecFile(specDir, "SPEC-001.md", { title: "Auth Spec", parent: "Integration PRD", structured: "Auth works" });
+    writeSpecFile(specDir, "SPEC-002.md", { title: "Storage Spec", parent: "Integration PRD", structured: "Storage works" });
+    writeSpecFile(specDir, "SPEC-003.md", { title: "API Spec", parent: "Integration PRD", structured: "The API works" });
 
     const result = runLore(["sync-docs", "--from", specDir], tmpDir);
     expect(result.exitCode).toBe(0);
@@ -165,11 +168,7 @@ describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-2 — --
     const specDir = join(tmpDir, "docs", "requirements", "spec");
     mkdirSync(specDir, { recursive: true });
 
-    writeSpecFile(specDir, "SPEC-001.md", {
-      title: "Dry Run Test Spec",
-      parent: "Integration PRD",
-      body: "# Dry Run Test Spec\n\nBody.",
-    });
+    writeSpecFile(specDir, "SPEC-001.md", { title: "Dry Run Test Spec", parent: "Integration PRD", structured: "Dry run works" });
 
     const dryResult = runLore(["sync-docs", "--from", specDir, "--dry-run"], tmpDir);
     expect(dryResult.exitCode).toBe(0);
@@ -201,11 +200,7 @@ describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-5 — --
     const specDir = join(tmpDir, "docs", "requirements", "spec");
     mkdirSync(specDir, { recursive: true });
 
-    writeSpecFile(specDir, "SPEC-001.md", {
-      title: "JSON Test Spec",
-      parent: "Integration PRD",
-      body: "# JSON Test Spec\n\nBody.",
-    });
+    writeSpecFile(specDir, "SPEC-001.md", { title: "JSON Test Spec", parent: "Integration PRD", structured: "JSON works" });
 
     const result = runLore(["sync-docs", "--from", specDir, "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
@@ -239,22 +234,22 @@ describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-5 drift 
     const specDir = join(tmpDir, "docs", "requirements", "spec");
     mkdirSync(specDir, { recursive: true });
 
-    // Step 1: Create spec file with body "AAAA"
+    // Step 1: Create spec file whose goal statement is "AAAA"
     writeSpecFile(specDir, "SPEC-drift-same-len.md", {
       title: "Drift SameLength Spec",
       parent: "Integration PRD",
-      body: "AAAA",
+      structured: "AAAA",
     });
 
     // Step 2: Sync to create in corpus
     const createResult = runLore(["sync-docs", "--from", specDir], tmpDir);
     expect(createResult.exitCode).toBe(0);
 
-    // Step 3: Modify file to same-length but different body "BBBB"
+    // Step 3: Modify file to a same-length but different goal statement "BBBB"
     writeSpecFile(specDir, "SPEC-drift-same-len.md", {
       title: "Drift SameLength Spec",
       parent: "Integration PRD",
-      body: "BBBB",
+      structured: "BBBB",
     });
 
     // Step 4: Run sync-docs in dry-run JSON mode — must detect drift
@@ -278,22 +273,22 @@ describe("spec-lore-sync-docs-backfill-new-spec-files-into-corpus#AC-SD-5 drift 
     const specDir = join(tmpDir, "docs", "requirements", "spec");
     mkdirSync(specDir, { recursive: true });
 
-    // Step 1: Create spec file with body "AAA" (3 chars)
+    // Step 1: Create spec file whose goal statement is "AAA" (3 chars)
     writeSpecFile(specDir, "SPEC-drift-diff-len.md", {
       title: "Drift DiffLength Spec",
       parent: "Integration PRD",
-      body: "AAA",
+      structured: "AAA",
     });
 
     // Step 2: Sync to create in corpus
     const createResult = runLore(["sync-docs", "--from", specDir], tmpDir);
     expect(createResult.exitCode).toBe(0);
 
-    // Step 3: Modify file to different-length body "BBBBB" (5 chars)
+    // Step 3: Modify file to a different-length goal statement "BBBBB" (5 chars)
     writeSpecFile(specDir, "SPEC-drift-diff-len.md", {
       title: "Drift DiffLength Spec",
       parent: "Integration PRD",
-      body: "BBBBB",
+      structured: "BBBBB",
     });
 
     // Step 4: Run sync-docs in dry-run JSON mode — must detect drift
@@ -325,16 +320,16 @@ describe("Bug B — drift hint shows slug and mentions --content-file", () => {
     writeSpecFile(specDir, "SPEC-hint-test.md", {
       title: "Hint Test Spec",
       parent: "Integration PRD",
-      body: "Original body content.",
+      structured: "Original goal",
     });
     const createResult = runLore(["sync-docs", "--from", specDir], tmpDir);
     expect(createResult.exitCode).toBe(0);
 
-    // Step 2: Modify file body so drift is detected
+    // Step 2: Modify the file's fields so drift is detected
     writeSpecFile(specDir, "SPEC-hint-test.md", {
       title: "Hint Test Spec",
       parent: "Integration PRD",
-      body: "Updated body content — this differs from corpus.",
+      structured: "Updated goal — this differs from corpus.",
     });
 
     // Step 3: Run sync-docs (human mode, not --json) and capture stdout
@@ -343,8 +338,9 @@ describe("Bug B — drift hint shows slug and mentions --content-file", () => {
 
     const out = driftResult.stdout;
 
-    // Hint must mention --content-file (not the old --content "$(cat ...)" form)
-    expect(out).toContain("--content-file");
+    // A structured file's content is its fields, so the hint names --fields-file; a body (--content-file) is refused for a templated doc
+    expect(out).toContain("--fields-file");
+    expect(out).not.toContain("--content-file");
 
     // Hint must show the slug (format: <filename>  →  <slug>)
     expect(out).toContain("→");

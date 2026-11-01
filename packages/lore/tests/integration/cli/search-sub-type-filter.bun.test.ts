@@ -97,6 +97,9 @@ interface SearchHitRecord {
 function initCorpus(dir: string): void {
   const result = runLore(["init"], dir);
   if (result.exitCode !== 0) throw new Error(`lore init failed: ${result.stderr}`);
+  // BR-1528: `lore handoff` creates the document structured through the approved `knowledge/handoff` template.
+  const seeded = runLore(["migrate", "templates", "--apply"], dir);
+  if (seeded.exitCode !== 0) throw new Error(`lore migrate templates --apply failed: ${seeded.stderr}`);
 }
 
 /**

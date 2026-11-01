@@ -143,6 +143,9 @@ beforeEach(() => {
   makeCleanTreeRepo(tmpDir);
   const initResult = runLore(["init"], tmpDir);
   expect(initResult.exitCode).toBe(0);
+  // BR-1528: `lore handoff` creates the document structured through the approved `knowledge/handoff` template.
+  const seeded = runLore(["migrate", "templates", "--apply"], tmpDir);
+  expect(seeded.exitCode, seeded.stderr + seeded.stdout).toBe(0);
   // reason: plans are judged by default (BR-281 / BR-1237); these fixtures approve a plan only to reach the
   // archive behaviour under test, never review-judgment. `disablePlanCloseGate` below merges into the same file.
   patchLoreConfig(tmpDir, "workflow:\n  review:\n    judgment_required_types: []\n");

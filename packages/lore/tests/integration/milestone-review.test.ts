@@ -386,6 +386,9 @@ beforeEach(() => {
   installFakeSuiteScripts();
   installFakeGh();
   expect(runLore(["init"], tmpDir).exitCode).toBe(0);
+  // BR-1528: the review document and the ad-hoc refresh tasks are created structured through the approved templates.
+  const seeded = runLore(["migrate", "templates", "--apply"], tmpDir);
+  expect(seeded.exitCode, seeded.stderr + seeded.stdout).toBe(0);
   patchLoreConfig(tmpDir, "workflow:\n  review:\n    judgment_required_types: []\n");
   installJudge(judgeAnswer(), judgeAnswer());
   const prd = runLore(["create", "prd", "--title", "Review PRD", "--content", "root", "--no-ai"], tmpDir);
