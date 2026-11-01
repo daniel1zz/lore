@@ -41,6 +41,7 @@ import { createApp } from "../../../src/app.js";
 import { saveConfig } from "@lore/core/node";
 import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 // ─── Command type ─────────────────────────────────────────────────────────────
 
@@ -231,8 +232,8 @@ describe("lore create prd — --content flag skips AI (AC-AI-3)", () => {
       await runCmd(cmd, {
         type: "prd",
         title: "Manual PRD",
-        content: "# My Manual Content\n",
-        ai: true, // ai=true but content is provided → AI is bypassed
+        "fields-file": templatedFieldsArgs("prd")[1],
+        ai: true, // ai=true but a fields file is provided → AI is bypassed
       });
     } finally {
       output.restore();
@@ -258,7 +259,7 @@ describe("lore create prd — --no-ai flag (AC-AI-2)", () => {
       await runCmd(cmd, {
         type: "prd",
         title: "No-AI PRD",
-        content: "# From Editor\n",
+        "fields-file": templatedFieldsArgs("prd")[1],
         ai: false, // --no-ai
       });
     } finally {

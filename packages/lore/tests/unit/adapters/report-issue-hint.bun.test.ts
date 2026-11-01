@@ -50,6 +50,7 @@ import { tmpdir } from "os";
 import { saveConfig } from "@lore/core/node";
 import { buildReportIssueHint } from "../../../src/adapters/cli/report-issue-hint.js";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 // tests/unit/adapters/ -> tests/unit/ -> tests/ -> packages/lore/ -> packages/ -> repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -242,7 +243,7 @@ describe("AC-073-2: hint scoping negatives — a usage error and a plain non-gat
     configureUpstream(tmpDir);
 
     const created = await runLore(
-      ["create", "prd", "--title", "Probe Root", "--content", "x", "--json"],
+      ["create", "prd", "--title", "Probe Root", ...templatedFieldsArgs("prd"), "--json"],
       tmpDir,
     );
     expect(created.exitCode).toBe(0);
@@ -362,7 +363,7 @@ describe("REGRESSION: the hint wiring never fires on an ALLOW branch", () => {
     configureUpstream(tmpDir);
 
     const prdResult = await runLore(
-      ["create", "prd", "--title", "Root", "--content", "x", "--json"],
+      ["create", "prd", "--title", "Root", ...templatedFieldsArgs("prd"), "--json"],
       tmpDir,
     );
     expect(prdResult.exitCode).toBe(0);

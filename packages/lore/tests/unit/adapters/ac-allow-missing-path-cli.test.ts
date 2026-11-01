@@ -57,6 +57,7 @@ import { spawnSync } from "child_process";
 import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -120,7 +121,7 @@ describe("PRODUCTION WIRING — lore ac add --allow-missing-path + lore status -
     { timeout: 60_000 },
     () => {
       const prd = runLore(
-        ["create", "prd", "--title", "AC-OX-10 PRD", "--content", "root", "--no-ai"],
+        ["create", "prd", "--title", "AC-OX-10 PRD", ...templatedFieldsArgs("prd"), "--no-ai"],
         tmpDir,
       );
       if (prd.exitCode !== 0) throw new Error(`create prd failed: ${prd.stderr}`);
@@ -132,8 +133,7 @@ describe("PRODUCTION WIRING — lore ac add --allow-missing-path + lore status -
           "spec",
           "--title",
           "AC-OX-10 Spec",
-          "--content",
-          "## Overview/Goal\nbody",
+          ...templatedFieldsArgs("spec", { kind: "feature" }),
           "--no-ai",
         ],
         tmpDir,

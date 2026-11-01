@@ -55,6 +55,7 @@ import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { planFieldsArgs, templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root.
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -123,9 +124,9 @@ beforeAll(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-get-structured-extra-"));
   await mustRun(["init"], tmpDir);
 
-  const prdSlug = parseSlug((await mustRun(["create", "prd", "--title", "Extra Notice Root", "--no-ai", "--content", "body"], tmpDir)).stdout);
+  const prdSlug = parseSlug((await mustRun(["create", "prd", "--title", "Extra Notice Root", "--no-ai", ...templatedFieldsArgs("prd")], tmpDir)).stdout);
   const planSlug = parseSlug(
-    (await mustRun(["create", "plan", "--title", "Extra Notice Plan", "--no-ai", "--parent", prdSlug, "--content", "body"], tmpDir)).stdout,
+    (await mustRun(["create", "plan", "--title", "Extra Notice Plan", "--no-ai", "--parent", prdSlug, ...planFieldsArgs(prdSlug)], tmpDir)).stdout,
   );
   taskSlug = parseSlug(
     (await mustRun(
@@ -136,7 +137,7 @@ beforeAll(async () => {
         "--parent", planSlug,
         "--plan-id", planSlug,
         "--no-ai",
-        "--content", "Task body.",
+        ...templatedFieldsArgs("task"),
         "--anchor", "src/first.ts",
         "--anchor", "src/second.ts",
       ],
@@ -145,7 +146,7 @@ beforeAll(async () => {
   );
   plainKnowledgeSlug = parseSlug(
     (await mustRun(
-      ["create", "knowledge", "--title", "Extra Notice Plain", "--sub-type", "reference", "--no-ai", "--parent", prdSlug, "--content", "Plain body."],
+      ["create", "knowledge", "--title", "Extra Notice Plain", "--sub-type", "reference", "--no-ai", "--parent", prdSlug, ...templatedFieldsArgs("knowledge", { kind: "reference" })],
       tmpDir,
     )).stdout,
   );

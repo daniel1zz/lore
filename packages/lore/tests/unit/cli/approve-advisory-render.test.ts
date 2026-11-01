@@ -46,6 +46,7 @@ import { tmpdir } from "os";
 import { saveConfig } from "@lore/core/node";
 import type { LoreConfig } from "@lore/core";
 import { citeSpecViaCli } from "../../helpers/cli-live-rule.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 // tests/unit/cli/ → tests/unit/ → tests/ → packages/lore/
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -122,14 +123,14 @@ function writeConfig(dir: string): void {
 }
 
 function createPrd(dir: string, title: string): string {
-  const r = runLore(["create", "prd", "--title", title, "--content", "PRD body.", "--no-ai"], dir);
+  const r = runLore(["create", "prd", "--title", title, ...templatedFieldsArgs("prd"), "--no-ai"], dir);
   if (r.exitCode !== 0) throw new Error(`create prd failed: ${r.stderr}`);
   return parseSlug(r.stdout);
 }
 
 function createSpec(dir: string, parentSlug: string, title: string): string {
   const r = runLore(
-    ["create", "spec", "--title", title,"--content", "## Overview\n\nBody.", "--no-ai"],
+    ["create", "spec", "--title", title, ...templatedFieldsArgs("spec", { kind: "feature" }), "--no-ai"],
     dir,
   );
   if (r.exitCode !== 0) throw new Error(`create spec failed: ${r.stderr}`);
@@ -199,7 +200,7 @@ function approveDoc(dir: string, slug: string): RunResult {
 
 function createPlan(dir: string, parentSlug: string, title: string): string {
   const r = runLore(
-    ["create", "plan", "--title", title, "--parent", parentSlug, "--content", "## Plan\n\nbody", "--no-ai"],
+    ["create", "plan", "--title", title, "--parent", parentSlug, ...planFieldsArgs(parentSlug), "--no-ai"],
     dir,
   );
   if (r.exitCode !== 0) throw new Error(`create plan failed: ${r.stderr}`);

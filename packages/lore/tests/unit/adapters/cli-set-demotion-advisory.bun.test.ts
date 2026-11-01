@@ -32,6 +32,7 @@ import { readFileSync } from "node:fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { liveInvocation, runHandlerForExit } from "../../live-invocation.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 import type { Invocation } from "@lore/core";
 
 type RunnableCommand = {
@@ -163,6 +164,13 @@ async function initLoreDb(): Promise<void> {
   }
 }
 
+/** Writes a partial `--fields-file` that changes the prd's `goals.statement`; returns its path. */
+function writeGoalsPatch(name: string, statement: string): string {
+  const path = join(tmpDir, name);
+  writeFileSync(path, JSON.stringify({ fields: { goals: { statement, measure: "sample" } } }), "utf8");
+  return path;
+}
+
 /** Creates a draft `prd` doc (no parent required, no gate on approval) and returns its slug. */
 async function createDraftPrd(createCmd: RunnableCommand, title: string): Promise<string> {
   const out = captureOutput();
@@ -170,7 +178,7 @@ async function createDraftPrd(createCmd: RunnableCommand, title: string): Promis
     await runCmd(createCmd, {
       type: "prd",
       title,
-      content: "## Overview\n\nbody",
+      "fields-file": templatedFieldsArgs("prd")[1],
       ai: false,
     });
   } finally {
@@ -219,13 +227,12 @@ describe("lore set — approved→draft demotion advisory on the standard patch 
     await setStatus(setCmd, slug, "approved");
     expect(await getDocStatus(getCmd, slug)).toBe("approved");
 
-    const contentFile = join(tmpDir, "new-content.md");
-    writeFileSync(contentFile, "## Overview\n\nupdated body\n", "utf8");
+    const contentFile = writeGoalsPatch("new-content.json", "updated body");
 
     const out = captureOutput();
     const exit = captureExit();
     try {
-      await runCmd(setCmd, { id: slug, "content-file": contentFile });
+      await runCmd(setCmd, { id: slug, "fields-file": contentFile });
     } finally {
       out.restore();
     }
@@ -244,13 +251,12 @@ describe("lore set — approved→draft demotion advisory on the standard patch 
     const slug = await createDraftPrd(createCmd, "Negative Path Doc");
     expect(await getDocStatus(getCmd, slug)).toBe("draft");
 
-    const contentFile = join(tmpDir, "new-content-negative.md");
-    writeFileSync(contentFile, "## Overview\n\nupdated body (still draft)\n", "utf8");
+    const contentFile = writeGoalsPatch("new-content-negative.json", "updated body (still draft)");
 
     const out = captureOutput();
     const exit = captureExit();
     try {
-      await runCmd(setCmd, { id: slug, "content-file": contentFile });
+      await runCmd(setCmd, { id: slug, "fields-file": contentFile });
     } finally {
       out.restore();
     }
@@ -288,8 +294,7 @@ describe("lore set — approved→draft demotion advisory on the standard patch 
     await initLoreDb();
     const { cmd: setCmd } = await importSetCommand();
 
-    const contentFile = join(tmpDir, "new-content-error.md");
-    writeFileSync(contentFile, "## Overview\n\nbody\n", "utf8");
+    const contentFile = writeGoalsPatch("new-content-error.json", "body");
 
     const out = captureOutput();
     // reason: this failure path sets `process.exitCode` (a property, checked at process
@@ -298,7 +303,7 @@ describe("lore set — approved→draft demotion advisory on the standard patch 
     // throughout this command (e.g. the --kind branch's resolve/get failures). So the
     // assertion reads `process.exitCode` itself, not a `process.exit()` spy.
     try {
-      await runCmd(setCmd, { id: "prd-does-not-exist", "content-file": contentFile });
+      await runCmd(setCmd, { id: "prd-does-not-exist", "fields-file": contentFile });
     } finally {
       out.restore();
     }

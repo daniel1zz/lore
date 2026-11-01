@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 let dir = "";
 let leafA = "";
@@ -57,7 +58,7 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "rule-propose-op-flags-reg-"));
   await loreOk(["init"]);
   patchLoreConfig(dir, ["workflow:", "  review:", "    judgment_required_types: []", "  gates:", "    spec-create:", "      enabled: false", "    spec-promote:", "      enabled: false", ""].join("\n"));
-  const prd = slugOf(await loreOk(["create", "prd", "--title", "Fixture PRD", "--no-ai", "--content", "## Overview\n\nFixture body.", "--json"]));
+  const prd = slugOf(await loreOk(["create", "prd", "--title", "Fixture PRD", "--no-ai", ...templatedFieldsArgs("prd"), "--json"]));
   const chain = async (label: string): Promise<string> => {
     const root = slugOf(await loreOk(["baseline", "add", prd, "--node", "root", "--label", `Root${label}`, "--title", `Root ${label}`]));
     const branch = slugOf(await loreOk(["baseline", "add", root, "--node", "branch", "--label", `Branch${label}`, "--title", `Branch ${label}`]));
@@ -72,7 +73,7 @@ afterAll(() => {
 });
 
 async function proposed(title: string): Promise<{ spec: string; id: string }> {
-  const spec = slugOf(await loreOk(["create", "spec", "--title", title, "--kind", "feature", "--no-ai", "--content", "## Overview\n\nFixture body.", "--json"]));
+  const spec = slugOf(await loreOk(["create", "spec", "--title", title, "--kind", "feature", "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature" }), "--json"]));
   const out = await loreOk(["rule", "propose", spec, "add", "--leaf", leafA, "--statement", "original wording", "--enforced-by", "both", "--example", "example one"]);
   const id = out.match(/\bBR-\d+\b/)?.[0];
   if (id === undefined) throw new Error(`no rule id in: ${out}`);

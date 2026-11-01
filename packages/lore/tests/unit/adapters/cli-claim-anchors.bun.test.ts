@@ -71,6 +71,7 @@ import { sessionActorFor, withSessionIdentity } from "../../helpers/session-acto
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -109,7 +110,7 @@ async function initCorpus(tmpDir: string): Promise<void> {
 }
 
 async function createPlan(tmpDir: string, title: string): Promise<string> {
-  const result = await runLore(["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)), "--title", title, "--content", "Plan body.", "--no-ai"], tmpDir);
+  const result = await runLore(["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)), "--title", title, ...templatedFieldsArgs("plan"), "--no-ai"], tmpDir);
   if (result.exitCode !== 0) throw new Error(`create plan failed: ${result.stderr}`);
   return parseSlug(result.stdout);
 }
@@ -127,8 +128,7 @@ async function createTask(tmpDir: string, planSlug: string, title: string, ancho
     "--plan-id",
     planSlug,
     "--no-ai",
-    "--content",
-    "Task body.",
+    ...templatedFieldsArgs("task"),
   ];
   for (const anchor of anchors) {
     args.push("--anchor", anchor);
@@ -182,8 +182,7 @@ describe("lore create task --anchor — HAPPY", () => {
         "--anchor",
         "src/b/",
         "--no-ai",
-        "--content",
-        "body",
+        ...templatedFieldsArgs("task"),
         "--json",
       ],
       tmpDir,
@@ -202,7 +201,7 @@ describe("lore create task (no --anchor) — REGRESSION", () => {
   it("omitting --anchor entirely leaves extra.file_anchors absent (unchanged pre-SPEC-042 create behavior)", async () => {
     const planSlug = await createPlan(tmpDir, "No Anchor Plan");
     const result = await runLore(
-      ["create", "task", "--title", "Plain Task", "--kind", "code", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body", "--json"],
+      ["create", "task", "--title", "Plain Task", "--kind", "code", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", ...templatedFieldsArgs("task"), "--json"],
       tmpDir,
     );
 
@@ -232,8 +231,7 @@ describe("lore create task --anchor <invalid> — NEGATIVE", () => {
         "--anchor",
         "/absolute/path",
         "--no-ai",
-        "--content",
-        "body",
+        ...templatedFieldsArgs("task"),
       ],
       tmpDir,
     );
