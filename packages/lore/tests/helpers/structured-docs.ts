@@ -17,7 +17,6 @@
  */
 
 import { parseConfig, type CreateDocInput, type DimensionAnswer, type DocRecord, type JsonSchemaNode, type LoreConfig, type Template } from "@lore/core";
-import { fileURLToPath } from "node:url";
 import type { App } from "../../src/app.js";
 import { readShippedTemplateSeeds } from "../../src/adapters/cli/template-seeds.js";
 import { TemplateSeedService } from "../../src/service/template-seed-service.js";
@@ -47,14 +46,14 @@ export async function seedTemplatesWith(lore: (args: string[]) => Promise<{ exit
 
 /**
  * Seed every shipped template into an App's corpus directly (a test that builds its own `createApp` and has no CLI runner).
- * The seeds are read from the repository's `assets/templates/`, so a test using it declares `// @reads assets/templates/**`.
+ * The seeds are the statically imported shipped set (no file read, so a test using it declares no assets read).
  *
  * @param app - an App whose writes are made by a known party (`createLiveApp`, or `createApp(..., liveWriteContext())`)
  * @throws when a seed is invalid or a write is refused
  */
 export async function seedTemplatesInApp(app: App): Promise<void> {
   if (app.templateService === undefined) throw new Error("seedTemplatesInApp: the App has no template service");
-  const seeds = readShippedTemplateSeeds(fileURLToPath(new URL("../../../../assets", import.meta.url)));
+  const seeds = readShippedTemplateSeeds();
   if (!seeds.ok) throw new Error(`seedTemplatesInApp: ${JSON.stringify(seeds.error)}`);
   await must(new TemplateSeedService(app.templateService, app.corpusService).apply(seeds.value), "seed templates");
 }

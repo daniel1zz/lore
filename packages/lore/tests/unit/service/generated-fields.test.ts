@@ -1,4 +1,3 @@
-// @reads assets/templates/**
 /**
  * @spec_ref spec-every-document-is-stored-as-structured-fields-validated-by (BR-1528)
  *
@@ -18,7 +17,6 @@
 
 import { describe, expect, it } from "vitest";
 import { DEGRADED_HANDOFF_MARKER, MILESTONE_DIMENSIONS, handoffExtraSchema, milestoneReviewSchema, renderDocument, validateDocument, type Template } from "@lore/core";
-import { fileURLToPath } from "node:url";
 import { readShippedTemplateSeeds } from "../../../src/adapters/cli/template-seeds.js";
 import {
   adhocVerifyTaskFields,
@@ -31,7 +29,7 @@ import {
 } from "../../../src/service/generated-fields.js";
 import type { FidelityRecord } from "../../../src/service/fidelity-sample.js";
 
-const readSeeds = readShippedTemplateSeeds(fileURLToPath(new URL("../../../../../assets", import.meta.url)));
+const readSeeds = readShippedTemplateSeeds();
 if (!readSeeds.ok) throw new Error(`shipped seeds unreadable: ${JSON.stringify(readSeeds.error)}`);
 const shippedSeeds = readSeeds.value;
 

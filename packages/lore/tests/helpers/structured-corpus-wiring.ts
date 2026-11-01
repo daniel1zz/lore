@@ -7,12 +7,11 @@
  *   must not import; this file imports only services, the in-memory store and the shipped-seed reader.
  * Public surface: {@link wireStructuredCorpus}, {@link seededTemplateReader}, {@link fillTemplate}, {@link fillShippedTemplate}.
  * Invariants:
- *   - Seeds come from the repository's `assets/templates/`; a test using either function declares `// @reads assets/templates/**`.
+ *   - Seeds are the statically imported shipped set (`template-seeds.ts`); no file is read, so no `@reads` is declared.
  *   - A refused fixture write throws with the error; it never continues.
  * Side-effect class: IO (reads the shipped seeds; writes template documents into the corpus it is given).
  */
 
-import { fileURLToPath } from "node:url";
 import type { DimensionAnswer, JsonSchemaNode, LoreError, Result, Template } from "@lore/core";
 import { readShippedTemplateSeeds } from "../../src/adapters/cli/template-seeds.js";
 import { CorpusService } from "../../src/service/corpus-service.js";
@@ -42,7 +41,7 @@ async function must<T>(result: Promise<Result<T, LoreError>>, what: string): Pro
 export async function wireStructuredCorpus(corpus: CorpusService, store: StoreInterface, options: { requireCreate?: boolean } = {}): Promise<void> {
   const templates = new TemplateService(store);
   corpus.setStructuredWrite({ templates, requireStructuredCreate: options.requireCreate === true });
-  const seeds = readShippedTemplateSeeds(fileURLToPath(new URL("../../../../assets", import.meta.url)));
+  const seeds = readShippedTemplateSeeds();
   if (!seeds.ok) throw new Error(`wireStructuredCorpus: ${JSON.stringify(seeds.error)}`);
   await must(new TemplateSeedService(templates, corpus).apply(seeds.value), "seed templates");
 }
@@ -73,7 +72,7 @@ export async function seededTemplateReader(): Promise<TemplateService> {
  * @throws when the seeds are unreadable or none matches
  */
 export function fillShippedTemplate(docType: string, kind?: string, refTarget?: string): { fields: Record<string, unknown>; dimensions: DimensionAnswer[] } {
-  const seeds = readShippedTemplateSeeds(fileURLToPath(new URL("../../../../assets", import.meta.url)));
+  const seeds = readShippedTemplateSeeds();
   if (!seeds.ok) throw new Error(`fillShippedTemplate: ${JSON.stringify(seeds.error)}`);
   const seed = seeds.value.find((candidate) => candidate.template.doc_type === docType && candidate.template.kind === kind);
   if (seed === undefined) throw new Error(`fillShippedTemplate: no shipped seed for ${docType}${kind === undefined ? "" : `/${kind}`}`);
