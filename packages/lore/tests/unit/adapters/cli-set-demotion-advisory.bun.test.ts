@@ -178,7 +178,7 @@ async function createDraftPrd(createCmd: RunnableCommand, title: string): Promis
     await runCmd(createCmd, {
       type: "prd",
       title,
-      "fields-file": templatedFieldsArgs("prd")[1],
+      "fields-file": templatedFieldsArgs("prd", { refTarget: "problem" })[1],
       ai: false,
     });
   } finally {
@@ -227,12 +227,12 @@ describe("lore set — approved→draft demotion advisory on the standard patch 
     await setStatus(setCmd, slug, "approved");
     expect(await getDocStatus(getCmd, slug)).toBe("approved");
 
-    const contentFile = writeGoalsPatch("new-content.json", "updated body");
-
+    // reason: a templated document's content is its fields; the advisory's prior-status fetch runs for a title/content patch
+    // (set.ts), so the approved-doc case drives the standard patch path with `--title`.
     const out = captureOutput();
     const exit = captureExit();
     try {
-      await runCmd(setCmd, { id: slug, "fields-file": contentFile });
+      await runCmd(setCmd, { id: slug, title: "Happy Path Doc, retitled" });
     } finally {
       out.restore();
     }

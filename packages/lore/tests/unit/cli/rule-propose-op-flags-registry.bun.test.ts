@@ -60,9 +60,9 @@ beforeAll(async () => {
   patchLoreConfig(dir, ["workflow:", "  review:", "    judgment_required_types: []", "  gates:", "    spec-create:", "      enabled: false", "    spec-promote:", "      enabled: false", ""].join("\n"));
   const prd = slugOf(await loreOk(["create", "prd", "--title", "Fixture PRD", "--no-ai", ...templatedFieldsArgs("prd"), "--json"]));
   const chain = async (label: string): Promise<string> => {
-    const root = slugOf(await loreOk(["baseline", "add", prd, "--node", "root", "--label", `Root${label}`, "--title", `Root ${label}`]));
-    const branch = slugOf(await loreOk(["baseline", "add", root, "--node", "branch", "--label", `Branch${label}`, "--title", `Branch ${label}`]));
-    return slugOf(await loreOk(["baseline", "add", branch, "--node", "leaf", "--label", `Leaf${label}`, "--title", `Leaf ${label}`]));
+    const root = slugOf(await loreOk(["baseline", "add", prd, "--node", "root", "--label", `Root${label}`, "--title", `Root ${label}`, ...templatedFieldsArgs("baseline", { kind: "root" })]));
+    const branch = slugOf(await loreOk(["baseline", "add", root, "--node", "branch", "--label", `Branch${label}`, "--title", `Branch ${label}`, ...templatedFieldsArgs("baseline", { kind: "branch" })]));
+    return slugOf(await loreOk(["baseline", "add", branch, "--node", "leaf", "--label", `Leaf${label}`, "--title", `Leaf ${label}`, ...templatedFieldsArgs("baseline", { kind: "leaf" })]));
   };
   leafA = await chain("A");
   leafB = await chain("B");

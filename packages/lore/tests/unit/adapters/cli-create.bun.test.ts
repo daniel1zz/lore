@@ -87,6 +87,11 @@ function captureExit() {
  * gate behaviour, not the body's source, so a create that names no fields file gets the filled approved template of its
  * (type, kind) here, in the one place every create passes through.
  */
+const SHIPPED_KINDS: Record<string, readonly string[]> = {
+  spec: ["feature", "design", "tech", "domain-overview"],
+  knowledge: ["assessment", "handoff", "ideation", "milestone-review", "prompt", "reference", "research", "retro", "skill", "uat"],
+};
+
 function withFields(args: Record<string, unknown>): Record<string, unknown> {
   const type = args["type"];
   if (typeof type !== "string" || args["fields-file"] !== undefined || args["content"] !== undefined) return args;
@@ -95,6 +100,9 @@ function withFields(args: Record<string, unknown>): Record<string, unknown> {
   }
   const kind = type === "spec" ? args["kind"] ?? "feature" : type === "knowledge" ? args["sub-type"] : undefined;
   if (!["prd", "spec", "task", "adr", "knowledge"].includes(type)) return args;
+  // A negative case names a kind or sub-type no template exists for (a bogus value, or none): it stays as written so the
+  // command's own refusal is the assertion.
+  if ((type === "knowledge" || type === "spec") && !(typeof kind === "string" && SHIPPED_KINDS[type]?.includes(kind))) return args;
   return { ...args, "fields-file": templatedFieldsArgs(type, typeof kind === "string" ? { kind } : {})[1] };
 }
 

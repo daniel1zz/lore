@@ -371,7 +371,7 @@ describe("lore set — AC-SET-1: editor opens when no flags provided", () => {
     expect(out2.stderr).toHaveLength(0);
   });
 
-  it.skipIf(isWindows)("bumps version when editor returns different content", async () => {
+  it.skipIf(isWindows)("refuses an editor-written body for a templated document and keeps its version", async () => {
     await initLoreDb();
 
     const createMod = await import("../../../src/adapters/cli/commands/create.js");
@@ -415,9 +415,11 @@ describe("lore set — AC-SET-1: editor opens when no flags provided", () => {
       out2.restore();
     }
 
-    expect(exit2.code).toBeUndefined();
-    expect(out2.stdout.join("\n")).toContain("Updated");
-    expect(out2.stdout.join("\n")).toContain("v2"); // version bumped from 1 → 2
+    // A templated document's content is its fields (BR-1528): an editor-written body is refused and names the fields path,
+    // so the version does not move.
+    expect(exit2.code).toBe(4);
+    expect(out2.stdout.join("\n")).not.toContain("Updated");
+    expect(out2.stderr.join("\n")).toContain("--fields-file");
   });
 });
 

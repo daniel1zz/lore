@@ -127,14 +127,14 @@ afterEach(() => {
 });
 
 function createPrd(dir: string, title: string): string {
-  const r = runLore(["create", "prd", "--title", title, ...templatedFieldsArgs("prd"), "--no-ai"], dir);
+  const r = runLore(["create", "prd", "--title", title, ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"], dir);
   if (r.exitCode !== 0) throw new Error(`create prd failed: ${r.stderr}`);
   return parseSlug(r.stdout);
 }
 
 function createSpec(dir: string, parentSlug: string, title: string): string {
   const r = runLore(
-    ["create", "spec", "--title", title, ...templatedFieldsArgs("spec", { kind: "feature" }), "--no-ai"],
+    ["create", "spec", "--title", title, ...templatedFieldsArgs("spec", { kind: "feature", refTarget: parentSlug }), "--no-ai"],
     dir,
   );
   if (r.exitCode !== 0) throw new Error(`create spec failed: ${r.stderr}`);

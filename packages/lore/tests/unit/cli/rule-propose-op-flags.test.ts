@@ -82,9 +82,9 @@ beforeAll(async () => {
     prd,
   );
   leafA = (JSON.parse(await loreOk(["rule", "show", liveRuleId, "--json"])) as { data: { leaf: string } }).data.leaf;
-  const root = slugOf(await loreOk(["baseline", "add", prd, "--node", "root", "--label", "Root2", "--title", "Second Root"]));
-  const branch = slugOf(await loreOk(["baseline", "add", root, "--node", "branch", "--label", "Branch2", "--title", "Second Branch"]));
-  leafB = slugOf(await loreOk(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf2", "--title", "Second Leaf"]));
+  const root = slugOf(await loreOk(["baseline", "add", prd, "--node", "root", "--label", "Root2", "--title", "Second Root", ...templatedFieldsArgs("baseline", { kind: "root" })]));
+  const branch = slugOf(await loreOk(["baseline", "add", root, "--node", "branch", "--label", "Branch2", "--title", "Second Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })]));
+  leafB = slugOf(await loreOk(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf2", "--title", "Second Leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })]));
 }, 180_000);
 
 afterAll(() => {

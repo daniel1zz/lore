@@ -42,6 +42,7 @@ import { saveConfig } from "@lore/core/node";
 import { liveInvocation, liveAmbient, liveWriteContext, runHandlerForExit } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
 import { templatedFieldsArgs } from "../../helpers/templated-create.js";
+import { seedTemplatesInApp } from "../../helpers/structured-docs.js";
 
 // ─── Command type ─────────────────────────────────────────────────────────────
 
@@ -114,15 +115,16 @@ let tmpDir: string;
 let originalCwd: string;
 let savedEditor: string | undefined;
 
-beforeEach(() => {
+beforeEach(async () => {
   // reason: process.exitCode set by CLI commands (FU#4 refactor) leaks between in-process
   // test invocations under bun test. Reset to 0 here to guarantee clean state each test.
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-cli-ai-test-")));
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
 
-  // Create real SQLite DB
+  // Create real SQLite DB; BR-1528: seed the approved templates a structured create resolves.
   const app = createApp(join(loreDir, "lore.db"), undefined, liveAmbient(), liveWriteContext());
+  await seedTemplatesInApp(app);
   app.close();
 
   originalCwd = process.cwd();

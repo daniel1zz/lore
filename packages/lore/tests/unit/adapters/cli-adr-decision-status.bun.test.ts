@@ -94,7 +94,7 @@ async function createAdr(
       "--decision-status",
       decisionStatus,
       "--no-ai",
-      ...templatedFieldsArgs("adr"),
+      ...templatedFieldsArgs("adr", { refTarget: "context" }),
       "--json",
     ],
     tmpDir,
