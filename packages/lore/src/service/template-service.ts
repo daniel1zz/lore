@@ -121,6 +121,25 @@ export class TemplateService {
   }
 
   /**
+   * The document types that have at least one approved template (the "templated" types: only these are classified
+   * legacy-frozen or listed for conversion).
+   *
+   * @returns the set of `doc_type`s, or the store failure
+   */
+  async templatedTypes(): Promise<Result<ReadonlySet<string>, LoreError>> {
+    const docs = await this.store.findMany({ type: "template" });
+    if (!docs.ok) return docs;
+    const types = new Set<string>();
+    for (const doc of docs.value) {
+      if (doc.deleted_at !== null) continue;
+      const snapshots = await this.approvedSnapshots(doc);
+      if (!snapshots.ok) return snapshots;
+      for (const snapshot of snapshots.value) types.add(snapshot.template.doc_type);
+    }
+    return ok(types);
+  }
+
+  /**
    * The template a `slug@version` pin names, exactly as it was approved as that version.
    *
    * @param ref - `extra.template_ref`, e.g. `spec-tech-template@2`
