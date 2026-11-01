@@ -407,7 +407,7 @@ describe("bulk lifecycle: draft can be abandoned", () => {
     const task = await createTask("Already archived");
     await landAttested(task);
     expect((await bulkJson(["archive", task, "--apply", "--reason", "done with it"], tmpDir)).exitCode).toBe(0);
-    expect((await runLore(["set", task, "--status", "deprecated"], tmpDir)).exitCode).toBe(4);
+    expect((await runLore(["set", task, "--status", "deprecated", "--reason", "too late"], tmpDir)).exitCode).toBe(4);
     const bulk = await bulkJson(["deprecate", task, "--apply", "--reason", "too late"], tmpDir);
     expect(bulk.exitCode).toBe(1);
     expect(bulk.rows[0]?.outcome).toBe("FAILED");
@@ -458,7 +458,7 @@ describe("bulk lifecycle: archive --apply exit code", () => {
 
     // Control: once the unjudgeable straggler is abandoned, nothing fails and the apply exits 0.
     expect((await runLore(["set", straggler, "--status", "draft"], tmpDir)).exitCode).toBe(0);
-    expect((await runLore(["set", straggler, "--status", "deprecated"], tmpDir)).exitCode).toBe(0);
+    expect((await runLore(["set", straggler, "--status", "deprecated", "--reason", "abandoned straggler"], tmpDir)).exitCode).toBe(0);
     const ok = await runLore(["archive", "--apply"], tmpDir);
     expect(ok.exitCode, ok.stdout + ok.stderr).toBe(0);
     expect(ok.stdout).not.toContain("FAILED");

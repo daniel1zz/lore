@@ -266,7 +266,7 @@ Skill("plan","replan") on plan-user-authentication
 # task-redis-ratelimit cancelled (risk #2 accepted instead)
 
 lore set task-redis-ratelimit --status approved
-lore set task-redis-ratelimit --status deprecated
+lore set task-redis-ratelimit --status deprecated --reason "superseded by the Memcached approach"
 
 # ⛔ deprecated NEVER satisfies readiness — rewire every dependent:
 lore unlink task-redis-ratelimit task-auth-routes

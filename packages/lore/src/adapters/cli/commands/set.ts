@@ -764,11 +764,38 @@ export default defineLoreCommand({
         priorStatusForDemotionAdvisory = getForDemotion.value.doc.status;
       }
 
+      // BR-1551 (AC-DCF-5): a task leaves its plan by deprecation only with a non-empty reason, which the landing record names; a
+      // bare `--status deprecated` on a task is a usage error (exit 2) and writes nothing.
+      let decisionForSet = decisionOpt;
+      if (patch["status"] === "deprecated") {
+        const resolveForDeprecation = await app.corpusService.resolve(args.id);
+        if (!resolveForDeprecation.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, resolveForDeprecation.error) + "\n");
+          return exitCode(resolveForDeprecation.error);
+        }
+        const getForDeprecation = await app.corpusService.get(resolveForDeprecation.value);
+        if (!getForDeprecation.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, getForDeprecation.error) + "\n");
+          return exitCode(getForDeprecation.error);
+        }
+        const deprecating = getForDeprecation.value.doc;
+        if (deprecating.type === "task") {
+          const deprecationReason = typeof args.reason === "string" ? args.reason.trim() : "";
+          if (deprecationReason === "") {
+            inv.io.stderr.write(`Error: deprecating a task needs a non-empty reason (lore set ${deprecating.slug} --status deprecated --reason "<why>").\n`);
+            exitCli(2);
+          }
+          patch["extra"] = { ...(deprecating.extra ?? {}), deprecation_reason: deprecationReason };
+          // reason: --reason here is the deprecation reason, not a decision's; the decision flags are read only when others were given.
+          if (decisionForSet !== undefined && (args.premise === undefined && args.alt === undefined && args.gate === undefined && args.score === undefined && args.ref === undefined && args["weight-table"] === undefined)) decisionForSet = undefined;
+        }
+      }
+
       const result = await app.corpusService.set(args.id, patch, {
         by: resolvedActor,
         ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}),
         ...(typeof args.plan === "string" ? { plan: args.plan } : {}),
-        ...(decisionOpt !== undefined ? { decision: decisionOpt } : {}),
+        ...(decisionForSet !== undefined ? { decision: decisionForSet } : {}),
         ...(fieldsPatch !== undefined
           ? { fieldsPatch: { ...(fieldsPatch.fields !== undefined ? { fields: fieldsPatch.fields } : {}), ...(fieldsPatch.dimensions !== undefined ? { dimensions: fieldsPatch.dimensions } : {}) } }
           : {}),

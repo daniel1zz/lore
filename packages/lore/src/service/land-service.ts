@@ -290,11 +290,7 @@ export class LandService {
         if (!branchTip.ok) return branchTip;
         const unfolded = open.value.filter((candidate) => !this.isFolded(candidate, branchTip.value ?? ""));
         if (unfolded.length === 0) return this.integrateBranch(plan, turn);
-        return ok({
-          exit: 0,
-          lines: [...lines, `land: ${unfolded.length} open code task(s) of the plan are not folded yet (${unfolded.map((candidate) => candidate.slug).join(", ")}); main is unchanged`],
-          errors: [],
-        });
+        return ok({ exit: 0, lines: [...lines, ...this.renderWaitingTasks(branch, unfolded)], errors: [] });
       });
     } catch (cause) {
       return this.queueFailure(cause);
@@ -380,6 +376,36 @@ export class LandService {
     return ok(all.value.filter((task) => isPlanMember(task, plan.id) && task.extra["kind"] === "code" && (task.status === "approved" || task.status === "active")));
   }
 
+  /**
+   * The lines a waiting integration branch prints (BR-1551, AC-DCF-5): every unfolded open code task with its unmet cause and the
+   * commands that clear it. A task stops holding the branch only by being folded or by being deprecated with a non-empty reason.
+   */
+  private renderWaitingTasks(branch: string, unfolded: readonly DocRecord[]): string[] {
+    const lines = [`land: ${branch} waits for ${unfolded.length} open code task(s) of the plan that are not folded; main is unchanged`];
+    for (const task of unfolded) {
+      lines.push(`land:   ${task.slug}: ${this.unmetCauseOf(task)}`);
+      lines.push(`land:     fold it: \`lore finish ${task.slug}\` in its worktree, then \`lore land ${task.slug}\``);
+      lines.push(`land:     contract cannot be met: \`lore set ${task.slug} --correction "<why>"\` amends it, then finish and land as above`);
+      lines.push(`land:     drop it: \`lore set ${task.slug} --status deprecated --reason "<why>"\` (it is then named deprecated, not landed)`);
+    }
+    return lines;
+  }
+
+  /** Why `task` is not folded: no claim, no contract, the unmet contract items at its branch tip, or finished and only waiting for its land. */
+  private unmetCauseOf(task: DocRecord): string {
+    const contract = doneContractSchema.safeParse(task.extra["done_contract"]);
+    if (!contract.success) return "holds no done contract";
+    const claim = extractHeldClaim(task);
+    const claimBranch = claimBranchOf(claim);
+    if (claim === undefined || claimBranch === undefined) return "holds no claim on a branch, so there is no work to fold";
+    const tip = this.resolveBranch(claimBranch);
+    if (!tip.ok) return `its branch ${claimBranch} cannot be read`;
+    if (tip.value === null) return `its branch ${claimBranch} no longer exists`;
+    const unmet = this.unmetItems(task, contract.data, claim, tip.value);
+    if (unmet.length === 0) return `finished at ${short(tip.value)} and not landed yet`;
+    return `not finished at ${short(tip.value)}, ${unmet.length} item(s) unmet: ${unmet.join("; ")}`;
+  }
+
   /** Whether the log of `task` holds a `folded` entry whose tip the branch (at `branchTip`) contains. */
   private isFolded(task: DocRecord, branchTip: string): boolean {
     const log = readLog(task);
@@ -389,6 +415,16 @@ export class LandService {
 
   // ───────────────────────────── landing the branch ─────────────────────────────
 
+  /** The landing-record lines naming each deprecated code task of `plan` as deprecated, not landed, with its reason (BR-1551). */
+  private async deprecatedCodeTaskLines(plan: DocRecord): Promise<Result<string[], LoreError>> {
+    const all = await this.ports.store.findMany({ type: "task" });
+    if (!all.ok) return all;
+    const lines = all.value
+      .filter((task) => isPlanMember(task, plan.id) && task.extra["kind"] === "code" && task.status === "deprecated")
+      .map((task) => `land: ${task.slug} deprecated, not landed (reason: ${String(task.extra["deprecation_reason"] ?? "none recorded")})`);
+    return ok(lines);
+  }
+
   /** Integrates the plan's integration branch into main inside the turn the fold holds, then archives and reports (AC-DCS2-19). */
   private async integrateBranch(plan: DocRecord, turn: HeldTurn): Promise<Result<LandOutcome, LoreError>> {
     const branch = String(plan.extra["integration_branch"]);
@@ -397,13 +433,15 @@ export class LandService {
     if (!open.ok) return open;
     const entries = open.value.map(landEntryOf);
     // reason: the queue instance holds this turn, so the integrate port's own ticket shares it instead of waiting behind the fold.
+    const deprecated = await this.deprecatedCodeTaskLines(plan);
+    if (!deprecated.ok) return deprecated;
     const exit = await this.integrateOnce(branch);
     if (exit !== 0) return ok({ ...this.failed(exit, `integrating ${branch}`, turn.target), lines: turn.lines });
     const archived = await this.archiveWalk(entries, turn.target);
     await this.ports.planClose?.afterBranchLanded(plan);
     return ok({
       exit: archived.errors.length === 0 ? 0 : 4,
-      lines: [...turn.lines, `land: landed ${branch} on main`, ...archived.lines],
+      lines: [...turn.lines, `land: landed ${branch} on main`, ...archived.lines, ...deprecated.value],
       errors: archived.errors,
     });
   }
@@ -418,16 +456,25 @@ export class LandService {
     const entries: LandEntry[] = [];
     const head = this.resolveBranch(branch);
     if (!head.ok) return head;
+    const deprecatedLines: string[] = [];
     for (const plan of declaring) {
       const open = await this.openCodeTasks(plan);
       if (!open.ok) return open;
-      for (const task of open.value) if (head.value !== null && this.isFolded(task, head.value)) entries.push(landEntryOf(task));
+      // BR-1551: nothing integrates the branch while an open code task of the plan is unfolded, naming the branch included.
+      const unfolded = open.value.filter((task) => head.value === null || !this.isFolded(task, head.value));
+      if (unfolded.length > 0) {
+        return err(refusal("land-branch-waiting", `nothing was changed.\n${this.renderWaitingTasks(branch, unfolded).join("\n")}`, unfolded.map((task) => task.slug)));
+      }
+      for (const task of open.value) entries.push(landEntryOf(task));
+      const deprecated = await this.deprecatedCodeTaskLines(plan);
+      if (!deprecated.ok) return deprecated;
+      deprecatedLines.push(...deprecated.value);
     }
     const exit = await this.integrateOnce(branch);
     if (exit !== 0) return ok(this.failed(exit, `integrating ${branch}`, branch));
     const archived = await this.archiveWalk(entries, branch);
     for (const plan of declaring) await this.ports.planClose?.afterBranchLanded(plan);
-    return ok({ exit: archived.errors.length === 0 ? 0 : 4, lines: [`land: landed ${branch} on main`, ...archived.lines], errors: archived.errors });
+    return ok({ exit: archived.errors.length === 0 ? 0 : 4, lines: [`land: landed ${branch} on main`, ...archived.lines, ...deprecatedLines], errors: archived.errors });
   }
 
   /** Runs the one integrate; the exit code of a failed one, 0 when it succeeded. */

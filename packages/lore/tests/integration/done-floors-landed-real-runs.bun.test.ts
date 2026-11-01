@@ -320,7 +320,7 @@ describe("AC-DCL-1 (f) — a terminal task refuses claim", () => {
   it("(f) lore claim on a deprecated task exits 4", () => {
     const task = createTask("Deprecated");
     mustRun(["set", task, "--status", "approved"], dir);
-    mustRun(["set", task, "--status", "deprecated"], dir);
+    mustRun(["set", task, "--status", "deprecated", "--reason", "fixture: a deprecated task"], dir);
 
     const claim = runLore(["claim", task], dir);
 

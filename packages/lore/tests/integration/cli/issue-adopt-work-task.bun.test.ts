@@ -280,7 +280,7 @@ describe("AC-IL-8 any open listed issue is adoptable; closed or archived-work is
       slugOf(await must(["create", "task", "--adhoc", "--kind", "code", "--spec", carrierSpec, "--ac-scope", "", "--title", title, "--no-ai", "--content", "Carrier.", "--issue", String(n), "--json"]));
 
     deprecatedTaskSlug = await carrier("Deprecated carrier", DEPRECATED);
-    await must(["set", deprecatedTaskSlug, "--status", "deprecated"]);
+    await must(["set", deprecatedTaskSlug, "--status", "deprecated", "--reason", "fixture: a deprecated carrier"]);
 
     // Archiving a carrier closes its issue on GitHub; the PATCH is made to fail so the issue stays OPEN with archived work.
     archivedTaskSlug = await carrier("Archived carrier", ARCHIVED_TASK);

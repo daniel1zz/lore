@@ -292,11 +292,11 @@ interface CloseWorld {
 async function closeWorld(label: string, options: { landed: boolean; requiresUat?: boolean }): Promise<CloseWorld> {
   const plan = await approvedPlan(`Plan ${label}`, options.requiresUat === true);
   const blocker = options.landed ? await landedCodeTask(plan, label) : await fixture.createTask({ plan, kind: "corpus", title: `Blocker ${label}` });
-  if (!options.landed) await mustSetup(["set", blocker, "--status", "deprecated"]);
+  if (!options.landed) await mustSetup(["set", blocker, "--status", "deprecated", "--reason", "fixture: an unlanded blocker"]);
   const closeTask = await seedLegacyCloseTask(plan, `Close plan ${label}`);
   expect(closeTask.startsWith("task-close-plan-"), `the slug of the close task is ${closeTask}`).toBe(true);
   const blocked = await fixture.createTask({ plan, kind: "corpus", title: `Blocked ${label}` });
-  await mustSetup(["set", blocked, "--status", "deprecated"]);
+  await mustSetup(["set", blocked, "--status", "deprecated", "--reason", "fixture: a deprecated blocked task"]);
   await mustSetup(["link", blocker, closeTask, "--type", "blocks"]);
   await mustSetup(["link", closeTask, blocked, "--type", "blocks"]);
   const stored = rowOf(closeTask);
