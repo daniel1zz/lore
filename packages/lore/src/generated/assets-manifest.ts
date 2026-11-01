@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "25f7ad7f92f50b0e5ce226c814f59314b48ca974240fdc60978eb8873596b7c3",
+  tree_digest: "9f4fd055df8210fb40e17d9a2fe920c3a1cee4e248584e0c213098bbfe33c69e",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "be7b99d5d1f72cf4ff8579ab09c2e42454c03ec0e0f9ba4e8fdb303b4a6cb73f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -125,8 +125,6 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "skills/lore-auto-wire/scripts/fix-path.sh", kind: "skill", ownership: "managed", sha256: "76828df5440be276233fbd147f28bfeac00e91f73815ca9e85dc3911c436932f" },
   { path: "skills/lore-autopilot/SKILL.md", kind: "skill", ownership: "managed", sha256: "b489e1ef2c55d33e4245c56fecedf312c77ca30c2747cb7c40e03a2be6794672" },
   { path: "skills/lore-baseline/SKILL.md", kind: "skill", ownership: "managed", sha256: "d2cf15a0a4030a1df0580871935345758e0a1c3a7bce63c64ecb9f6ddd85af85" },
-  { path: "skills/lore-baseline/templates/branch.md", kind: "skill", ownership: "managed", sha256: "0db3c50293303cb7f879f0df0001d33a582f598f3d0a5f47151f99ce2e106049" },
-  { path: "skills/lore-baseline/templates/leaf.md", kind: "skill", ownership: "managed", sha256: "b01451b45fe0b59d16a77df35a8575c105716ad60802d6bb9b2090cd52da237d" },
   { path: "skills/lore-best-practice/SKILL.md", kind: "skill", ownership: "managed", sha256: "76d58d4eeb539105b06bf514b27b75df8b74814746f06a211f7b6f605f1dbc37" },
   { path: "skills/lore-biz-review/SKILL.md", kind: "skill", ownership: "managed", sha256: "90741b9bc01df098e6bef78c9216dad429a07b83763999d649172779b14ad43e" },
   { path: "skills/lore-bug-hunt/SKILL.md", kind: "skill", ownership: "managed", sha256: "d70baddae59986cb274bb9366579d1c2b392f0544dbf389a3bd5843caa3f7521" },

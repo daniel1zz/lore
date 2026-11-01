@@ -274,7 +274,7 @@ export type ProjectScaffoldReceipt = ProjectScaffoldReport & {
 export const PROJECT_NEXT_STEPS: readonly string[] = [
   "Run /lore-init-context to fill in this repo's CLAUDE.md module layer.",
   "Run /lore-kickoff to bootstrap the initial corpus (root PRD, a baseline leaf + rule, then a first spec citing it).",
-  'Run `lore create prd --title "<your product>"` to start your first PRD.',
+  'Run `lore template show prd --blank > prd-fields.yaml`, fill it in, then `lore create prd --title "<your product>" --fields-file prd-fields.yaml` to start your first PRD.',
 ];
 
 /**
