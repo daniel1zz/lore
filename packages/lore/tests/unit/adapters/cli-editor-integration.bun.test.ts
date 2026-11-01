@@ -1,4 +1,5 @@
 // @reads assets/project/lore-config-template.yaml
+// @layer cli-editor AC-CR-1 AC-CR-2 AC-CR-3 AC-CR-4 (SPEC-003 editor-flow criteria; the same ids now also exist in another spec, whose owners are elsewhere)
 /**
  * @spec_ref SPEC-003 §3.1 — editor integration for create and set commands
  *
