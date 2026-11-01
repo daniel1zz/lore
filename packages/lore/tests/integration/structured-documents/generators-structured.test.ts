@@ -143,14 +143,10 @@ describe("BR-1528 generators create structured documents with require_create ON"
     const adhoc = tasks.find((task) => (task.extra as Record<string, unknown>)["adhoc"] === true);
     expect(adhoc).toBeDefined();
     expect(pinnedRef(adhoc as DocRecord)).toBe("task-template@1");
-    // The generated fields satisfy the template (validation passed at create). `lore template check` reports exactly one
-    // cross-field finding, `ac_scope` refs-resolve: `TemplateService.checks` resolves a ref against the document's OWN criteria,
-    // rules and documents, never the governing spec's criteria, so no task naming a spec's AC can be check-clean. A checker gap
-    // (named in the task report), not a generator defect: asserted exactly so a fix of the checker turns this into `expectCheckClean`.
-    const checked = await rig.lore(["template", "check", (adhoc as DocRecord).slug, "--json"]);
-    expect(checked.exitCode).toBe(4);
-    expect(checked.stdout + checked.stderr).toContain("ac_scope: AC-GEN-1");
-    expect((checked.stdout + checked.stderr).match(/refs-resolve/g)?.length).toBe(1);
+    // its `ac_scope` names an AC the spec in its `spec_ref` declares, which the check resolves against that spec's criteria
+    expect((adhoc as DocRecord).extra["ac_scope"]).toEqual(["AC-GEN-1"]);
+    expect(((adhoc as DocRecord).extra["fields"] as Record<string, unknown>)["spec_ref"]).toBe(specSlug);
+    await expectCheckClean((adhoc as DocRecord).slug);
   }, 120_000);
 
   it("HAPPY: the UAT verdict builder creates a templated, check-clean verdict through the guarded createUatDoc seam", async () => {

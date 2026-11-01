@@ -110,9 +110,6 @@ async function initCorpus(dir: string): Promise<void> {
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
-  // BR-1528: `lore handoff` creates the document structured through the approved `knowledge/handoff` template.
-  const seeded = await runLore(["migrate", "templates", "--apply"], dir);
-  if (seeded.exitCode !== 0) throw new Error(`lore migrate templates --apply failed: ${seeded.stderr}`);
 }
 
 function parseSlug(stdout: string): string {
@@ -285,6 +282,10 @@ async function createHandoffChain(dir: string): Promise<{ planSlug: string; hand
   expect(planResult.exitCode).toBe(0);
   const planSlug = parseSlug(planResult.stdout);
 
+  // BR-1528: `lore handoff` creates the document structured through the approved `knowledge/handoff` template. Seeded here,
+  // not in `initCorpus`: the spec-create regression cases in this file pin the output of a corpus with NO approved template.
+  const seeded = await runLore(["migrate", "templates", "--apply"], dir, "alice");
+  expect(seeded.exitCode, seeded.stderr).toBe(0);
   const handoffResult = await runLore(
     [
       "handoff",
