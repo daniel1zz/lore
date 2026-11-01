@@ -53,7 +53,7 @@ import { OVERRIDE_MEASURED_FACTS } from "./override-decision.js";
 import type { DocWritePort } from "./corpus-service.js";
 import type { IssueFilingService } from "./issue-filing-service.js";
 import { planStateFingerprint, selectLatestMilestoneReview } from "./milestone-review.js";
-import { rootCauseOf, type FailedFinding } from "./root-cause-fingerprint.js";
+import { failingCausesOf, rootCauseOf, splitFindingByFile, type FailedFinding, type RootCause } from "./root-cause-fingerprint.js";
 
 /** What the service reads and writes through. */
 export interface GateAcceptancePorts {
@@ -121,51 +121,92 @@ export function createGateAcceptanceLog(store: Pick<StoreInterface, "listDecisio
   };
 }
 
+/** One accepted root cause with the issue it is filed under and the human decision record that accepts it. */
+export interface AcceptedCause {
+  /** The cause label (`main red: <path>` for a regression file; the cites label of another gate). */
+  readonly cause: string;
+  readonly issue: number;
+  readonly decision_record: number;
+}
+
 /** What one acceptance recorded. */
 export interface GateAcceptance {
   readonly plan: string;
   readonly dimension: GateDimension;
-  /** The issue the accepted finding is filed under. */
-  readonly issue: number;
   readonly review: string;
-  /** The id of the human decision record in the decision log that accepts the gate. */
-  readonly decision_record: number;
+  /**
+   * One entry per accepted root cause: one per charged file for a regression (BR-1513), one for any other gate. There is no
+   * "the" issue or "the" decision record of an acceptance, so no first-file view exists to read by mistake.
+   */
+  readonly accepted: readonly AcceptedCause[];
 }
 
 function refuse(field: string, message: string): LoreError {
   return { code: "VALIDATION_ERROR", field, message, rule: "BR-1500" };
 }
 
+/** The review a gate acceptance reads: the stored review and its document. */
+type StoredReview = { readonly doc: Pick<DocRecord, "slug">; readonly review: MilestoneReview };
+
 /**
- * The blocking gates of a stored review that are accepted FOR THAT FAILURE: the decision log holds an effective human accept
- * of class governance-loosen for subject `<plan id>:<gate>` at the root-cause fingerprint of the review's current failure of
- * that gate (BR-1500). This is the single predicate every close path uses.
+ * The blocking gates of a stored review that are accepted FOR THAT FAILURE: for every root cause of the gate's current
+ * failure the decision log holds an effective human accept of class governance-loosen for subject `<plan id>:<gate>` at that
+ * cause's fingerprint (BR-1500). A regression is one cause per charged file (BR-1513), so it is accepted only when EVERY
+ * current file has its accept. This is the single predicate every close path uses.
  *
  * reason: the log is the ONLY authority. Plan `extra` is writable by any caller (`lore set --extra`), so no stored field
  * (`gate_accepted`, a party, a record id) is read here: trusting one let an agent close its own plan (#538).
  * reason: the fingerprint is part of the subject, so an accept of one failure never waves a later, different failure of the
- * same gate through (AC-AF-7); a gate whose cause cannot be fingerprinted (no cite) is never accepted.
+ * same gate through (AC-AF-7), and an accept of one file never waves another file through (AC-PF-4); a gate whose cause
+ * cannot be fingerprinted (no cite) is never accepted.
  *
  * @param plan - the plan (id and slug)
  * @param latest - the plan's latest stored review and its document
  * @param log - the decision log reader (required: with none wired the read fails loud, see {@link unwiredGateAcceptanceLog})
  * @returns the accepted gates, in render order; a store error from the log, unchanged
  */
-export async function acceptedGatesOf(
-  plan: Pick<DocRecord, "id" | "slug">,
-  latest: { readonly doc: Pick<DocRecord, "slug">; readonly review: MilestoneReview },
-  log: GateAcceptanceLog,
-): Promise<Result<GateDimension[], LoreError>> {
+export async function acceptedGatesOf(plan: Pick<DocRecord, "id" | "slug">, latest: StoredReview, log: GateAcceptanceLog): Promise<Result<GateDimension[], LoreError>> {
   const gates: GateDimension[] = [];
   for (const dimension of blockingGates(latest.review.dimensions)) {
-    const judgment = latest.review.dimensions[dimension];
-    const cause = rootCauseOf({ plan: plan.slug, dimension, reason: judgment.reason, reference: judgment.reference, cites: judgment.cites, reviewSlug: latest.doc.slug, causes: latest.review.causes });
-    if (!cause.ok) continue;
-    const record = await log.humanAcceptedRecord(gateAcceptanceSubject(plan.id, dimension, cause.value.fingerprint));
-    if (!record.ok) return record;
-    if (record.value !== null) gates.push(dimension);
+    const causes = failingCausesOf(plan.slug, latest.doc.slug, latest.review, dimension);
+    if (!causes.ok || causes.value.length === 0) continue;
+    const unaccepted = await unacceptedCausesOf(plan, dimension, causes.value, log);
+    if (!unaccepted.ok) return unaccepted;
+    if (unaccepted.value.length === 0) gates.push(dimension);
   }
   return ok(gates);
+}
+
+/** The causes of `dimension` that have no effective human accept yet, in cause order. */
+async function unacceptedCausesOf(plan: Pick<DocRecord, "id">, dimension: GateDimension, causes: readonly RootCause[], log: GateAcceptanceLog): Promise<Result<RootCause[], LoreError>> {
+  const unaccepted: RootCause[] = [];
+  for (const cause of causes) {
+    const record = await log.humanAcceptedRecord(gateAcceptanceSubject(plan.id, dimension, cause.fingerprint));
+    if (!record.ok) return record;
+    if (record.value === null) unaccepted.push(cause);
+  }
+  return ok(unaccepted);
+}
+
+/**
+ * The root causes of the blocking gates that still lack a human accept, so a refused close can name them (BR-1513).
+ *
+ * @returns `gate -> unaccepted causes` for each blocking gate that is not accepted; a gate whose cause cannot be identified
+ *   maps to an empty list (it needs a new review)
+ */
+export async function unacceptedGateCausesOf(plan: Pick<DocRecord, "id" | "slug">, latest: StoredReview, log: GateAcceptanceLog): Promise<Result<Map<GateDimension, RootCause[]>, LoreError>> {
+  const missing = new Map<GateDimension, RootCause[]>();
+  for (const dimension of blockingGates(latest.review.dimensions)) {
+    const causes = failingCausesOf(plan.slug, latest.doc.slug, latest.review, dimension);
+    if (!causes.ok || causes.value.length === 0) {
+      missing.set(dimension, []);
+      continue;
+    }
+    const unaccepted = await unacceptedCausesOf(plan, dimension, causes.value, log);
+    if (!unaccepted.ok) return unaccepted;
+    if (unaccepted.value.length > 0) missing.set(dimension, unaccepted.value);
+  }
+  return ok(missing);
 }
 
 /**
@@ -181,21 +222,23 @@ export function unwiredGateAcceptanceLog(): GateAcceptanceLog {
 /**
  * The pending acceptance ids of the blocking gates of a review, for the batch report ("acceptance pending <id>").
  *
- * @returns `dimension -> pending decision id` for each gate whose acceptance waits for a human; empty when none
+ * @returns `dimension -> pending decision ids` (one per file for a regression) for each gate with an acceptance waiting for
+ *   a human; empty when none
  */
 export async function pendingAcceptancesOf(
   plan: Pick<DocRecord, "id" | "slug">,
-  latest: { readonly doc: Pick<DocRecord, "slug">; readonly review: MilestoneReview },
+  latest: StoredReview,
   log: GateAcceptanceLog,
-): Promise<Result<Map<GateDimension, number>, LoreError>> {
-  const pending = new Map<GateDimension, number>();
+): Promise<Result<Map<GateDimension, number[]>, LoreError>> {
+  const pending = new Map<GateDimension, number[]>();
   for (const dimension of blockingGates(latest.review.dimensions)) {
-    const judgment = latest.review.dimensions[dimension];
-    const cause = rootCauseOf({ plan: plan.slug, dimension, reason: judgment.reason, reference: judgment.reference, cites: judgment.cites, reviewSlug: latest.doc.slug, causes: latest.review.causes });
-    if (!cause.ok) continue;
-    const id = await log.pendingId(gateAcceptanceSubject(plan.id, dimension, cause.value.fingerprint));
-    if (!id.ok) return id;
-    if (id.value !== null) pending.set(dimension, id.value);
+    const causes = failingCausesOf(plan.slug, latest.doc.slug, latest.review, dimension);
+    if (!causes.ok) continue;
+    for (const cause of causes.value) {
+      const id = await log.pendingId(gateAcceptanceSubject(plan.id, dimension, cause.fingerprint));
+      if (!id.ok) return id;
+      if (id.value !== null) pending.set(dimension, [...(pending.get(dimension) ?? []), id.value]);
+    }
   }
   return ok(pending);
 }
@@ -263,43 +306,74 @@ export class GateAcceptanceService {
     // reason: the acceptance IS the human accept in the decision log (class governance-loosen, subject `<plan id>:<dimension>` at
     // this failure's fingerprint); nothing stored on the plan carries that authority (#538, BR-1500). An agent's call waits for
     // a human to answer a pending decision; a human party's direct call appends its own human decision.
-    const settled = await this.settleHumanAccept(plan, dimension, finding, latest.doc.slug, decision, humanPartyOf(this.ports.writerSource) !== undefined);
-    if (!settled.ok) return settled;
-    const filed = await filing.fileFindings([finding]);
+    // reason: BR-1513 — a regression is one cause per charged file, so each file gets its own decision (subject version = that
+    // file's fingerprint). A file that already has an effective human accept creates nothing new, and every file is asked in this one
+    // call, so a refused agent call leaves one pending decision for each file still lacking one.
+    const parts = splitFindingByFile(finding);
+    const records: number[] = [];
+    const refusals: LoreError[] = [];
+    for (const part of parts) {
+      const settled = await this.settleHumanAccept(plan, dimension, part, latest.doc.slug, decision, humanPartyOf(this.ports.writerSource) !== undefined);
+      if (settled.ok) records.push(settled.value);
+      else refusals.push(settled.error);
+    }
+    const firstRefusal = refusals[0];
+    if (firstRefusal !== undefined) {
+      const messages: string[] = [];
+      for (const e of refusals) if (e.code === "VALIDATION_ERROR") messages.push(e.message);
+      // reason: several files each refuse in their own words (one pending decision per file); a caller needs every one of them.
+      return err(messages.length === refusals.length && refusals.length > 1 ? refuse("accept-gate", messages.join(" ")) : firstRefusal);
+    }
+    const filed = await filing.fileFindings(parts);
     if (!filed.ok) return filed;
-    const group = filed.value[0];
-    if (group === undefined || group.error !== undefined || group.issue === undefined) {
-      return err(group?.error ?? refuse("accept-gate", `the ${dimension} finding of ${plan.slug} could not be filed as an issue`));
+    const issues: number[] = [];
+    for (const group of filed.value) {
+      if (group.error !== undefined || group.issue === undefined) {
+        return err(group.error ?? refuse("accept-gate", `the ${dimension} finding of ${plan.slug} could not be filed as an issue`));
+      }
+      issues.push(group.issue.number);
+    }
+    const acceptedCauses: AcceptedCause[] = [];
+    for (const [index, group] of filed.value.entries()) {
+      const issue = issues[index];
+      const decisionRecord = records[index];
+      if (issue === undefined || decisionRecord === undefined) continue;
+      acceptedCauses.push({ cause: group.cause.label, issue, decision_record: decisionRecord });
+    }
+    if (acceptedCauses.length === 0 || acceptedCauses.length !== parts.length) {
+      return err(refuse("accept-gate", `the ${dimension} finding of ${plan.slug} could not be filed as an issue`));
     }
 
     // reason: BR-1500 "recorded on the plan" and the premise re-check / `lore decision rates` (`selectPlanDecisions`) read an
     // accept-gate decision from the plan's version rows, so the plan version carrying the decision record is written once the log
     // holds the human accept. The `gate_accepted` flag is a RECORD only: `acceptedGatesOf` reads the log and no reader uses the flag.
-    // Re-read AFTER the filing wrote the plain known-defect entry (its write bumped the plan's version) so the write carries the
+    // Re-read AFTER the filing wrote the plain known-defect entries (their writes bumped the plan's version) so the write carries the
     // current version as its CAS guard.
     const fresh = await this.ports.getPlanBundle(planRef);
     if (!fresh.ok) return fresh;
     const current = fresh.value.plan;
     const entries = readKnownDefects(current.extra);
-    // bound to THIS failure's root-cause fingerprint, never to the dimension: an entry of the same gate with another fingerprint is another failure
-    const fingerprint = group.cause.fingerprint;
-    if (!entries.some((e) => e.dimension === dimension && e.fingerprint === fingerprint)) {
-      return err(refuse("accept-gate", `the issue of the ${dimension} finding was filed but no known defect of ${dimension} with its root cause is recorded on ${plan.slug}`));
+    // bound to THIS failure's root-cause fingerprints, never to the dimension: an entry of the same gate with another fingerprint is another failure
+    const fingerprints = filed.value.map((group) => group.cause.fingerprint);
+    for (const fingerprint of fingerprints) {
+      if (!entries.some((e) => e.dimension === dimension && e.fingerprint === fingerprint)) {
+        return err(refuse("accept-gate", `the issue of the ${dimension} finding was filed but no known defect of ${dimension} with its root cause is recorded on ${plan.slug}`));
+      }
     }
-    const flagged = entries.map((e) => (e.dimension === dimension && e.fingerprint === fingerprint ? { ...e, gate_accepted: true as const } : e));
+    const flagged = entries.map((e) => (e.dimension === dimension && fingerprints.includes(e.fingerprint) ? { ...e, gate_accepted: true as const } : e));
     const written = await this.ports.writer.writeDoc({
       doc: current,
       patch: { extra: { ...(current.extra as Record<string, unknown>), [KNOWN_DEFECTS_FIELD]: flagged } },
       action: "update",
-      changeSummary: `Accepted gate ${dimension} with a decision (issue #${String(group.issue.number)}, human decision record ${String(settled.value)})`,
+      changeSummary: `Accepted gate ${dimension} with a decision (issue ${issues.map((n) => `#${String(n)}`).join(", ")}, human decision record ${records.join(", ")})`,
       decision,
       auditAction: "update",
-      auditDetails: { operation: "accept-gate", dimension, fingerprint, decision_record: settled.value, issue: group.issue.number, review: latest.doc.slug, rule: "BR-1500" },
+      auditDetails: { operation: "accept-gate", dimension, fingerprints, decision_records: records, issues, review: latest.doc.slug, rule: "BR-1500" },
       lock: "none",
       by: this.ports.by,
     });
     if (!written.ok) return written;
-    return ok({ plan: plan.slug, dimension, issue: group.issue.number, review: latest.doc.slug, decision_record: settled.value });
+    return ok({ plan: plan.slug, dimension, review: latest.doc.slug, accepted: acceptedCauses });
   }
 
   /**
@@ -327,8 +401,10 @@ export class GateAcceptanceService {
       return err(refuse("accept-gate", `the ${dimension} failure of ${plan.slug} has no identifiable root cause (${cause.error.code}), so it cannot be accepted: it needs a new review. Nothing was written.`));
     }
     const subject = gateAcceptanceSubject(plan.id, dimension, cause.value.fingerprint);
+    // reason: a regression is accepted file by file (BR-1513), so the question and every refusal name the file it is about.
+    const what = dimension === "regression" ? `${dimension} (${cause.value.label})` : dimension;
     const detail: DecisionDetail = {
-      summary: `Accept the failed ${dimension} gate of plan ${plan.slug} as a known defect (review ${reviewSlug})`,
+      summary: `Accept the failed ${what} gate of plan ${plan.slug} as a known defect (review ${reviewSlug})`,
       requested_by: "the agent session that ran `lore assess --accept-gate`",
       change: { document: plan.slug, gate: dimension, review: reviewSlug, reason: decision.reason, fingerprint: cause.value.fingerprint },
       on_accept: "Re-running the same `lore assess --accept-gate` command then reports the gate accepted, and the plan may close past it.",
@@ -339,12 +415,12 @@ export class GateAcceptanceService {
     const { effective } = decided.value;
     if (effective.channel === "human-tty" && effective.verdict === "auto") return ok(effective.record_id);
     if (effective.channel === "human-tty") {
-      return err(refuse("accept-gate", `a human rejected accepting ${dimension} of ${plan.slug} (decision ${String(effective.record_id)}). Nothing was written.`));
+      return err(refuse("accept-gate", `a human rejected accepting ${what} of ${plan.slug} (decision ${String(effective.record_id)}). Nothing was written.`));
     }
     const pending = await this.ports.log.pendingId(subject);
     if (!pending.ok) return pending;
     if (pending.value === null) {
-      return err(refuse("accept-gate", `accepting ${dimension} of ${plan.slug} needs a human decision but no pending decision could be found (record ${String(decided.value.record_id)}). Nothing was written.`));
+      return err(refuse("accept-gate", `accepting ${what} of ${plan.slug} needs a human decision but no pending decision could be found (record ${String(decided.value.record_id)}). Nothing was written.`));
     }
     if (byHumanParty) {
       const answered = await decisions.resolvePending(pending.value, "accept", decision.reason, issueHumanPartyProof(new Date().toISOString()));
@@ -354,7 +430,7 @@ export class GateAcceptanceService {
     return err(
       refuse(
         "accept-gate",
-        `An agent run cannot accept a gate: pending decision ${String(pending.value)} was created for a human to accept ${dimension} of ${plan.slug}. Ask the human in the session (\`lore pending --ask\`, then the interactive question tool), then re-run this same command. Nothing was written.`,
+        `An agent run cannot accept a gate: pending decision ${String(pending.value)} was created for a human to accept ${what} of ${plan.slug}. Ask the human in the session (\`lore pending --ask\`, then the interactive question tool), then re-run this same command. Nothing was written.`,
       ),
     );
   }

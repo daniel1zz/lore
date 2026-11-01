@@ -323,7 +323,7 @@ describe("AC-AF-7 accepting a gate records the decision and a known defect, and 
     expect(readKnownDefects((await w.reload()).extra).map((e) => [e.dimension, e.gate_accepted])).toEqual([["security", undefined]]);
 
     const accepted = await w.service().acceptGate(w.plan.slug, "security", FULL_DECISION);
-    expect(accepted).toMatchObject({ ok: true, value: { dimension: "security", issue: ISSUE } });
+    expect(accepted).toMatchObject({ ok: true, value: { dimension: "security", accepted: [expect.objectContaining({ issue: ISSUE })] } });
     const stored = await w.reload();
     // the plan records the acceptance (a flagged known defect and the decision on its version row); the authority is the decision log (#538)
     expect(readKnownDefects(stored.extra)).toEqual([expect.objectContaining({ repo_id: REPO_ID, number: ISSUE, dimension: "security", gate_accepted: true })]);
@@ -492,7 +492,7 @@ describe("AC-AF-7 the acceptance is bound to the failure it accepted", () => {
     const human = rows.value.filter((r) => r.channel === "human-tty");
     expect(human).toHaveLength(1);
     expect(human[0]).toMatchObject({ class: "governance-loosen", subject_id: `${w.plan.id}:security`, verdict: "auto" });
-    expect(accepted.ok && accepted.value.decision_record).toBe(human[0]?.id);
+    expect(accepted.ok && accepted.value.accepted.map((a) => a.decision_record)).toEqual([human[0]?.id]);
     const asked = rows.value.find((r) => r.channel === "machine" && r.subject_id === `${w.plan.id}:security`);
     expect(asked?.detail ?? "").toContain("the finding is a false positive");
     // the plan RECORDS it: a flagged known defect, and the decision on the plan's version row where `lore decision rates` and the re-check read it

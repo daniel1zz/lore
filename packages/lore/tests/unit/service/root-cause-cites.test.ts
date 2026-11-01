@@ -50,6 +50,13 @@ describe("judge-text fingerprints use structured cites, never wording", () => {
     expect(rootCauseOf({ ...base, dimension: "regression", reason: "x" }).ok).toBe(false);
   });
 
+  it("STATE: a regression charged with one file is keyed by that file alone, ignoring cites and the plan", () => {
+    const a = causeOf({ ...base, plan: "p-one", dimension: "regression", reason: "x", cites: ["AC-ZZ-1"], causes: { regression_files: ["a.test.ts"] } });
+    const b = causeOf({ ...base, plan: "p-two", dimension: "regression", reason: "y", causes: { regression_files: ["a.test.ts"] } });
+    expect(a.fingerprint).toBe(b.fingerprint);
+    expect(a.label).toBe("main red: a.test.ts");
+  });
+
   it("STATE: measured dimensions ignore cites", () => {
     const a = causeOf({ ...base, dimension: "snapshot_accuracy", reason: "x", cites: ["AC-ZZ-1"], causes: { contradicted_rules: ["BR-99999"] } });
     const b = causeOf({ ...base, dimension: "snapshot_accuracy", reason: "y", causes: { contradicted_rules: ["BR-99999"] } });

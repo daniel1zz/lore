@@ -132,11 +132,9 @@ export function measuredCauses(
   const contradicted = cited.filter((r) => r.state === "contradicted").map((r) => r.rule_id);
   const rules = dimensions.snapshot_accuracy.verdict === "fail" && contradicted.length > 0 ? [...new Set(contradicted)].sort() : undefined;
   if (regression === undefined && rules === undefined) return undefined;
-  // reason: BR-1496 / #540 — no review measures a full suite, so the root cause is the set of files the selection found red
-  // at the plan's last landing and charged to it. `suite_failing_files` (the field the fingerprint reads, BR-1379) carries
-  // that set; the per-file fingerprint is #556's change, not made here.
-  const suiteSet = regression;
-  return { ...(regression !== undefined ? { regression_files: regression } : {}), ...(suiteSet !== undefined ? { suite_failing_files: suiteSet } : {}), ...(rules !== undefined ? { contradicted_rules: rules } : {}) };
+  // reason: BR-1496 / #540 — no review measures a full suite, so the root causes are the files the selection found red at the
+  // plan's last landing and charged to it. Each file is its own cause (BR-1513): the fingerprint reads one file at a time.
+  return { ...(regression !== undefined ? { regression_files: regression } : {}), ...(rules !== undefined ? { contradicted_rules: rules } : {}) };
 }
 
 /** The `milestone` decisions whose document is the plan, its spec or one of its tasks (newest per class+document). */

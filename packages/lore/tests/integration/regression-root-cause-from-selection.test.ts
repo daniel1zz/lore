@@ -8,7 +8,7 @@
  *
  * Dimensions: HAPPY (filed once, root cause names the file), NEGATIVE (no regression_files -> no regression cause stored),
  * STATE (second review reuses the open issue), REGRESSION (no suite is supplied: the old `measured`-only path left
- * suite_failing_files empty and the filing refused).
+ * suite_failing_files empty and the filing refused; BR-1513: the field is gone, each charged file is its own cause).
  */
 
 import { describe, expect, it } from "vitest";
@@ -74,7 +74,7 @@ describe("a regression found by the selection files its issue", () => {
     expect(groups.ok).toBe(true);
     if (!groups.ok) return;
     expect(groups.value).toHaveLength(1);
-    expect(groups.value[0]?.cause.label).toContain(RED_FILE);
+    expect(groups.value[0]?.cause.label).toBe(`main red: ${RED_FILE}`);
     expect(tracker.filed).toHaveLength(1);
     expect(tracker.filed[0]?.title).toContain(RED_FILE);
   });
@@ -94,6 +94,5 @@ describe("a regression found by the selection files its issue", () => {
   it("NEGATIVE: a clean selection stores no regression cause", async () => {
     const review = await reviewWithCharged([]);
     expect(review.causes?.regression_files).toBeUndefined();
-    expect(review.causes?.suite_failing_files).toBeUndefined();
   });
 });

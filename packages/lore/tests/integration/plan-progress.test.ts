@@ -541,6 +541,8 @@ interface WorldPlan {
   /** Dimensions the fake judge fails for this plan, with their measured regression files. */
   failing: MilestoneDimension[];
   regressionFiles: string[];
+  /** Makes the fake judge fail its dimensions WITHOUT a cite: such a stored review cannot be fingerprinted (unfileable). */
+  noCites: boolean;
   retired: boolean;
   retirement: PlanRetirementState;
   /** Set to make the next `closePlan` fail once. */
@@ -567,6 +569,7 @@ function makeWorldPlan(slug: string, opts: { acs?: Record<string, unknown>[]; pr
     archived: false,
     failing: [],
     regressionFiles: [],
+    noCites: false,
     retired: false,
     retirement: { state: "none" },
     closeFailures: 0,
@@ -618,8 +621,6 @@ class World {
   readonly store = new InMemoryStore();
   judgeCalls: string[] = [];
   suiteRuns = 0;
-  /** The failing-file set of the batch's ONE suite run (stored on every review as suite_failing_files). */
-  suiteFailingFiles: string[] = [];
   failJudgeOnce = false;
   now = T0;
   spawns = 0;
@@ -711,7 +712,7 @@ class World {
       return err<LoreError>({ code: "AI_PROVIDER_ERROR", message: "injected judge failure", provider: "fake" });
     }
     const dimensions = Object.fromEntries(
-      MILESTONE_DIMENSIONS.map((d) => [d, { verdict: plan.failing.includes(d) ? "fail" : "pass", reason: plan.failing.includes(d) ? `${d} failed` : "ok", reference: "fixture", ...(plan.failing.includes(d) ? { cites: [`src/${d}.ts`] } : {}) }]),
+      MILESTONE_DIMENSIONS.map((d) => [d, { verdict: plan.failing.includes(d) ? "fail" : "pass", reason: plan.failing.includes(d) ? `${d} failed` : "ok", reference: "fixture", ...(plan.failing.includes(d) && !plan.noCites ? { cites: [`src/${d}.ts`] } : {}) }]),
     ) as MilestoneReview["dimensions"];
     const review: MilestoneReview = {
       plan_id: plan.bundle.plan.id,
@@ -720,7 +721,7 @@ class World {
       dimensions,
       decisions: [],
       ...(plan.retired ? { retired_acs: [{ kind: "superseded" as const, spec: `spec-${plan.slug}`, ac: "AC-W-1", reason: "feature gone", at: "2026-10-02T00:00:00.000Z" }] } : {}),
-      ...(plan.regressionFiles.length > 0 ? { causes: { regression_files: [...plan.regressionFiles].sort(), ...(this.suiteFailingFiles.length > 0 ? { suite_failing_files: [...this.suiteFailingFiles].sort() } : {}) } } : {}),
+      ...(plan.regressionFiles.length > 0 ? { causes: { regression_files: [...plan.regressionFiles].sort() } } : {}),
       prompt_version: "fixture",
       diff_source: "fixture",
     };
@@ -904,7 +905,7 @@ describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", 
     expect(world.issues.filed).toBe(0);
   });
 
-  it("HAPPY: two plans with the same failing-file set share ONE issue (fingerprint in its body); regression is a gate, so both stay open (A6: was accepted with known defects)", async () => {
+  it("HAPPY: two plans charged with the same files share one issue PER FILE (fingerprint in its body); regression is a gate, so both stay open (A6: was accepted with known defects)", async () => {
     const world = new World();
     const a = world.add(makeWorldPlan("p-red-a"));
     const b = world.add(makeWorldPlan("p-red-b"));
@@ -912,49 +913,49 @@ describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", 
       p.failing = ["regression"];
       p.regressionFiles = ["packages/x/tests/b.test.ts", "packages/x/tests/a.test.ts"];
     }
-    world.suiteFailingFiles = ["packages/x/tests/b.test.ts", "packages/x/tests/a.test.ts"];
     const run = await world.runner().runBatch(["p-red-a", "p-red-b"], world.ports("batch-1"));
     const rows = run.ok && run.value.state === "ran" ? run.value.rows : [];
     expect(rows.map((r) => r.outcome)).toEqual(["kept-open", "kept-open"]);
-    expect(world.issues.filed).toBe(1);
-    const issue = world.issues.open[0];
-    const cause = causeOf({ plan: "p-red-a", dimension: "regression", reason: "", reference: "", reviewSlug: "r", causes: { regression_files: ["packages/x/tests/a.test.ts"], suite_failing_files: ["packages/x/tests/a.test.ts", "packages/x/tests/b.test.ts"] } });
-    expect(issue?.body).toContain(cause.fingerprint);
-    expect(issue?.title).toContain(`[fp:${cause.short}]`);
-    expect(issue?.title).toContain("main red: packages/x/tests/a.test.ts, packages/x/tests/b.test.ts");
-    expect(world.issues.links.map((l) => `${l.plan}->${String(l.issue)}`).sort()).toEqual(["p-red-a->101", "p-red-b->101"]);
+    expect(world.issues.filed).toBe(2);
+    const causeA = causeOf({ plan: "p-red-a", dimension: "regression", reason: "", reference: "", reviewSlug: "r", causes: { regression_files: ["packages/x/tests/a.test.ts"] } });
+    const causeB = causeOf({ plan: "p-red-b", dimension: "regression", reason: "", reference: "", reviewSlug: "r", causes: { regression_files: ["packages/x/tests/b.test.ts"] } });
+    const [issueA, issueB] = world.issues.open;
+    expect(issueA?.body).toContain(causeA.fingerprint);
+    expect(issueA?.title).toContain(`[fp:${causeA.short}]`);
+    expect(issueA?.title).toContain("main red: packages/x/tests/a.test.ts");
+    expect(issueA?.title).not.toContain("b.test.ts");
+    expect(issueB?.body).toContain(causeB.fingerprint);
+    expect(issueB?.title).toContain("main red: packages/x/tests/b.test.ts");
+    expect(world.issues.links.map((l) => `${l.plan}->${String(l.issue)}`).sort()).toEqual(["p-red-a->101", "p-red-a->102", "p-red-b->101", "p-red-b->102"]);
     expect(a.archived || b.archived).toBe(false);
     expect(world.suiteRuns).toBe(1);
   });
 
-  it("BOUNDARY: a different suite run (different failing set) is a different fingerprint, so a second issue", async () => {
+  it("BOUNDARY: a plan charged with a different file is a different fingerprint, so a second issue", async () => {
     const world = new World();
     const a = world.add(makeWorldPlan("p-red-a"));
     const c = world.add(makeWorldPlan("p-red-c"));
     a.failing = ["regression"];
     a.regressionFiles = ["a.test.ts"];
-    world.suiteFailingFiles = ["a.test.ts"];
     await world.runner().runBatch(["p-red-a"], world.ports("batch-1"));
     c.failing = ["regression"];
     c.regressionFiles = ["c.test.ts"];
-    world.suiteFailingFiles = ["c.test.ts"];
     await world.runner().runBatch(["p-red-c"], world.ports("batch-2"));
     expect(world.issues.filed).toBe(2);
   });
 
-  it("ERROR: a failed regression review without suite_failing_files is a filing error, nothing is filed and the plan stays complete", async () => {
+  it("ERROR: rootCauseOf refuses a regression finding that still carries several files (BR-1513: split by file first); a single charged file files normally", async () => {
     const world = new World();
-    const a = world.add(makeWorldPlan("p-red-old"));
+    const a = world.add(makeWorldPlan("p-red-one"));
     a.failing = ["regression"];
     a.regressionFiles = ["a.test.ts"];
-    const run = await world.runner().runBatch(["p-red-old"], world.ports("batch-1"));
-    expect(run.ok && run.value.state === "ran" && run.value.rows[0]).toMatchObject({ outcome: "error", stage: "filing" });
-    expect(world.issues.filed).toBe(0);
-    expect(a.archived).toBe(false);
-    expect(world.errors.map((e) => e.stage)).toEqual(["filing"]);
-    expect(world.errors[0]?.message).toContain("suite_failing_files");
-    const direct = rootCauseOf({ plan: "p", dimension: "regression", reason: "x", reference: "", reviewSlug: "r", causes: { regression_files: ["a.test.ts"] } });
-    expect(direct.ok).toBe(false);
+    const run = await world.runner().runBatch(["p-red-one"], world.ports("batch-1"));
+    expect(run.ok && run.value.state === "ran" && run.value.rows[0]).toMatchObject({ outcome: "kept-open", reviewed: true });
+    expect(world.issues.filed).toBe(1);
+    expect(world.errors).toEqual([]);
+    const several = rootCauseOf({ plan: "p", dimension: "regression", reason: "x", reference: "", reviewSlug: "r", causes: { regression_files: ["a.test.ts", "b.test.ts"] } });
+    expect(several.ok).toBe(false);
+    expect(!several.ok && several.error).toMatchObject({ code: "VALIDATION_ERROR", field: "causes.regression_files", rule: "BR-1513" });
   });
 
   it("STATE: a second batch hitting the same fingerprint while the issue is open links it and files nothing", async () => {
@@ -962,7 +963,6 @@ describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", 
     const a = world.add(makeWorldPlan("p-red-a"));
     a.failing = ["regression"];
     a.regressionFiles = ["a.test.ts"];
-    world.suiteFailingFiles = ["a.test.ts"];
     await world.runner().runBatch(["p-red-a"], world.ports("batch-1"));
     expect(world.issues.filed).toBe(1);
     const later = world.add(makeWorldPlan("p-red-later"));
@@ -1033,19 +1033,18 @@ describe("batch outcomes — pass, fail by root cause, retired ACs (AC-PCR-4)", 
 });
 
 describe("batch outcomes — one main red issue per suite run, issue titles keep the original summary (AC-PCR-4)", () => {
-  it("HAPPY: two plans attributed different subsets of ONE failing suite run file ONE main red issue with the full sorted set, linked to both", async () => {
+  it("HAPPY: two plans charged different files file one issue per file (a, m, z), each linked to the plan charged with it", async () => {
     const world = new World();
     const a = world.add(makeWorldPlan("p-sub-a"));
     const b = world.add(makeWorldPlan("p-sub-b"));
-    world.suiteFailingFiles = ["z.test.ts", "a.test.ts", "m.test.ts"];
     a.failing = ["regression"];
     a.regressionFiles = ["a.test.ts"];
     b.failing = ["regression"];
     b.regressionFiles = ["m.test.ts", "z.test.ts"];
     await world.runner().runBatch(["p-sub-a", "p-sub-b"], world.ports("batch-1"));
-    expect(world.issues.filed).toBe(1);
-    expect(world.issues.open[0]?.title).toContain("main red: a.test.ts, m.test.ts, z.test.ts");
-    expect(world.issues.links.map((l) => `${l.plan}->${String(l.issue)}`).sort()).toEqual(["p-sub-a->101", "p-sub-b->101"]);
+    expect(world.issues.filed).toBe(3);
+    expect(world.issues.open.map((i) => i.title.replace(/ \[fp:[0-9a-f]{12}\]$/, ""))).toEqual(["regression: main red: a.test.ts", "regression: main red: m.test.ts", "regression: main red: z.test.ts"]);
+    expect(world.issues.links.map((l) => `${l.plan}->${String(l.issue)}`).sort()).toEqual(["p-sub-a->101", "p-sub-b->102", "p-sub-b->103"]);
   });
 
   it("REGRESSION: a finding summary naming AC-ZZ-3 and BR-99999 keeps both ids in the issue title, with [fp:<12hex>]", () => {
@@ -1125,7 +1124,6 @@ describe("lease and retry — renewal, takeover, errors, once per fingerprint, o
     const plan = world.add(makeWorldPlan("p-file-error"));
     plan.failing = ["regression"];
     plan.regressionFiles = ["a.test.ts"];
-    world.suiteFailingFiles = ["a.test.ts"];
     world.issues.failFilingOnce = true;
     const first = await world.runner().runBatch(["p-file-error"], world.ports("batch-1"));
     expect(first.ok && first.value.state === "ran" && first.value.rows[0]).toMatchObject({ outcome: "error", stage: "filing", reviewed: true });
@@ -1222,15 +1220,15 @@ async function archivePlan(store: InMemoryStore, plan: { id: string; slug: strin
 }
 
 describe("an unfileable stored review means needs review; one plan never blocks the others (AC-PCR-5)", () => {
-  /** A complete plan whose stored review failed regression on a measured run but lacks suite_failing_files. */
+  /** A complete plan whose stored review failed security without any cite, so its cause cannot be fingerprinted. */
   async function worldWithBadRecord(): Promise<{ world: World; bad: WorldPlan; good: WorldPlan }> {
     const world = new World();
     const bad = world.add(makeWorldPlan("p-bad"));
     const good = world.add(makeWorldPlan("p-good"));
-    bad.failing = ["regression"];
-    bad.regressionFiles = ["a.test.ts"];
-    await world.judge("p-bad"); // stores the incomplete review (no suite_failing_files)
-    world.suiteFailingFiles = ["a.test.ts"]; // the re-review stores a complete one
+    bad.failing = ["security"];
+    bad.noCites = true;
+    await world.judge("p-bad"); // stores the unfileable review (a failed dimension without a cite)
+    bad.noCites = false; // the re-review stores a complete one
     return { world, bad, good };
   }
 
@@ -1247,9 +1245,9 @@ describe("an unfileable stored review means needs review; one plan never blocks 
     expect(rows.map((r) => [r.plan, r.outcome, r.reviewed])).toEqual([["p-bad", "kept-open", true], ["p-good", "accepted", true]]);
     expect(world.errors).toHaveLength(1);
     expect(world.errors[0]).toMatchObject({ planSlug: "p-bad", stage: "review" });
-    expect(world.errors[0]?.message).toContain("suite_failing_files");
+    expect(world.errors[0]?.message).toContain("without any cite");
     expect(bad.docs).toHaveLength(2);
-    expect(bad.docs[1]?.extra["milestone_review"]).toMatchObject({ causes: { suite_failing_files: ["a.test.ts"] } });
+    expect(bad.docs[1]?.extra["milestone_review"]).toMatchObject({ dimensions: { security: { cites: ["src/security.ts"] } } });
     expect(world.issues.filed).toBe(1);
   });
 
@@ -1271,7 +1269,7 @@ describe("an unfileable stored review means needs review; one plan never blocks 
     const lines = formatCompleteLines(summarizeComplete(views.value, T0));
     expect(lines[0]).toContain("complete 2 (awaiting review 2, awaiting owner 0");
     expect(lines[1]).toContain("last review error: p-bad review:");
-    expect(lines[1]).toContain("suite_failing_files");
+    expect(lines[1]).toContain("without any cite");
     const stats = await service.acceptance(lister);
     expect(stats.ok).toBe(true);
   });
@@ -1636,7 +1634,6 @@ describe("AC-PCR-4 one coverage predicate decides filing-complete and plan close
     const plan = world.add(makeWorldPlan("p-legacy2"));
     plan.failing = ["regression"];
     plan.regressionFiles = ["l2.test.ts"];
-    world.suiteFailingFiles = ["l2.test.ts"];
     await world.judge("p-legacy2");
     world.issues.open.push({ number: 8, title: "regression: anything [fp:whatever]", body: "" });
     world.issues.links.push({ plan: "p-legacy2", issue: 8, dimensions: [] });
@@ -1662,7 +1659,6 @@ describe("AC-PCR-5 a fixed covering issue sends its plan back to review", () => 
     const plan = world.add(makeWorldPlan("p-fixed"));
     plan.failing = ["regression"];
     plan.regressionFiles = ["fixed.test.ts"];
-    world.suiteFailingFiles = ["fixed.test.ts"];
     await world.judge("p-fixed");
     world.issues.links.push({ plan: "p-fixed", issue: 7, dimensions: ["regression"] });
     return { world, plan };
@@ -1703,7 +1699,7 @@ describe("AC-PCR-5 a fixed covering issue sends its plan back to review", () => 
 
   it("REGRESSION: the filing dedupe matches open issues only, never a closed one carrying the fingerprint", async () => {
     const { world } = await planWithClosedCover();
-    const finding = { plan: "p-fixed", dimension: "regression" as const, reason: "", reference: "", reviewSlug: "r", causes: { regression_files: ["fixed.test.ts"], suite_failing_files: ["fixed.test.ts"] } };
+    const finding = { plan: "p-fixed", dimension: "regression" as const, reason: "", reference: "", reviewSlug: "r", causes: { regression_files: ["fixed.test.ts"] } };
     const cause = causeOf(finding);
     const filed = await new IssueFilingService(world.issues).fileFindings([finding]); // the tracker holds no open issue: #7 is closed
     expect(filed.ok && filed.value[0]?.reused).toBe(false);
@@ -1719,7 +1715,6 @@ describe("AC-PCR-5 a failing re-review files every uncovered dimension; a plan r
     const plan = world.add(makeWorldPlan("p-loop"));
     plan.failing = ["regression"];
     plan.regressionFiles = ["loop.test.ts"];
-    world.suiteFailingFiles = ["loop.test.ts"];
     await world.judge("p-loop");
     world.issues.links.push({ plan: "p-loop", issue: 7, dimensions: ["regression"] });
     return { world, plan };
@@ -1820,7 +1815,7 @@ describe("AC-KD-2 filing records known defects on the plan, no document and no l
     return readKnownDefects((await reload(w.store, plan.id)).extra).map((e) => `${String(e.number)}/${e.dimension}`);
   }
 
-  const regression = (plan: string) => ({ plan, dimension: "regression" as const, reason: "red", reference: "", reviewSlug: "r", causes: { regression_files: ["a.test.ts"], suite_failing_files: ["a.test.ts"] } });
+  const regression = (plan: string) => ({ plan, dimension: "regression" as const, reason: "red", reference: "", reviewSlug: "r", causes: { regression_files: ["a.test.ts"] } });
   const security = (plan: string) => ({ plan, dimension: "security" as const, reason: "leak", reference: "", reviewSlug: "r", cites: ["src/auth.ts"] });
 
   it("a plan failing regression and security with two fingerprints files two issues and records exactly one entry per failed dimension", async () => {
