@@ -37,7 +37,7 @@ export interface CorpusParentSource {
   >;
   create(input: CreateDocInput): Promise<{ ok: true; value: { id: string } } | { ok: false; error: unknown }>;
   /** Present on a service wired for structured writes (`app.corpusService`); absent on a bare construction. */
-  readonly templateReader?: TemplateService;
+  readonly templateReader?: TemplateService | undefined;
 }
 
 /** What one spawned `lore` produced: the slice of a runner's result the CLI variant reads. */
