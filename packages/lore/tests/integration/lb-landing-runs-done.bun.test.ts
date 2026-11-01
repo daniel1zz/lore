@@ -8,8 +8,8 @@
  * command `true`, each fixture claim under its own CLAUDE_CODE_SESSION_ID with the ambient one stripped).
  *
  * Coverage: (1) HAPPY complete runner-attested evidence: integrate archives the task with no separate `lore done`;
- * (2) NEGATIVE only a filtered pass of the anchored test file: integrate exits 0, the branch is on main, the task stays
- * unarchived, stdout names the unfiltered-test-file floor and a `lore evidence` command for that file.
+ * (2) NEGATIVE no red run on record (red-first floor): integrate exits 0, the branch is on main, the task stays
+ * unarchived, stdout names the red-first floor and a `lore evidence` command for it.
  * REGRESSION (simplest green-but-broken): a landing that rolls main back when done refuses; main must contain X2.
  */
 import { afterEach, describe, expect, it } from "vitest";

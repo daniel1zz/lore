@@ -253,10 +253,10 @@ describe("lore done decides the holder by run (spec-run-only-write-identity-and-
 
     const done = await doneHeld(slug, HELD_NAME, R2);
 
-    // The task holds no pass of its contract, so the evidence floor refuses (the holder check is the LAST floor, BR-209). The refusal
-    // that is reached names neither the ended run nor a fresh claim: the ended run's claim no longer holds the task against run B.
+    // The task has no landing record, so the not-landed floor refuses whatever evidence exists (the holder check is the LAST floor, BR-209).
+    // The refusal that is reached names neither the ended run nor a fresh claim: the ended run's claim no longer holds the task against run B.
     expect(done.ok).toBe(false);
-    expect(errorText(done)).toContain("[floor: attested-pass]");
+    expect(errorText(done)).toContain("[floor: not-landed]");
     expect(errorText(done)).not.toContain(R1);
     expect(errorText(done)).not.toContain("fresh claim");
   });

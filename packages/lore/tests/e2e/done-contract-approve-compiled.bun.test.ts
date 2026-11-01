@@ -1,5 +1,6 @@
 // @reads assets/project/lore-config-template.yaml
 // @reads .lore/config.yaml
+// @spawns packages/lore/src/index.ts -- the gh-issue-stub helper and runSpawned start the CLI entry in a child bun process
 /**
  * done-contract-approve-compiled.bun.test.ts — the done contract compiled at approve, observed through the `lore` command tree
  * on throwaway repositories and corpora (spec-done-contract-compiled-at-approve-task-kinds-write-sets).

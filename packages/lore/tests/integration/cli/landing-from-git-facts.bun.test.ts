@@ -15,7 +15,8 @@
  *   - the evidence-binding cases of AC-ND-3 (a pass on a dirty tree / an unreachable head / before the latest claim does not count) are
  *     replaced by the evidence rule of AC-DCS1-27, which binds a pass to the tree it ran on (`done-contract-done-floors-compiled`);
  *   - the oracle-file reads of AC-ND-6 are replaced by AC-DCS1-30 (`cli/verify-missing-oracle-file`);
- *   - the no-branch claim half of AC-ND-9 (`work-needs-branch`) is replaced by the claim-time contract kind (a code task claims on a branch).
+ *   - the no-branch claim half of AC-ND-9 (`work-needs-branch`) is still owned by AC-DCS1-14 (a check or corpus task is never claimed and
+ *     is finished with `lore finish`; the refusal also names `lore start`); this file keeps the detached-HEAD half (`worktree-without-branch`).
  * What stays, with the same predicate and the same refusal tokens: unlanded work refuses `[floor: not-landed]` with a reason token
  * (`tip-not-on-main`, `uncommitted-work`, `unmeasurable`), by whatever route main later reaches the commit; the capture-time tip decides
  * after the harness removes the branch; a worktree on a detached HEAD cannot be claimed.
@@ -222,7 +223,7 @@ describe("AC-ND-1 — there is no commitless-landing flag on lore done, and an u
 
     // the row taken at the branch has no landed commit to be compared with: the evidence rule (AC-DCS1-27) refuses it as unmeasurable
     expect(refused.exitCode).toBe(4);
-    expect(refused.text).toContain("[floor: attested-pass]");
+    expect(refused.text).toContain("[floor: not-landed]");
     expect(refused.text).toContain("no landing record");
     expect(docOf(task, dir).status).not.toBe("archived");
     expect(docOf(task, dir).extra["landing"]).toBeUndefined();
@@ -249,7 +250,7 @@ describe("AC-ND-2 — landing follows reachability from main", () => {
 
     // reachability alone no longer closes a code task: only `lore integrate` records the landing a contract is judged against
     expect(again.exitCode).toBe(4);
-    expect(again.text).toContain("[floor: attested-pass]");
+    expect(again.text).toContain("[floor: not-landed]");
     expect(again.text).toContain("no landing record");
     expect(docOf(task, dir).status).not.toBe("archived");
   }, 300_000);
@@ -334,7 +335,9 @@ describe("AC-ND-9 — a claim on a worktree needs a branch (#304)", () => {
 
     expect(refused.exitCode).toBe(4);
     expect(refused.text).toContain("worktree-without-branch");
-    expect(refused.text).toContain("without --worktree");
+    expect(refused.text).toContain("A check or corpus task is never claimed");
+    expect(refused.text).toContain("lore finish");
+    expect(refused.text).not.toContain("without --worktree");
     expect(docOf(task, dir).extra["claim"]).toBeUndefined();
     expect(docOf(task, dir).version).toBe(before.version);
 

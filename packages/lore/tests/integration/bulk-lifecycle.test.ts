@@ -1,4 +1,5 @@
 // @reads assets/project/lore-config-template.yaml
+// @spawns-external git -- builds the throwaway repo's landing branch (execFileSync git in landAttested)
 /**
  * @spec_ref spec-lean-governance-batch-verbs-judgment-only-at-milestones (Part A; AC-LG-1..AC-LG-4; BR-1366, BR-1367)
  *
