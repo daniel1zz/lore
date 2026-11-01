@@ -920,7 +920,7 @@ export class SessionService {
           field: "plan_ref",
           message:
             "a handoff needs a parent: pass --plan <plan> to file it under that plan, or create the " +
-            "requirements document first (`lore create prd --title <title>`) so it can be filed under it; " +
+            "requirements document first (`lore template show prd --blank`, fill it, then `lore create prd --title <title> --fields-file <file>`) so it can be filed under it; " +
             "this corpus has neither a --plan given nor a requirements document",
           rule: "BR-709",
         });

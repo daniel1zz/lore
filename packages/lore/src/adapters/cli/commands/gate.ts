@@ -317,7 +317,6 @@ const gateSpecCreateInputSchema = z
     type: z.string(),
     title: z.string(),
     parent_id: z.string().optional(),
-    content: z.string().optional(),
     extra: z
       .object({ spec_kind: z.string().optional(), acceptance_criteria: z.unknown().optional() })
       .passthrough()
@@ -326,6 +325,22 @@ const gateSpecCreateInputSchema = z
   .passthrough();
 
 type GateSpecCreateInput = z.infer<typeof gateSpecCreateInputSchema>;
+
+/**
+ * Refusal text for a candidate that carries a `content` key (BR-1528/1529). Names the structured route
+ * (`template show <type> [--kind k] --blank` → fill → `create --fields-file`) and the route for an
+ * unconverted legacy document (`lore convert`). Pure.
+ */
+function renderContentKeyRefusal(input: GateSpecCreateInput): string {
+  const kind = input.extra?.spec_kind;
+  const kindFlag = input.type === "spec" && kind !== undefined && kind !== "" ? ` --kind ${kind}` : "";
+  return [
+    "gate: refused (content key)",
+    "lore_create takes no `content`: a document is stored as structured fields and its body is rendered from them, so a supplied body is refused, not ignored.",
+    `Structured route: \`lore template show ${input.type}${kindFlag} --blank\` → fill the fields → \`lore create ${input.type} --title <title> --fields-file <file>\`.`,
+    "Unconverted legacy document: bring it into fields with `lore convert`, then revise through fields.",
+  ].join("\n");
+}
 
 export default defineLoreCommand({
   meta: {
@@ -343,7 +358,7 @@ export default defineLoreCommand({
         "input-json": {
           type: "string",
           description:
-            'JSON matching lore_create\'s input shape: {type, title, parent_id?, extra?: {spec_kind?, acceptance_criteria?}}. A spec is created structured (`lore template show spec --kind <k> --blank` → fill → `lore create spec --fields-file`), so no body is passed; a legacy `content` key is accepted and ignored by every predicate.',
+            'JSON matching lore_create\'s input shape: {type, title, parent_id?, extra?: {spec_kind?, acceptance_criteria?}}. A spec is created structured (`lore template show spec --kind <k> --blank` → fill → `lore create spec --fields-file`), so no body is passed; a `content` key is refused (exit 4) naming the structured route and `lore convert`.',
           required: true,
         },
       },
@@ -374,6 +389,13 @@ export default defineLoreCommand({
             `Error: --input-json does not match the expected shape: ${issue?.message ?? "invalid input"}\n`,
           );
           return 2;
+        }
+
+        // reason: BR-1528/1529 — a document is stored as fields and its body is rendered from them, so a
+        // `content` key can never be honoured; it is refused loudly, not dropped (no silent fallback).
+        if ("content" in parsed.data) {
+          printLine(inv.io.stdout, renderContentKeyRefusal(parsed.data));
+          return 4;
         }
 
         const { app, config } = loadLoreApp({ inv });

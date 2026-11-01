@@ -16,7 +16,7 @@
  *       other config key. Re-baselined by BR-987 / AC-FIP-3: a real seed IS an audited adoption (one
  *       `baseline_adopt` row, actor = the setup caller); a kept explicit mode writes no row.
  *   C2. The skill and templates live in the assets SSOT as `assets/skills/lore-baseline/SKILL.md` and
- *       `assets/skills/lore-baseline/templates/<name>.md` (at least one template) and are embedded in the generated
+ *       `assets/skills/lore-baseline/SKILL.md` (node skeletons come from `lore template show --blank`, no skill-side copies) and are embedded in the generated
  *       assets manifest under `skills/lore-baseline/...`.
  *   C3. `lore setup --project` installs every `skills/lore-baseline/**` asset into the repo at
  *       `.claude/<asset path>` (so `.claude/skills/lore-baseline/SKILL.md`), byte-identical to the asset, and lists
@@ -178,9 +178,11 @@ describe("setup seeds baseline adoption (BL-8): authoring skill and templates", 
     expect(readFileSync(assetSkill, "utf8").trim().length).toBeGreaterThan(200);
   });
 
-  it("the assets SSOT ships at least one node template under skills/lore-baseline/templates/", () => {
+  it("the node skeletons have one source: the seeded templates, not skill-side .md copies", () => {
     const manifest = readEmbeddedManifestPaths();
-    expect(manifest.filter((p) => p.startsWith("skills/lore-baseline/templates/") && p.endsWith(".md")).length).toBeGreaterThan(0);
+    expect(manifest.filter((p) => p.startsWith("skills/lore-baseline/templates/"))).toEqual([]);
+    expect(manifest).toContain("templates/baseline-branch.json");
+    expect(manifest).toContain("templates/baseline-leaf.json");
   });
 
   it("setup installs the skill at .claude/skills/lore-baseline/SKILL.md byte-identical to the asset", () => {

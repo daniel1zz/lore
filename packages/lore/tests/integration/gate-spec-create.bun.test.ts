@@ -104,14 +104,11 @@ function createPrd(tmpDir: string, title: string): string {
   return slug;
 }
 
-const COMPLIANT_CONTENT = "## Overview\n\nSome text.\n\n## Scope\n\nIn scope.\n\n## Acceptance Criteria\n\n- AC1\n";
-
 // reason: BR-1 - a compliant spec payload carries NO parent; the argument is kept so callers read the same.
 function compliantPayload(_parentSlug: string): Record<string, unknown> {
   return {
     type: "spec",
     title: "A well-formed spec",
-    content: COMPLIANT_CONTENT,
     extra: { spec_kind: "tech" },
   };
 }
@@ -179,14 +176,24 @@ describe("lore gate spec-create", () => {
     expect(result.stdout).toContain("a spec takes no parent");
   });
 
-  // REGRESSION — BR-4 retired: a body with no `## ` heading is no longer a spec-create violation (the template is the check).
-  it("REGRESSION: a content with no level-2 heading passes (hasSkeleton is retired)", () => {
+  // NEGATIVE — BR-1528/1529: a document is stored as fields, so a `content` key is refused loudly, never dropped.
+  it("NEGATIVE: a content key is refused (exit 4) naming the structured route and the convert route", () => {
     const payload = compliantPayload(prdSlug);
     payload["content"] = "just some prose, no headings at all";
     const result = runGate(tmpDir, payload);
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("gate: pass");
-    expect(result.stdout).not.toContain("MISSING_SKELETON");
+    expect(result.exitCode).toBe(4);
+    expect(result.stdout).not.toContain("gate: pass");
+    expect(result.stdout).toContain("content");
+    expect(result.stdout).toContain("lore template show spec --kind tech --blank");
+    expect(result.stdout).toContain("--fields-file");
+    expect(result.stdout).toContain("lore convert");
+  });
+
+  // BOUNDARY — an empty content string is still a content key: refused, not treated as absent.
+  it("BOUNDARY: an empty content string is refused too", () => {
+    const payload = compliantPayload(prdSlug);
+    payload["content"] = "";
+    expect(runGate(tmpDir, payload).exitCode).toBe(4);
   });
 
   // BOUNDARY — every remaining structural predicate fails simultaneously → both reasons present.
@@ -195,7 +202,6 @@ describe("lore gate spec-create", () => {
       type: "spec",
       title: "Broken spec",
       parent_id: prdSlug,
-      content: "no headings",
       extra: { spec_kind: "bogus" },
     });
     expect(result.exitCode).toBe(4);
@@ -221,7 +227,7 @@ describe("lore gate spec-create", () => {
   it("AC5: LORE_GATE_BYPASS=1 exits 0 for a non-compliant candidate", () => {
     const result = runGate(
       tmpDir,
-      { type: "spec", title: "Broken spec", content: "no headings", extra: { spec_kind: "bogus" } },
+      { type: "spec", title: "Broken spec", extra: { spec_kind: "bogus" } },
       { LORE_GATE_BYPASS: "1" },
     );
     expect(result.exitCode).toBe(0);
@@ -356,7 +362,7 @@ describe("lore gate spec-create: no approved template", () => {
   afterEach(() => cleanupDir(tmpDir));
 
   it("BOUNDARY: still exits 4 with the missing reason, and the pack says no template could be read", () => {
-    const result = runGate(tmpDir, { type: "spec", title: "x", parent_id: "some-parent", content: "no headings" });
+    const result = runGate(tmpDir, { type: "spec", title: "x", parent_id: "some-parent" });
     expect(result.exitCode).toBe(4);
     expect(result.stdout).toContain("a spec takes no parent");
     expect(result.stdout).not.toContain("MISSING_SKELETON");
