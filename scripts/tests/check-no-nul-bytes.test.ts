@@ -116,6 +116,7 @@
 // @reads assets/skills/lore-write-a-skill/SKILL.md
 // @reads assets/skills/lore/SKILL.md
 // @reads assets/skills/shared/**
+// @reads assets/templates/**
 // @reads bun.lock
 // @reads bunfig.toml
 // @reads docs/requirements/**
