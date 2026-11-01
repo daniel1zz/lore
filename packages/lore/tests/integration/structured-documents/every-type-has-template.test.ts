@@ -142,6 +142,21 @@ function filledFilesOf(shown: ShownTemplate): { fields: unknown; dimensions: unk
   };
 }
 
+/** Paths of every array reachable through required properties whose blank value has no entry (an optional entry must still be shown). */
+function arraysWithoutEntry(schema: JsonSchemaNode | undefined, blank: unknown, path: string): string[] {
+  if (schema === undefined) return [];
+  if (schema["type"] === "array") {
+    const items = isNode(schema["items"]) ? schema["items"] : undefined;
+    if (!Array.isArray(blank) || blank.length === 0) return items === undefined ? [] : [path];
+    return arraysWithoutEntry(items, blank[0], `${path}[0]`);
+  }
+  if (isNode(blank) && isNode(schema["properties"])) {
+    const properties = schema["properties"] as Record<string, unknown>;
+    return Object.entries(blank).flatMap(([key, value]) => arraysWithoutEntry(isNode(properties[key]) ? (properties[key] as JsonSchemaNode) : undefined, value, `${path}.${key}`));
+  }
+  return [];
+}
+
 /** Knowledge sub-types `lore create` refuses by design: retired, or written only by their dedicated command. */
 const KNOWLEDGE_WITHOUT_CREATE: readonly string[] = ["assessment", "milestone-review", "handoff", "uat"];
 
@@ -237,6 +252,24 @@ describe("AC-ST-8: the filled blank of every type and kind creates in a fresh co
   it("the corpus refuses an unstructured create, so each round-trip below is a structured one", async () => {
     const result = await rig.lore(["create", "prd", "--title", "Unstructured", "--content", "free text", "--no-ai"]);
     expect(result.exitCode).not.toBe(0);
+  });
+
+  it("the spec-tech blank shows one out_of_scope entry with its id/text/why item shape", async () => {
+    const shown = await showBlank("spec", "tech");
+    expect(shown.blank.fields["out_of_scope"]).toEqual([{ id: "", text: "" }]);
+    const itemProperties = ((shown.fields["properties"] as Record<string, { items?: { properties?: Record<string, unknown> } }>)["out_of_scope"]?.items?.properties) ?? {};
+    expect(Object.keys(itemProperties)).toEqual(["id", "text", "why"]);
+    const yaml = await rig.lore(["template", "show", "spec", "--kind", "tech", "--blank"]);
+    expect(yaml.stdout).toMatch(/out_of_scope:\n\s+# optional[^\n]*\n\s+- id: ""\n\s+text: ""\n\s+why: ""/);
+  });
+
+  it("every blank shows one entry for every array reachable through its required fields", async () => {
+    const defects: string[] = [];
+    for (const seed of requiredSeeds()) {
+      const shown = await showBlank(seed.docType, seed.kind);
+      for (const path of arraysWithoutEntry(shown.fields, shown.blank.fields, "fields")) defects.push(`${seed.file}: ${path}`);
+    }
+    expect(defects).toEqual([]);
   });
 
   it("the milestone-review template allows several root causes in one dimension, and refuses a root cause without a fingerprint", async () => {
