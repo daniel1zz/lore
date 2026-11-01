@@ -512,6 +512,10 @@ describe("STATE — workflow.task_feed.* config override clips the objective sec
 
 describe("REGRESSION — spec-create / session-resume / phase-start outputs are unchanged after the table-driven dispatch refactor", () => {
   it("spec-create with no approved template prints the template-slice source line and an explicit no-template notice, exit 0", async () => {
+    // reason: `lore init` seeds the spec/feature template (BR-807 as modified); this case is about a corpus WITHOUT one, so the
+    // seeded template document is removed first (a soft delete: the slot then resolves nothing).
+    const removed = await runLore(["delete", "spec-feature-template", "--confirm"], tmpDir);
+    expect(removed.exitCode, removed.stderr).toBe(0);
     const result = await runLore(["feed", "spec-create"], tmpDir);
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe(

@@ -391,6 +391,17 @@ function makeFixture(prefix: string): string {
   if (!existsSync(join(dir, ".lore", "lore.db"))) {
     throw new Error(`lore init did not create ${join(dir, ".lore", "lore.db")} — a later verb would walk up to a foreign corpus`);
   }
+  // reason: `lore init` seeds one approved template per shipped seed (BR-807 as modified). A template row carries no `meta`
+  // (like `prd`, `deriveTypeMeta` has no variant for it by design), so these fixtures — which pin the ten-key row of the
+  // types they exercise — soft-delete the seeded templates; the listing then holds only the documents the fixture creates.
+  const seeded = spawnLore(["list", "--type", "template", "--json", "--limit", "500"], dir);
+  if (seeded.exitCode !== 0) throw new Error(`listing the seeded templates failed (exit ${seeded.exitCode}): ${seeded.stderr}`);
+  const templates = (JSON.parse(seeded.stdout) as { data: { docs: Array<{ slug: string }> } }).data.docs;
+  if (templates.length === 0) throw new Error("lore init seeded no template: the fixture's premise (init seeds them) is gone");
+  for (const template of templates) {
+    const removed = spawnLore(["delete", template.slug, "--confirm"], dir);
+    if (removed.exitCode !== 0) throw new Error(`removing ${template.slug} failed (exit ${removed.exitCode}): ${removed.stderr}`);
+  }
   return dir;
 }
 

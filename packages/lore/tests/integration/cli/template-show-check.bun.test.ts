@@ -134,6 +134,14 @@ beforeAll(async () => {
   if (init.exitCode !== 0) throw new Error(`init failed: ${init.stderr}`);
   dbPath = join(dir, ".lore", "lore.db");
 
+  // reason: `lore init` seeds one approved template per shipped seed (BR-807 as modified). This suite pins its OWN fixture
+  // templates (an equal-version seed would tie with them, and the draft-only task case needs the task slot empty), so the
+  // seeded template documents are soft-deleted first.
+  await withApp(async (app) => {
+    const seeded = await must(app.corpusService.list({ type: "template", limit: 500 } as never), "list seeded templates");
+    for (const template of seeded.docs) await must(app.corpusService.delete(template.id, true), `remove ${template.slug}`);
+  });
+
   await withApp(async (app) => {
     prdId = (await must(app.corpusService.create({ type: "prd", title: "Template CLI PRD", content: "root" } as never), "prd")).id;
     const template = await must(

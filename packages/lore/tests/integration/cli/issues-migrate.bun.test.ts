@@ -216,7 +216,8 @@ describe(`${SPEC}#AC-GS-12 migration reaches its post-conditions losslessly and 
     expect(result.stdout).toContain("14 of 14 migrated");
 
     // zero-ness
-    expect(sql(fixture, `SELECT COUNT(*) AS c FROM docs WHERE deleted_at IS NULL AND extra LIKE '%"issue_report"%'`)[0]?.["c"]).toBe(0);
+    // reason: the seeded issue-report TEMPLATE (BR-807 as modified) names `issue_report` in its own body; a template is no mirror carrier
+    expect(sql(fixture, `SELECT COUNT(*) AS c FROM docs WHERE deleted_at IS NULL AND type != 'template' AND extra LIKE '%"issue_report"%'`)[0]?.["c"]).toBe(0);
     expect(sql(fixture, "SELECT COUNT(*) AS c FROM links WHERE link_type = 'resolves'")[0]?.["c"]).toBe(0);
 
     // meaning: per-carrier refs
@@ -326,7 +327,7 @@ describe(`${SPEC}#AC-GS-13 a GitHub failure leaves the mirror intact and the run
     expect(sql(fixture, "SELECT COUNT(*) AS c FROM audit WHERE action = 'issue_mirror_retired' AND doc_id = ?", ids["m2"] ?? "")[0]?.["c"]).toBe(0);
 
     // every OTHER mirror is migrated
-    const stillMirrors = sql(fixture, `SELECT id FROM docs WHERE deleted_at IS NULL AND extra LIKE '%"issue_report"%'`).map((row) => row["id"]);
+    const stillMirrors = sql(fixture, `SELECT id FROM docs WHERE deleted_at IS NULL AND type != 'template' AND extra LIKE '%"issue_report"%'`).map((row) => row["id"]);
     expect(stillMirrors).toEqual([ids["m2"]]);
     expect(fixture.stateOf(2).state).toBe("open");
   }, SEED_TIMEOUT);

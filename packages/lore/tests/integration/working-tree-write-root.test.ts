@@ -24,6 +24,14 @@ import type { DocWritePort } from "../../src/service/corpus-service";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 
 import { ensureRequirementsDocSlugAsync } from "../helpers/parented-create.js";
+import { readShippedTemplateSeeds } from "../../src/adapters/cli/template-seeds.js";
+
+/** The approved template documents `lore init` seeds (BR-807 as modified): one per shipped seed. */
+const SEED_COUNT = (() => {
+  const seeds = readShippedTemplateSeeds();
+  if (!seeds.ok) throw new Error(JSON.stringify(seeds.error));
+  return seeds.value.length;
+})();
 const scratch: string[] = [];
 
 afterEach(() => {
@@ -167,8 +175,10 @@ describe("INT-T5 tracked-file writes land in the invoking working tree", () => {
     expect(migrated.exitCode, migrated.stderr).toBe(0);
     const humanIds = Object.values(JSON.parse(readFileSync(indexPath, "utf8")).mappings as Record<string, { human_id: string }>).map((m) => m.human_id);
     // reason: the adr is filed under a requirements document (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6), which is
-    // mirrored too; only the adr was drifted, so the migration restores ADR-001 and leaves PRD-001 as it was.
-    expect([...humanIds].sort()).toEqual(["ADR-001", "PRD-001"]);
+    // mirrored too; only the adr was drifted, so the migration restores ADR-001 and leaves PRD-001 as it was. The corpus also
+    // carries the approved templates `lore init` seeds (BR-807 as modified), one TPL-nnn per shipped seed, untouched.
+    const templateIds = Array.from({ length: SEED_COUNT }, (_, i) => `TPL-${String(i + 1).padStart(3, "0")}`);
+    expect([...humanIds].sort()).toEqual(["ADR-001", "PRD-001", ...templateIds]);
     expect(snapshot(main)).toEqual(before);
   }, 60_000);
 
