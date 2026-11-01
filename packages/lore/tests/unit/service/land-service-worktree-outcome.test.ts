@@ -37,7 +37,7 @@ function taskRecord(status: string): DocRecord {
         new_symbols: [],
         added_oracles: [],
       },
-      claim: { by: "agent:test", at: "2026-11-01T00:00:00.000Z", branch: BRANCH, finished_commit: TIP },
+      claim: { by: "agent:test", at: "2026-11-01T00:00:00.000Z", branch: BRANCH, start_head: "b".repeat(40), finished_at: "2026-11-01T00:00:00.000Z", finished_commit: TIP },
     },
   } as unknown as DocRecord;
 }
@@ -70,7 +70,7 @@ describe("lore land prints the worktree outcome of its done walk", () => {
     const reason = "ignored files at .env.local would be lost; see decision record";
     const { service, doneCalls } = serviceWith("approved", [{ worktree: WORKTREE, decision: "keep", reason }]);
     const landed = await service.land(SLUG);
-    expect(landed.ok).toBe(true);
+    expect(landed.ok ? "ok" : JSON.stringify(landed.error)).toBe("ok");
     if (!landed.ok) return;
     expect(doneCalls).toEqual([SLUG]);
     expect(landed.value.exit).toBe(0);
@@ -84,7 +84,7 @@ describe("lore land prints the worktree outcome of its done walk", () => {
   it("a removed worktree is printed as `worktree: removed <path>`", async () => {
     const { service } = serviceWith("approved", [{ worktree: WORKTREE, decision: "remove", reason: "removed" }]);
     const landed = await service.land(SLUG);
-    expect(landed.ok).toBe(true);
+    expect(landed.ok ? "ok" : JSON.stringify(landed.error)).toBe("ok");
     if (!landed.ok) return;
     expect(landed.value.lines).toEqual([`land: landed ${BRANCH} on main`, `land: archived ${SLUG}`, `worktree: removed ${WORKTREE}`]);
   });
@@ -92,7 +92,7 @@ describe("lore land prints the worktree outcome of its done walk", () => {
   it("a done walk that reports no worktree prints no worktree line", async () => {
     const { service, doneCalls } = serviceWith("approved", []);
     const landed = await service.land(SLUG);
-    expect(landed.ok).toBe(true);
+    expect(landed.ok ? "ok" : JSON.stringify(landed.error)).toBe("ok");
     if (!landed.ok) return;
     expect(doneCalls).toEqual([SLUG]);
     expect(landed.value.lines.filter((line) => line.startsWith("worktree:"))).toEqual([]);
