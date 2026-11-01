@@ -42,7 +42,7 @@ import { MILESTONE_REVIEW_SUB_TYPE, planStateFingerprint, type PlanRetirementSta
 import { coverFailedDimensions } from "../../src/service/milestone-review-inputs.js";
 import { IssueFilingService, type IssuePort, type IssueRef } from "../../src/service/issue-filing-service.js";
 import { issueTitleOf, rootCauseOf } from "../../src/service/root-cause-fingerprint.js";
-import { ReviewLeases, planLeaseKey, REVIEW_LEASE_EXPIRY_MS, REVIEW_LEASE_RENEW_MS } from "../../src/service/review-batch-lease.js";
+import { ReviewLeases, batchLeaseKey, planLeaseKey, REVIEW_LEASE_EXPIRY_MS, REVIEW_LEASE_RENEW_MS } from "../../src/service/review-batch-lease.js";
 
 /** A plan key the lease-mechanics tests use (the corpus-wide `review-batch` lease is retired, BR-1511). */
 const RENEW_KEY = planLeaseKey("p-lease-mechanics");
@@ -652,9 +652,10 @@ class World {
     return ok(coverFailedDimensions(failed, entries));
   }
 
-  /** `leaseLive` is retired with the corpus-wide lease (BR-1511): the trigger no longer reads a lease; callers that still pass it are unaffected. */
-  triggerDeps(opts: { pending?: Set<string>; leaseLive?: boolean } = {}): ReviewTriggerDeps {
+  /** `leaseLive` is retired with the corpus-wide lease (BR-1511): callers that still pass it are unaffected. `batchLease` is the landing's per-machine lease port (BR-1532); default: a fresh landing holder over this world's store. */
+  triggerDeps(opts: { pending?: Set<string>; leaseLive?: boolean; batchLease?: ReviewLeases } = {}): ReviewTriggerDeps {
     return {
+      batchLease: opts.batchLease ?? this.lease("landing"),
       listPlans: async () => ok([...this.plans.values()].filter((p) => !p.archived).map((p) => p.bundle.plan)),
       getPlanBundle: async (ref) => ok(this.find(ref).bundle),
       listReviewDocs: async (planId) => ok(this.find(planId).docs),
@@ -755,14 +756,27 @@ describe("landing starts the review — trigger set and detached start (AC-PCR-3
     expect(world.spawns).toBe(0);
   });
 
-  it("STATE: a landing starts a batch whenever the trigger set is non-empty, whatever lease another batch holds (BR-1511)", async () => {
+  it("STATE: a landing while a batch holds batch:<machine> starts none and reports it is covered; a per-plan lease does not stop a start (BR-1511, BR-1532)", async () => {
     const world = new World();
     const needs = world.add(makeWorldPlan("p-needs"));
-    const holder = await world.lease("batch-a").acquire(planLeaseKey(needs.bundle.plan.id));
-    expect(holder.ok && holder.value.state).toBe("held");
-    const service = new ReviewTriggerService(world.triggerDeps());
-    expect(await service.start()).toMatchObject({ ok: true, value: { state: "started", triggered: 1 } });
+    // a plan lease held by another batch is not the machine's batch lease: the landing still starts its batch
+    const planHolder = await world.lease("batch-a").acquire(planLeaseKey(needs.bundle.plan.id));
+    expect(planHolder.ok && planHolder.value.state).toBe("held");
+    const first = await new ReviewTriggerService(world.triggerDeps()).start();
+    expect(first).toMatchObject({ ok: true, value: { state: "started", triggered: 1 } });
     expect(world.spawns).toBe(1);
+    // the first landing's batch now holds batch:<machine> (handed off, never released here): a second landing is covered
+    const second = await new ReviewTriggerService(world.triggerDeps()).start();
+    expect(second).toMatchObject({ ok: true, value: { state: "covered", triggered: 1, machineUnknown: false } });
+    if (!second.ok || second.value.state !== "covered") throw new Error("second landing was not covered");
+    expect(second.value.key).toBe(batchLeaseKey(await world.lease("probe").machineId()));
+    expect(world.spawns).toBe(1);
+  });
+
+  it("NEGATIVE: a trigger built with no batch lease fails loud at construction instead of spawning with no handoff (BR-1532)", () => {
+    const world = new World();
+    const { batchLease: _omitted, ...withoutLease } = world.triggerDeps();
+    expect(() => new ReviewTriggerService(withoutLease as unknown as ReviewTriggerDeps)).toThrow(/batch lease/);
   });
 
   it("STATE: awaiting-owner plans (decision pending) are excluded; once the decision is resolved they are triggered", async () => {
