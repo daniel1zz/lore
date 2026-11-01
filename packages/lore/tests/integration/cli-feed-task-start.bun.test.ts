@@ -1,5 +1,6 @@
 // @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 // @reads assets/project/lore-config-template.yaml
+// @reads assets/templates/**
 /**
  * @spec_ref spec-070-deterministic-task-dispatch-bundle-lore-feed-task-start
  *   §Design D1, D7; §Acceptance Criteria AC-070-7, AC-070-18.
@@ -109,6 +110,9 @@ async function initCorpus(dir: string): Promise<void> {
   if (result.exitCode !== 0) {
     throw new Error(`lore init failed: ${result.stderr}`);
   }
+  // BR-1528: `lore handoff` creates the document structured through the approved `knowledge/handoff` template.
+  const seeded = await runLore(["migrate", "templates", "--apply"], dir);
+  if (seeded.exitCode !== 0) throw new Error(`lore migrate templates --apply failed: ${seeded.stderr}`);
 }
 
 function parseSlug(stdout: string): string {
