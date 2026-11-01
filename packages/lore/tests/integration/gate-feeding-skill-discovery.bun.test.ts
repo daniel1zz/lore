@@ -1,8 +1,8 @@
-// @reads assets/governance/write-spec-rule.md
 /**
- * @spec_ref IoC vertical-slice tech-spec §4.1/§11, P1 slice-2 — `lore gate spec-create`'s
- * "active feeding" rule-doc lookup discovers its source by `extra.skill.applies_to`
- * (via `CorpusService.findFeedingSkill`) instead of a hardcoded title literal.
+ * @spec_ref IoC vertical-slice tech-spec §4.1/§11, P1 slice-2 (superseded for this gate by
+ * spec-every-document-is-stored-as-structured-fields-validated-by, "One source") — `lore gate spec-create`'s
+ * "active feeding" rule is the approved corpus TEMPLATE of the spec's kind; a `knowledge/skill` doc scoped
+ * `applies_to: "spec"` (`CorpusService.findFeedingSkill`) no longer feeds this gate.
  *
  * bun test (not vitest): drives the real `gate.ts` command module in-process against a
  * real `SQLiteStore` (`createApp()`), the same in-process idiom
@@ -100,9 +100,12 @@ afterEach(() => {
 
 // ─── Fixture helpers ─────────────────────────────────────────────────────────
 
-const NO_PARENT_PAYLOAD: Record<string, unknown> = {
+// reason: BR-2 — a spec takes no parent, so a payload that names one (any id or slug, even one that resolves to nothing)
+// is a gate denial: the one predicate violation a schema-valid payload can carry now that the heading count is retired.
+const NO_PARENT_PAYLOAD_WITH_PARENT: Record<string, unknown> = {
   type: "spec",
-  title: "A spec missing its parent",
+  title: "A spec that names a parent",
+  parent_id: "no-such-parent",
   content: "just some prose, no headings at all",
 };
 
@@ -156,14 +159,6 @@ async function createDraftSkillDoc(opts: {
   });
 }
 
-/** Bumps a doc's `updated_at` forward by re-approving it (a no-op status re-assert still writes). */
-async function touchDoc(id: string): Promise<void> {
-  return withApp(async (app) => {
-    const result = await app.corpusService.set(id, { status: "approved" });
-    if (!result.ok) throw new Error(`touch failed: ${JSON.stringify(result.error)}`);
-  });
-}
-
 async function runGateSpecCreate(payload: Record<string, unknown>) {
   const cmd = await importGateSpecCreate();
   const output = captureOutput();
@@ -185,90 +180,88 @@ async function countDocs(): Promise<number> {
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe("lore gate spec-create — feeding skill discovery by applies_to", () => {
-  // HAPPY
-  it("discovers an approved knowledge/skill doc scoped applies_to=spec and feeds its slug + content", async () => {
+// reason: the spec-rules document and the rule file shipped with the binary are retired: a `lore gate spec-create` denial
+// quotes the APPROVED TEMPLATE of the spec's kind (spec-every-document-is-stored-as-structured-fields-validated-by, "One
+// source"). A `knowledge/skill` doc scoped `applies_to: "spec"` is still a discoverable feeding source for OTHER checkpoints
+// (`lore feed <checkpoint>`), but it no longer feeds this gate. These cases pin that: every skill-doc shape is ignored.
+describe("lore gate spec-create — the rule is the approved template, never a skill doc", () => {
+  async function installSpecFeatureTemplate(): Promise<string> {
+    return withApp(async (app) => {
+      const body = {
+        doc_type: "spec",
+        kind: "feature",
+        version: 1,
+        fields: { type: "object", required: ["summary"], properties: { summary: { type: "string", minLength: 1 } } },
+        dimensions: [{ id: "edge-cases", question: "Which edge cases does it handle?" }],
+        checks: [],
+        render: [{ heading: "Summary", fields: ["summary"] }],
+      };
+      const created = await app.corpusService.create({ type: "template", title: "Gate fixture spec feature template", extra: { template: body } } as CreateDocInput);
+      if (!created.ok) throw new Error(`template create failed: ${JSON.stringify(created.error)}`);
+      const approved = await app.corpusService.set(created.value.id, { status: "approved" });
+      if (!approved.ok) throw new Error(`template approve failed: ${JSON.stringify(approved.error)}`);
+      return `${created.value.slug}@1`;
+    });
+  }
+
+  // HAPPY — the template is the source.
+  it("quotes the approved spec/feature template on the source line", async () => {
+    const ref = await installSpecFeatureTemplate();
+
+    const result = await runGateSpecCreate(NO_PARENT_PAYLOAD_WITH_PARENT);
+
+    expect(result.exitCode).toBe(4);
+    expect(result.stdout).toContain(`[source: template ${ref}, trust: team-authored]`);
+    expect(result.stdout).toContain("What a spec feature must satisfy");
+  });
+
+  // NEGATIVE — an approved skill doc scoped applies_to=spec does NOT feed the gate any more.
+  it("ignores an approved skill doc scoped applies_to=spec: its slug and content never surface", async () => {
+    const ref = await installSpecFeatureTemplate();
     const skill = await createApprovedSkillDoc({
       title: "Custom write-spec rules",
       appliesTo: "spec",
       content: "## Rule\n\nDiscoverable-by-applies-to marker content.",
     });
 
-    const result = await runGateSpecCreate(NO_PARENT_PAYLOAD);
+    const result = await runGateSpecCreate(NO_PARENT_PAYLOAD_WITH_PARENT);
 
     expect(result.exitCode).toBe(4);
-    expect(result.stdout).toContain(`[source: ${skill.slug}`);
-    expect(result.stdout).toContain("Discoverable-by-applies-to marker content.");
+    expect(result.stdout).toContain(`[source: template ${ref}, trust: team-authored]`);
+    expect(result.stdout).not.toContain(skill.slug);
+    expect(result.stdout).not.toContain("Discoverable-by-applies-to marker content.");
   });
 
-  // NEGATIVE
-  it("ignores an approved skill doc scoped to a different applies_to (task, not spec)", async () => {
+  // ERROR — nothing readable: the pack NAMES the missing template (never an invented or shipped rule).
+  it("names the missing template, never a shipped asset or a skill doc, when no template is approved", async () => {
     await createApprovedSkillDoc({
-      title: "Task-scoped rules",
-      appliesTo: "task",
-      content: "## Rule\n\nTask-only marker content — must never leak into spec-create.",
-    });
-    const specSkill = await createApprovedSkillDoc({
-      title: "Spec-scoped rules",
+      title: "Custom write-spec rules",
       appliesTo: "spec",
-      content: "## Rule\n\nSpec-only marker content.",
+      content: "## Rule\n\nMust not stand in for the template.",
     });
 
-    const result = await runGateSpecCreate(NO_PARENT_PAYLOAD);
+    const result = await runGateSpecCreate(NO_PARENT_PAYLOAD_WITH_PARENT);
 
     expect(result.exitCode).toBe(4);
-    expect(result.stdout).toContain(`[source: ${specSkill.slug}`);
-    expect(result.stdout).toContain("Spec-only marker content.");
-    expect(result.stdout).not.toContain("Task-only marker content");
+    expect(result.stdout).toContain("[source: template lookup, trust: team-authored]");
+    expect(result.stdout).toContain("No rule could be read from an approved template");
+    expect(result.stdout).not.toContain("shipped asset");
+    expect(result.stdout).not.toContain("Must not stand in for the template.");
   });
 
-  // BOUNDARY
-  it("picks the most-recently-updated skill doc when two both declare applies_to=spec", async () => {
-    await createApprovedSkillDoc({
-      title: "Older spec rules",
-      appliesTo: "spec",
-      content: "## Rule\n\nOlder marker content.",
-    });
-    // reason: guarantee a strictly-later `updated_at` millisecond tick on `newer` — two
-    // sequential in-process writes can otherwise land within the same JS-clock
-    // millisecond on a fast machine, making the "latest wins" assertion below flaky.
-    await new Promise((r) => setTimeout(r, 5));
-    const newer = await createApprovedSkillDoc({
-      title: "Newer spec rules",
-      appliesTo: "spec",
-      content: "## Rule\n\nNewer marker content.",
-    });
-    await touchDoc(newer.id);
-
-    const result = await runGateSpecCreate(NO_PARENT_PAYLOAD);
-
-    expect(result.exitCode).toBe(4);
-    expect(result.stdout).toContain(`[source: ${newer.slug}`);
-    expect(result.stdout).toContain("Newer marker content.");
-    expect(result.stdout).not.toContain("Older marker content");
-  });
-
-  // NEGATIVE — nothing discoverable in the corpus: the rule shipped with the binary feeds, and is named (BR-1359).
-  it("falls back to the shipped write-spec rule, named on the source line, when no approved skill doc exists", async () => {
-    const result = await runGateSpecCreate(NO_PARENT_PAYLOAD);
-
-    expect(result.exitCode).toBe(4);
-    expect(result.stdout).toContain("[source: shipped asset assets/governance/write-spec-rule.md, trust: team-authored]");
-    expect(result.stdout).not.toContain("bun scripts/");
-  });
-
-  // STATE — a draft (unapproved) skill doc is invisible to discovery.
-  it("does not discover a DRAFT skill doc even when its applies_to matches", async () => {
+  // STATE — a draft skill doc changes nothing either.
+  it("a DRAFT skill doc changes nothing", async () => {
+    const ref = await installSpecFeatureTemplate();
     await createDraftSkillDoc({
       title: "Not yet approved rules",
       appliesTo: "spec",
       content: "## Rule\n\nDraft marker content — must never surface.",
     });
 
-    const result = await runGateSpecCreate(NO_PARENT_PAYLOAD);
+    const result = await runGateSpecCreate(NO_PARENT_PAYLOAD_WITH_PARENT);
 
     expect(result.exitCode).toBe(4);
-    expect(result.stdout).toContain("[source: shipped asset assets/governance/write-spec-rule.md");
+    expect(result.stdout).toContain(`[source: template ${ref}`);
     expect(result.stdout).not.toContain("Draft marker content");
   });
 
@@ -281,8 +274,8 @@ describe("lore gate spec-create — feeding skill discovery by applies_to", () =
     });
     const before = await countDocs();
 
-    await runGateSpecCreate(NO_PARENT_PAYLOAD);
-    await runGateSpecCreate(NO_PARENT_PAYLOAD);
+    await runGateSpecCreate(NO_PARENT_PAYLOAD_WITH_PARENT);
+    await runGateSpecCreate(NO_PARENT_PAYLOAD_WITH_PARENT);
 
     const after = await countDocs();
     expect(after).toBe(before);
