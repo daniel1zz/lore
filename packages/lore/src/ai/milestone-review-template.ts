@@ -25,6 +25,7 @@
 import { z } from "zod";
 import { JUDGED_DIMENSIONS, type JudgedDimension, type MilestoneDecisionRef, type MilestoneFacts } from "@lore/core";
 import type { CitedRuleStateRow } from "../service/milestone-review.js";
+import { canonicalEvidenceRowsOf } from "../service/judge-unit-keys.js";
 
 /**
  * Stamped on every stored review (`prompt_version`). milestone-6: judgment layer only, facts table, file chunks. milestone-7: every
@@ -81,6 +82,8 @@ export interface MilestoneEvidenceLine {
   readonly result: string;
   /** True when a trusted runner produced the row (`attestation` present). */
   readonly attested: boolean;
+  /** sha256 of the row's output tail; part of the criterion's canonical evidence row (#636). */
+  readonly output_tail_sha256?: string;
   readonly ac_ref?: string;
 }
 
@@ -292,13 +295,20 @@ function renderDiffSection(input: MilestoneReviewPromptInput): string {
   return `Source: ${input.diffSource}\n${label}${renderUnseen(input.unseenFiles)}\n\n${input.diffText}`;
 }
 
+/** The criterion's canonical evidence rows: the very set its verdict key reads (#636). */
+function renderCriterionEvidence(input: MilestoneReviewPromptInput, c: { readonly spec: string; readonly ac: string }): string {
+  const rows = canonicalEvidenceRowsOf(input.tasks, c);
+  if (rows.length === 0) return "\n  evidence: (none recorded for this criterion)";
+  return `\n  evidence:\n${rows.map((r) => `    - ${r.oracle} ${r.result}: ${r.command} (output sha256 ${r.output_sha256.slice(0, 12)})`).join("\n")}`;
+}
+
 function renderCriteria(input: MilestoneReviewPromptInput): string {
   const criteria = input.facts?.ai_criteria ?? [];
   if (criteria.length === 0) return "None.";
   return [
     "Give ONE verdict (pass or fail) and a reason for each criterion below that is marked ASK under `# Units`, judged against its rubric, in `criteria`.",
     "",
-    criteria.map((c) => `## ${c.spec}:${c.ac}\n  rubric: ${c.rubric}`).join("\n\n"),
+    criteria.map((c) => `## ${c.spec}:${c.ac}\n  rubric: ${c.rubric}${renderCriterionEvidence(input, c)}`).join("\n\n"),
   ].join("\n");
 }
 
