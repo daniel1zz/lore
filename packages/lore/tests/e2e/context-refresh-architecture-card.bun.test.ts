@@ -81,8 +81,8 @@ describe("lore context refresh links module files to their architecture card", (
     const section = parseBaselineSlug(
       mustRun(["baseline", "add", root, "--tree", "architecture", "--node", "section", "--label", "SECT", "--title", "Card Section", ...templatedFieldsArgs("baseline", { kind: "section" })], withCard).stdout,
     );
-    // The card names the module file it describes in its `paths` field (the structured twin of the old free body's "Source:" line).
-    const cardFields = templatedFieldsArgs("baseline", { kind: "module-card", fields: { purpose: "Module card: svc", paths: [MODULE_FILE] } });
+    // The card declares the module file it describes through the `Source:` line of its rendered body; the structured form carries it in `purpose`.
+    const cardFields = templatedFieldsArgs("baseline", { kind: "module-card", fields: { purpose: `Module card: svc.\n\nSource: \`${MODULE_FILE}\`.`, paths: [MODULE_FILE] } });
     cardSlug = parseBaselineSlug(
       mustRun(
         ["baseline", "add", section, "--tree", "architecture", "--node", "module-card", "--label", "MSVC", "--title", "Module card: svc", ...cardFields],
