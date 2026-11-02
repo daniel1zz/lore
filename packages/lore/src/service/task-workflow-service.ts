@@ -3388,7 +3388,9 @@ export class TaskWorkflowService {
     }
 
     // reason: BR-1490 as amended — a task the migration left gapped holds no contract; its claim is refused by name, naming the migration.
-    if (!doneContractSchema.safeParse(task.extra["done_contract"]).success) {
+    // reason: only a task past draft is judged: approve compiles the contract, so an approved or active task without one is exactly the
+    // state the migration left (a draft is not yet approved and has none by design).
+    if (task.status !== "draft" && !doneContractSchema.safeParse(task.extra["done_contract"]).success) {
       return refuseClaimByKind(
         "contract-missing",
         `${task.slug} holds no done contract. Run \`lore migrate done-contract\` to list what is missing for it and the command that fills each gap.`,
