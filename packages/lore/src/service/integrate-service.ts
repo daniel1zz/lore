@@ -745,6 +745,7 @@ export class IntegrateService {
     const casMs = clock() - casStart;
     if (swapped.status === 0) {
       finish({ outcome: "landed", merge_ms: mergeMs, corpus_snapshot_ms: snapshotMs, floor: floorTimings, cas_ms: casMs });
+      this.publishTypecheckCache(wt, merge);
       await this.recordOracleRows(tasks, merge, outcomes);
       const claimants = await this.recordLanding({ branch: request.branch, branch_head: tip, main_before: base.value, main_after: merge, landing_commit: merge, ...footprint, ...onlySelected });
       // reason: the shared checkout moves to main BEFORE the done walk, so the walk's `git branch -d` finds the branch merged into HEAD.
@@ -1004,6 +1005,19 @@ export class IntegrateService {
     const status = git(projectRoot, ["status", "--porcelain=v1", "--untracked-files=no"]);
     const tracked = status.status === 0 ? status.stdout.split("\n").filter((l) => l.trim() !== "").map((l) => l.slice(3)) : [];
     return tracked.length === 0 ? { state: "rebuilt" } : { state: "rebuilt", tracked_changes: tracked };
+  }
+
+  /**
+   * BR-1562: installs the build info the floor's typecheck left in the integration worktree as the machine cache entry of
+   * the landing. Called only after the CAS moved main, so the cache only ever holds a tree that passed the floor. Never
+   * fails the landing: a project without the script is skipped, a failed publish is reported as a warning.
+   */
+  private publishTypecheckCache(wt: string, landing: string): void {
+    const script = join(wt, "scripts", "typecheck-cache.ts");
+    if (!existsSync(script)) return;
+    const ran = this.deps.runFloor(`bun scripts/typecheck-cache.ts publish ${landing}`, wt);
+    if (ran.status === 0) this.deps.log(`integrate: ${ran.output.trim()}`);
+    else this.deps.log(`integrate: WARNING: the typecheck cache was not written for ${short(landing)} (exit ${ran.status}): ${ran.output.slice(-FLOOR_TAIL_CHARS).trim()}`);
   }
 
   /** The multi-step operation a checkout is in the middle of (it blocks a detach), or `undefined`. */
