@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { sessionActorFor } from "../helpers/session-actor";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 import { registerRun, runLore } from "./cli/support/claim-run-fixture.js";
 
 vi.setConfig({ testTimeout: 240_000, hookTimeout: 240_000 });
@@ -70,10 +71,10 @@ beforeAll(() => {
   git(repo, "commit", "-qm", "init");
   mustLore(["init"], repo);
   patchLoreConfig(repo, ["workflow:", "  gates:", "    task-claim:", "      enabled: false", ""].join("\n"));
-  const prd = slugOf(mustLore(["create", "prd", "--title", "USW3 PRD", "--content", "root", "--no-ai"], repo));
-  const plan = slugOf(mustLore(["create", "plan", "--title", "USW3 Plan", "--parent", prd, "--content", "x", "--no-ai"], repo));
+  const prd = slugOf(mustLore(["create", "prd", "--title", "USW3 PRD", "--no-ai", ...templatedFieldsArgs("prd")], repo));
+  const plan = slugOf(mustLore(["create", "plan", "--title", "USW3 Plan", "--parent", prd, "--no-ai", ...planFieldsArgs(prd)], repo));
   const newTask = (title: string, anchor: string): string =>
-    slugOf(mustLore(["create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", "--anchor", anchor], repo));
+    slugOf(mustLore(["create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--no-ai", ...templatedFieldsArgs("task"), "--anchor", anchor], repo));
   taskA = newTask("USW3 Task A", "src/a.ts");
   taskB = newTask("USW3 Task B", "src/b.ts");
   wtA = join(base, "wt-a");

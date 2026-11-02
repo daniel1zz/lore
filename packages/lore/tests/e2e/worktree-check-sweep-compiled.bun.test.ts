@@ -34,6 +34,7 @@ import { join } from "node:path";
 import { installShippedGuard } from "../integration/support/main-guard-repo.js";
 import { FIXTURE_DONE_CONTRACT_CONFIG } from "../helpers/landed-code-task";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 
 const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -166,8 +167,8 @@ beforeAll(async () => {
   // reason: `lore init` arms state binding (AC-CT-3); evidence captured on a dirty tree is unbound and refused by `lore done`.
   mustOk(git(repo, "add", "-A"), "git add corpus");
   mustOk(git(repo, "commit", "-q", "-m", "lore corpus"), "git commit corpus");
-  mustOk(await lore(["create", "prd", "--title", "Root", "--content", "Root PRD.", "--no-ai", "--json"]), "create prd");
-  const createdSpec = mustOk(await lore(["create", "spec", "--title", "Sweep spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai", "--json"]), "create spec");
+  mustOk(await lore(["create", "prd", "--title", "Root", ...templatedFieldsArgs("prd"), "--no-ai", "--json"]), "create prd");
+  const createdSpec = mustOk(await lore(["create", "spec", "--title", "Sweep spec", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech" }), "--no-ai", "--json"]), "create spec");
   spec = (JSON.parse(createdSpec.stdout) as { data: { slug: string } }).data.slug;
 
   aaa = addMergedWorktree("agent-AAA");
@@ -184,7 +185,7 @@ beforeAll(async () => {
 
   // CCC: a task claimed from this worktree, then archived — only its run keeps the worktree.
   const created = mustOk(
-    await lore(["create", "task", "--adhoc", "--spec", spec, "--title", "CCC claimed work", "--kind", "code", "--content", "Throwaway task.", "--no-ai", "--ac-scope", "", "--json"], "S3"),
+    await lore(["create", "task", "--adhoc", "--spec", spec, "--title", "CCC claimed work", "--kind", "code", ...templatedFieldsArgs("task", { fields: { objective: "Throwaway task." } }), "--no-ai", "--ac-scope", "", "--json"], "S3"),
     "create task",
   );
   const slug = (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;

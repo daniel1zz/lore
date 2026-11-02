@@ -30,6 +30,7 @@ import { actedStore } from "../live-invocation.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { approvePending } from "../helpers/approve-baseline.js";
 import { DECIDED_FLAGS_OWN_REASON } from "../helpers/decision-flags.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 
 let dir = "";
 let specS = "";
@@ -80,7 +81,7 @@ async function addScriptAc(spec: string, acId: string): Promise<void> {
 async function createTask(title: string, scope: readonly string[]): Promise<string> {
   return slugOf(
     await must([
-      "create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body",
+      "create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--no-ai", ...templatedFieldsArgs("task"),
       ...scope.flatMap((id) => ["--ac-scope", id]),
     ]),
   );
@@ -115,10 +116,10 @@ beforeAll(async () => {
       "",
     ].join("\n"),
   );
-  const prd = slugOf(await must(["create", "prd", "--title", "SR PRD", "--content", "root", "--no-ai"]));
-  const root = slugOf(await must(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "SR Root"]));
-  const branch = slugOf(await must(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "SR Branch"]));
-  const leaf = slugOf(await must(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "SR Leaf"]));
+  const prd = slugOf(await must(["create", "prd", "--title", "SR PRD", "--no-ai", ...templatedFieldsArgs("prd")]));
+  const root = slugOf(await must(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "SR Root", ...templatedFieldsArgs("baseline", { kind: "root" })]));
+  const branch = slugOf(await must(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "SR Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })]));
+  const leaf = slugOf(await must(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "SR Leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })]));
   const rule = await must(["rule", "add", leaf, "--statement", "a live rule to cite", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one"]);
   citedRule = rule.match(/\bBR-\d+\b/)?.[0] ?? "";
   if (citedRule === "") throw new Error(`no rule id in: ${rule}`);
@@ -129,13 +130,13 @@ beforeAll(async () => {
   } finally {
     side.close();
   }
-  specS =slugOf(await must(["create", "spec", "--title", "SR Spec S", "--content", "body", "--no-ai"]));
-  specS2 = slugOf(await must(["create", "spec", "--title", "SR Spec S2", "--content", "body", "--no-ai"]));
+  specS =slugOf(await must(["create", "spec", "--title", "SR Spec S", "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature", refTarget: prd })]));
+  specS2 = slugOf(await must(["create", "spec", "--title", "SR Spec S2", "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature", refTarget: prd })]));
   await addScriptAc(specS, "AC-1");
   await addScriptAc(specS, "AC-2");
   await addScriptAc(specS, "AC-3");
   await addScriptAc(specS2, "AC-9");
-  plan = slugOf(await must(["create", "plan", "--title", "SR Plan", "--parent", specS, "--no-ai", "--content", "body"]));
+  plan = slugOf(await must(["create", "plan", "--title", "SR Plan", "--parent", specS, "--no-ai", ...planFieldsArgs(specS)]));
   taskControl = await createTask("SR control task AC-1", ["AC-1"]);
   taskOnlyAc1 = await createTask("SR task only AC-1", ["AC-1"]);
   taskAc1AndAc2 = await createTask("SR task AC-1 and AC-2", ["AC-1", "AC-2"]);

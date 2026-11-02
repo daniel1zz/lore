@@ -23,6 +23,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
@@ -81,7 +82,7 @@ function runHook(payload: Record<string, unknown>, socket?: string): Out {
 }
 
 function newTask(title: string): string {
-  const r = mustLore(["create", "task", "--adhoc", "--kind", "code", "--title", title, "--ac-scope", "", "--json"]);
+  const r = mustLore(["create", "task", "--adhoc", "--kind", "code", "--title", title, "--ac-scope", "", ...templatedFieldsArgs("task"), "--json"]);
   return (JSON.parse(r.stdout).data as { slug: string }).slug;
 }
 
@@ -121,7 +122,7 @@ beforeAll(() => {
   git(["commit", "-q", "-m", "init"]);
 
   mustLore(["init"]);
-  mustLore(["create", "prd", "--title", "E2E Root", "--content", "root", "--no-ai"]);
+  mustLore(["create", "prd", "--title", "E2E Root", "--no-ai", ...templatedFieldsArgs("prd")]);
   // `lore setup` installs the hooks into a Claude config directory; PATH="" keeps any `claude` unreachable
   // (setup registers no MCP server and exits 0 — task-skill-implement-lore-setup-registers-no-tool-server-and).
   claudeDir = join(root, "claude-config");

@@ -37,6 +37,7 @@ import { AUTO_FACTS, lore, newCorpus, observeReversal, readLog, removeCorpora, r
 import { actedStore } from "../live-invocation.js";
 
 import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 
 afterAll(removeCorpora);
@@ -351,7 +352,7 @@ describe("AC-AU-8 the outcome observers", () => {
   it("observe(): audit-log evidence (restore, invalidate, reopen, correction after the decision) records reversed outcomes; aged decisions with none record stood", async () => {
     const corpus = newCorpus("lore-au8-obs-");
     // Subjects are real docs so the audit rows are legal.
-    const created = lore(corpus, ["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => lore(corpus, a)), "--sub-type", "reference", "--title", "Observer subject", "--content", "x", "--json"]);
+    const created = lore(corpus, ["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => lore(corpus, a)), "--sub-type", "reference", "--title", "Observer subject", ...templatedFieldsArgs("knowledge", { kind: "reference" }), "--json"]);
     expect(created.exitCode, created.stderr).toBe(0);
     const docId = (JSON.parse(created.stdout) as { data: { id: string } }).data.id;
 
@@ -390,7 +391,7 @@ describe("AC-AU-8 the outcome observers", () => {
 
   it("audit probe covers each reversal kind and ignores audit rows from BEFORE the decision", async () => {
     const corpus = newCorpus("lore-au8-kinds-");
-    const created = lore(corpus, ["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => lore(corpus, a)), "--sub-type", "reference", "--title", "Kinds subject", "--content", "x", "--json"]);
+    const created = lore(corpus, ["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => lore(corpus, a)), "--sub-type", "reference", "--title", "Kinds subject", ...templatedFieldsArgs("knowledge", { kind: "reference" }), "--json"]);
     const docId = (JSON.parse(created.stdout) as { data: { id: string } }).data.id;
     const store = actedStore(new SQLiteStore(corpus.dbPath));
     try {
@@ -410,7 +411,7 @@ describe("AC-AU-8 the outcome observers", () => {
         ["update", { correction: { reason: "fix" } }, "doc-correction"],
       ] as const) {
         const fresh = newCorpus("lore-au8-kind-");
-        const doc = (JSON.parse(lore(fresh, ["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => lore(fresh, a)), "--sub-type", "reference", "--title", `K ${source}`, "--content", "x", "--json"]).stdout) as { data: { id: string } }).data.id;
+        const doc = (JSON.parse(lore(fresh, ["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => lore(fresh, a)), "--sub-type", "reference", "--title", `K ${source}`, ...templatedFieldsArgs("knowledge", { kind: "reference" }), "--json"]).stdout) as { data: { id: string } }).data.id;
         const s2 = actedStore(new SQLiteStore(fresh.dbPath));
         try {
           await s2.appendAuditEntry({ timestamp: "2026-03-01T00:00:00.000Z", actor: "t", session_id: "s", action, doc_id: doc as never, details });

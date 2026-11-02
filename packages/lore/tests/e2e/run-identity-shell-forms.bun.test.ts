@@ -28,6 +28,10 @@ import { delimiter, dirname, join } from "node:path";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import { registerRunInDb } from "../helpers/test-run-identity";
 import { ensureRequirementsDocSlug } from "../helpers/parented-create";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
+
+/** `--fields-file <path>` text for the knowledge write every form performs (a temp path with no shell-special characters). */
+const KNOWLEDGE_FIELDS_TEXT = templatedFieldsArgs("knowledge", { kind: "reference" }).join(" ");
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
@@ -94,7 +98,7 @@ function storedRuns(title: string): Array<string | null> {
 /** The lore write every form performs: one knowledge document titled `title`. */
 let parentSlug = "";
 
-const writeOf = (cmd: string, title: string): string => `${cmd} create knowledge --parent ${parentSlug} --sub-type reference --title ${title} --content body --no-ai`;
+const writeOf = (cmd: string, title: string): string => `${cmd} create knowledge --parent ${parentSlug} --sub-type reference --title ${title} ${KNOWLEDGE_FIELDS_TEXT} --no-ai`;
 
 interface Form {
   readonly name: string;
@@ -121,7 +125,7 @@ const FORMS: readonly Form[] = [
   { name: "negation", command: (t) => `! ${writeOf("lore", t)}`, exitCode: 1 },
   { name: "braces", command: (t) => `{ ${writeOf("lore", t)}; }` },
   { name: "env A=1", command: (t) => writeOf("env A=1 lore", t) },
-  { name: "xargs", command: (t) => `echo ${t} | xargs lore create knowledge --parent ${parentSlug} --sub-type reference --content body --no-ai --title` },
+  { name: "xargs", command: (t) => `echo ${t} | xargs lore create knowledge --parent ${parentSlug} --sub-type reference ${KNOWLEDGE_FIELDS_TEXT} --no-ai --title` },
   { name: "timeout", command: (t) => writeOf("timeout 5 lore", t), skip: !hasTimeout },
   { name: "exec", command: (t) => writeOf("exec lore", t) },
   { name: "command", command: (t) => writeOf("command lore", t) },
@@ -165,7 +169,7 @@ beforeAll(() => {
   });
   writeFileSync(
     join(corpus, "package.json"),
-    JSON.stringify({ name: "fixture", scripts: { dev: `lore create knowledge --parent ${parentSlug} --sub-type reference --content body --no-ai --title` } }),
+    JSON.stringify({ name: "fixture", scripts: { dev: `lore create knowledge --parent ${parentSlug} --sub-type reference ${KNOWLEDGE_FIELDS_TEXT} --no-ai --title` } }),
   );
 });
 

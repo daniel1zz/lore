@@ -69,6 +69,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 
 /** Repo root: four levels up from `packages/lore/tests/integration/`. Asserted in `beforeAll`. */
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url)).replace(/\/$/, "");
@@ -170,7 +171,7 @@ function parseSlug(stdout: string): string {
 
 async function createPrd(dir: string, title: string): Promise<string> {
   const run = await runLore(
-    ["create", "prd", "--title", title, "--no-ai", "--content", "## Overview\n\nFixture body.", "--json"],
+    ["create", "prd", "--title", title, "--no-ai", ...templatedFieldsArgs("prd"), "--json"],
     dir,
   );
   if (run.exitCode !== 0) throw new Error(`create prd failed (exit ${run.exitCode}): ${run.stderr}`);
@@ -186,8 +187,7 @@ async function createSpec(dir: string, prdSlug: string, title: string, codeAncho
     "--kind",
     "feature",
     "--no-ai",
-    "--content",
-    "## Overview\n\nFixture body.",
+    ...templatedFieldsArgs("spec", { kind: "feature" }),
     "--json",
   ];
   for (const anchor of codeAnchors) args.push("--code-anchor", anchor);

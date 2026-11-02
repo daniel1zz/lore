@@ -25,6 +25,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 
 setDefaultTimeout(180_000);
 
@@ -93,7 +94,7 @@ beforeAll(async () => {
   vcs(["add", "."]);
   vcs(["commit", "-q", "-m", "init"]);
   await mustLore(["init"]);
-  await mustLore(["create", "prd", "--title", "Occupancy E2E Root", "--content", "root", "--no-ai"]);
+  await mustLore(["create", "prd", "--title", "Occupancy E2E Root", "--no-ai", ...templatedFieldsArgs("prd")]);
   worktreeDir = join(root, `agent-${AGENT}`);
   mkdirSync(worktreeDir);
 });

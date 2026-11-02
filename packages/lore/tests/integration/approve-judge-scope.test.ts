@@ -27,9 +27,9 @@ import { makeCleanTreeRepo } from "../helpers/clean-tree-repo";
 import { FIXTURE_DONE_CONTRACT_CONFIG } from "../helpers/landed-code-task";
 import { patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 
 const TIMEOUT_MS = 120_000;
-const SPEC_BODY = "## Overview/Goal\n\nFixture.\n\n## Scope\n\nFixture.\n\n## Acceptance Criteria\n\nNone yet.\n";
 let dir: string;
 
 async function lore(args: readonly string[]) {
@@ -57,7 +57,7 @@ beforeAll(async () => {
   makeCleanTreeRepo(dir);
   await must(["init"]);
   patchLoreConfig(dir, { workflow: { done_contract: { ...FIXTURE_DONE_CONTRACT_CONFIG } } });
-  prd = slugOf(await must(["create", "prd", "--title", "Judge scope product", "--no-ai", "--content", "# P\n\nA product.\n"]));
+  prd = slugOf(await must(["create", "prd", "--title", "Judge scope product", "--no-ai", ...templatedFieldsArgs("prd")]));
 }, TIMEOUT_MS);
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -65,7 +65,7 @@ afterAll(() => rmSync(dir, { recursive: true, force: true }));
 describe("AC-LG-6: judge only spec and adr", () => {
   it("judge only spec and adr: a knowledge doc approves with no judgment", async () => {
     const slug = slugOf(
-      await must(["create", "knowledge", "--sub-type", "reference", "--title", "Judge scope note", "--parent", prd, "--content", "body", "--no-ai"]),
+      await must(["create", "knowledge", "--sub-type", "reference", "--title", "Judge scope note", "--parent", prd, ...templatedFieldsArgs("knowledge", { kind: "reference" }), "--no-ai"]),
     );
     const r = await lore(["approve", slug]);
     expect(r.stderr + r.stdout).not.toContain("review-judgment");
@@ -73,18 +73,18 @@ describe("AC-LG-6: judge only spec and adr", () => {
   }, TIMEOUT_MS);
 
   it("judge only spec and adr: a baseline node approves with no judgment", async () => {
-    const root = slugOf(await must(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "Judge scope root"]));
+    const root = slugOf(await must(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "Judge scope root", ...templatedFieldsArgs("baseline", { kind: "root" })]));
     const r = await lore(["approve", root]);
     expect(r.stderr + r.stdout).not.toContain("review-judgment");
     expect(r.exitCode, r.stderr + r.stdout).toBe(0);
   }, TIMEOUT_MS);
 
   it("judge only spec and adr: a plan and its task approve with no judgment", async () => {
-    const plan = slugOf(await must(["create", "plan", "--title", "Judge scope plan", "--parent", prd, "--content", "x", "--no-ai"]));
+    const plan = slugOf(await must(["create", "plan", "--title", "Judge scope plan", "--parent", prd, "--no-ai", ...planFieldsArgs(prd)]));
     const planRun = await lore(["approve", plan]);
     expect(planRun.stderr + planRun.stdout).not.toContain("review-judgment");
     const task = slugOf(
-      await must(["create", "task", "--kind", "code", "--title", "Judge scope task", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"]),
+      await must(["create", "task", "--kind", "code", "--title", "Judge scope task", "--parent", plan, "--plan-id", plan, "--no-ai", ...templatedFieldsArgs("task")]),
     );
     const taskRun = await lore(["approve", task]);
     expect(taskRun.stderr + taskRun.stdout).not.toContain("review-judgment");
@@ -93,9 +93,9 @@ describe("AC-LG-6: judge only spec and adr", () => {
   }, TIMEOUT_MS);
 
   it("judge only spec and adr: a spec and an ADR are refused with exit 4 naming review-judgment", async () => {
-    const spec = slugOf(await must(["create", "spec", "--title", "Judge scope spec", "--content", SPEC_BODY, "--no-ai"]));
+    const spec = slugOf(await must(["create", "spec", "--title", "Judge scope spec", ...templatedFieldsArgs("spec", { kind: "feature", refTarget: prd }), "--no-ai"]));
     const adr = slugOf(
-      await must(["create", "adr", "--title", "Judge scope adr", "--parent", prd, "--content", "## Decision\n\nbody", "--decision-status", "proposed", "--no-ai"]),
+      await must(["create", "adr", "--title", "Judge scope adr", "--parent", prd, ...templatedFieldsArgs("adr", { refTarget: prd }), "--decision-status", "proposed", "--no-ai"]),
     );
     for (const slug of [spec, adr]) {
       const r = await lore(["approve", slug]);

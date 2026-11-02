@@ -64,6 +64,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 
 // ─── Path / spawn setup ─────────────────────────────────────────────────────
 
@@ -184,14 +185,14 @@ function parseSlug(stdout: string): string {
  */
 async function seedTask(dir: string): Promise<string> {
   const prdResult = await runLore(
-    ["create", "prd", "--title", "WCR E2E PRD", "--content", "root", "--no-ai"],
+    ["create", "prd", "--title", "WCR E2E PRD", "--no-ai", ...templatedFieldsArgs("prd")],
     dir,
   );
   expect(prdResult.exitCode).toBe(0);
   const prdSlug = parseSlug(prdResult.stdout);
 
   const planResult = await runLore(
-    ["create", "plan", "--title", "WCR E2E Plan", "--parent", prdSlug, "--content", "x", "--no-ai"],
+    ["create", "plan", "--title", "WCR E2E Plan", "--parent", prdSlug, "--no-ai", ...planFieldsArgs(prdSlug)],
     dir,
   );
   expect(planResult.exitCode).toBe(0);
@@ -209,9 +210,8 @@ async function seedTask(dir: string): Promise<string> {
       planSlug,
       "--plan-id",
       planSlug,
-      "--content",
-      "x",
       "--no-ai",
+      ...templatedFieldsArgs("task"),
     ],
     dir,
   );
