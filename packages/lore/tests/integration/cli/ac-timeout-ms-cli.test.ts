@@ -24,6 +24,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { withSessionIdentity } from "../../helpers/session-actor.js";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 const GIT_AUTHOR_ARGS = ["-c", "user.email=lore-test@example.com", "-c", "user.name=Lore Test"] as const;
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -93,8 +94,8 @@ describe("lore ac add|set --timeout-ms", () => {
     execFileSync("git", ["init", "-q"], { cwd: tmpDir });
     mustRun(["init"], tmpDir);
     disableAllGates(tmpDir);
-    mustRun(["create", "prd", "--title", "Timeout PRD", "--no-ai", "--content", "body"], tmpDir);
-    spec = extractSlug(mustRun(["create", "spec", "--title", "Timeout Spec", "--no-ai", "--content", "body"], tmpDir));
+    const prd = extractSlug(mustRun(["create", "prd", "--title", "Timeout PRD", "--no-ai", ...templatedFieldsArgs("prd", { refTarget: "problem" })], tmpDir));
+    spec = extractSlug(mustRun(["create", "spec", "--title", "Timeout Spec", "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature", refTarget: prd })], tmpDir));
   });
 
   afterEach(() => {
@@ -156,9 +157,9 @@ describe("lore ac add|set --timeout-ms", () => {
       ["ac", "add", spec, acId, "--statement", "sleeps", "--mode", "script", "--oracle", "other", "--command", "sleep 60", "--timeout-ms", "1500"],
       tmpDir,
     );
-    const planSlug = extractSlug(mustRun(["create", "plan", "--title", "Timeout Plan", "--parent", spec, "--no-ai", "--content", "body"], tmpDir));
+    const planSlug = extractSlug(mustRun(["create", "plan", "--title", "Timeout Plan", "--parent", spec, "--no-ai", ...planFieldsArgs(spec)], tmpDir));
     const taskSlug = extractSlug(
-      mustRun(["create", "task", "--kind", "code", "--title", "Timeout Task", "--parent", planSlug, "--plan-id", planSlug, "--ac-scope", acId, "--no-ai", "--content", "body"], tmpDir),
+      mustRun(["create", "task", "--kind", "code", "--title", "Timeout Task", "--parent", planSlug, "--plan-id", planSlug, "--ac-scope", acId, "--no-ai", ...templatedFieldsArgs("task")], tmpDir),
     );
     execFileSync("git", ["add", "-A"], { cwd: tmpDir });
     execFileSync("git", [...GIT_AUTHOR_ARGS, "commit", "-q", "-m", "corpus state"], { cwd: tmpDir });

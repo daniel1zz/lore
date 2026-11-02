@@ -36,6 +36,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { planFieldsArgs, templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 vi.setConfig({ testTimeout: 240_000, hookTimeout: 240_000 });
 
@@ -115,17 +116,17 @@ async function captureOnAc(acId: string, command: string, result: "pass" | "fail
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-ac-command-identity-"));
   await mustRun(["init"], dir);
-  await mustRun(["create", "prd", "--title", "EI PRD", "--no-ai", "--content", "## Overview\nbody"], dir);
-  await mustRun(["create", "spec", "--title", "EI Spec", "--no-ai", "--content", "## Overview\nbody"], dir);
+  await mustRun(["create", "prd", "--title", "EI PRD", "--no-ai", ...templatedFieldsArgs("prd", { refTarget: "problem" })], dir);
+  await mustRun(["create", "spec", "--title", "EI Spec", "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature", refTarget: "prd-ei-prd" })], dir);
   await addScriptAc("AC-EI-A", "echo a-declared");
   await addScriptAc("AC-EI-B", "echo b-declared");
   await addScriptAc("AC-EI-C", "echo c-v1");
   await addScriptAc("AC-EI-D", "sh -c 'exit 1'");
   await addScriptAc("AC-EI-E", "echo e-declared");
-  await mustRun(["create", "plan", "--title", "EI Plan", "--parent", SPEC, "--no-ai", "--content", "body"], dir);
+  await mustRun(["create", "plan", "--title", "EI Plan", "--parent", SPEC, "--no-ai", ...planFieldsArgs(SPEC)], dir);
   await mustRun(
     [
-      "create", "task", "--kind", "code", "--title", "EI Task", "--parent", PLAN, "--plan-id", PLAN, "--no-ai", "--content", "body",
+      "create", "task", "--kind", "code", "--title", "EI Task", "--parent", PLAN, "--plan-id", PLAN, "--no-ai", ...templatedFieldsArgs("task"),
       "--ac-scope", "AC-EI-A", "--ac-scope", "AC-EI-B", "--ac-scope", "AC-EI-C", "--ac-scope", "AC-EI-D", "--ac-scope", "AC-EI-E",
     ],
     dir,

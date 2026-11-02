@@ -35,6 +35,7 @@ import type { StoreInterface } from "../../../src/store/store-interface.js";
 import { RunSeeder } from "./fixtures/run-seeder.js";
 
 import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 setDefaultTimeout(300_000);
 
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -295,8 +296,8 @@ describe("AC-RID-9 CorpusService writes no literal 'system' author (D4)", () => 
   }
 
   function lifecycle(cwd: string, actor: string | null, slug: string, title: string): void {
-    mustLore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => mustLore(a, cwd, actor)), "--title", title, "--sub-type", "reference", "--no-ai", "--content", "first body"], cwd, actor);
-    mustLore(["set", slug, "--content", "second body"], cwd, actor);
+    mustLore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => mustLore(a, cwd, actor)), "--title", title, "--sub-type", "reference", "--no-ai", ...templatedFieldsArgs("knowledge", { kind: "reference", fields: { subject: "first subject" } })], cwd, actor);
+    mustLore(["set", slug, ...templatedFieldsArgs("knowledge", { kind: "reference", fields: { subject: "second subject" } })], cwd, actor);
     mustLore(["delete", slug, "--confirm"], cwd, actor);
   }
 
@@ -322,14 +323,14 @@ describe("AC-RID-9 CorpusService writes no literal 'system' author (D4)", () => 
   });
 
   it("NEGATIVE: with no run and no human session there is no fallback author at all: the write is refused and no 'system' row appears", () => {
-    const refused = lore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => lore(a, cwd, null)), "--title", "Sys Three", "--sub-type", "reference", "--no-ai", "--content", "body"], cwd, null);
+    const refused = lore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => lore(a, cwd, null)), "--title", "Sys Three", "--sub-type", "reference", "--no-ai", ...templatedFieldsArgs("knowledge", { kind: "reference" })], cwd, null);
     expect(refused.exitCode).toBe(4);
     expect(refused.stderr).toContain("lore session start --human");
     expect(versionAuthors(cwd, "knowledge-sys-three")).toEqual([]);
   });
 
   it("REGRESSION: lore get on a freshly created doc no longer says 'by system'", () => {
-    mustLore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => mustLore(a, cwd, "agent:session-c0ea7e03")), "--title", "Sys Four", "--sub-type", "reference", "--no-ai", "--content", "body"], cwd, "agent:session-c0ea7e03");
+    mustLore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => mustLore(a, cwd, "agent:session-c0ea7e03")), "--title", "Sys Four", "--sub-type", "reference", "--no-ai", ...templatedFieldsArgs("knowledge", { kind: "reference" })], cwd, "agent:session-c0ea7e03");
     const out = mustLore(["get", "knowledge-sys-four"], cwd, "agent:session-c0ea7e03").stdout;
     expect(out).not.toMatch(/by system\b/);
     expect(out).toContain("agent:session-c0ea7e03");

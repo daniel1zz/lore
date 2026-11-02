@@ -17,6 +17,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 import { execFileSync, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -93,7 +94,7 @@ function makeBranch(name: string): void {
 function createTask(title: string): string {
   taskCounter += 1;
   const slug = parseSlug(
-    mustRun(["create", "task", "--kind", "code", "--title", `${title} ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"]),
+    mustRun(["create", "task", "--kind", "code", "--title", `${title} ${taskCounter}`, "--parent", planSlug, "--plan-id", planSlug, ...templatedFieldsArgs("task"), "--no-ai"]),
   );
   // reason: `lore integrate` records a landing only on a task whose oracles it can run, i.e. one approved with its contract (AC-DCS2-1);
   // the red run is not this file's subject (AC-DCS1-5).
@@ -113,8 +114,8 @@ beforeEach(() => {
       "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"', "",
     ].join("\n"),
   );
-  const prd = parseSlug(mustRun(["create", "prd", "--title", "Claim PRD", "--content", "root", "--no-ai"]));
-  planSlug = parseSlug(mustRun(["create", "plan", "--title", "Claim Plan", "--parent", prd, "--content", "x", "--no-ai"]));
+  const prd = parseSlug(mustRun(["create", "prd", "--title", "Claim PRD", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"]));
+  planSlug = parseSlug(mustRun(["create", "plan", "--title", "Claim Plan", "--parent", prd, ...planFieldsArgs(prd), "--no-ai"]));
   git(["checkout", "-q", "--detach", "main"]);
   installShippedGuard(dir, join(dir, ".git", "guard-hooks")); // integrate refuses to run without the guard (BR-1273)
 });

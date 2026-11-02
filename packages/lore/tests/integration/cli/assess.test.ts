@@ -35,6 +35,7 @@ import { tmpdir } from "os";
 import { installStubClaude, stubClaudeEnv } from "../../helpers/stub-claude.js";
 
 import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 // ─── Path setup ───────────────────────────────────────────────────────────────
 
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -97,7 +98,7 @@ afterEach(() => {
 });
 
 function createPlan(title: string): string {
-  const r = runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", title, "--no-ai", "--content", "body"], tmpDir);
+  const r = runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", title, "--no-ai", ...templatedFieldsArgs("plan")], tmpDir);
   if (r.exitCode !== 0) throw new Error(`create plan failed: ${r.stderr}`);
   const m = r.stdout.match(/Slug:\s+(\S+)/);
   const slug = m?.[1];
@@ -107,7 +108,7 @@ function createPlan(title: string): string {
 
 function createTask(planSlug: string, title: string): string {
   const r = runLore(
-    ["create", "task", "--kind", "code", "--title", title, "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"],
+    ["create", "task", "--kind", "code", "--title", title, "--parent", planSlug, "--plan-id", planSlug, "--no-ai", ...templatedFieldsArgs("task")],
     tmpDir,
   );
   if (r.exitCode !== 0) throw new Error(`create task failed: ${r.stderr}`);

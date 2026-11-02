@@ -42,6 +42,7 @@ import { actedStore } from "../../live-invocation.js";
 import { DECIDED_FLAGS } from "../../helpers/decision-flags.js";
 import { installStubClaude, stubClaudeEnv } from "../../helpers/stub-claude.js";
 import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 
 // ─── The real CLI ─────────────────────────────────────────────────────────────
@@ -68,7 +69,7 @@ function runLore(args: string[]): RunResult {
 
 function createPlan(title: string): string {
   const parent = ensureRequirementsDocSlug((a) => runLore(a));
-  const r = runLore(["create", "plan", "--parent", parent, "--title", title, "--no-ai", "--content", "body"]);
+  const r = runLore(["create", "plan", "--parent", parent, "--title", title, "--no-ai", ...templatedFieldsArgs("plan")]);
   if (r.exitCode !== 0) throw new Error(`create plan failed: ${r.stderr}`);
   const slug = r.stdout.match(/Slug:\s+(\S+)/)?.[1];
   if (slug === undefined) throw new Error(`no plan slug in: ${r.stdout}`);

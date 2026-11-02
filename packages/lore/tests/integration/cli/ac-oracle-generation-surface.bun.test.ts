@@ -66,6 +66,7 @@ import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { planFieldsArgs, templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 // reason: the main fixture spawns ~20 compiled-binary processes to build a corpus
 // whose evidence rows straddle a generation bump; bun's 5s default is comfortably
@@ -199,9 +200,9 @@ async function recordPass(task: string, command: string, acId: string, tail: str
 async function buildCorpus(): Promise<Observed> {
   const dir = mkdtempSync(join(tmpdir(), "lore-ac-oracle-gen-"));
   await mustRun(["init"], dir);
-  await mustRun(["create", "prd", "--title", "Gen PRD", "--no-ai", "--content", "## Overview\nbody"], dir);
+  await mustRun(["create", "prd", "--title", "Gen PRD", "--no-ai", ...templatedFieldsArgs("prd", { refTarget: "problem" })], dir);
   await mustRun(
-    ["create", "spec", "--title", "Gen Spec","--no-ai", "--content", "## Overview\nbody"],
+    ["create", "spec", "--title", "Gen Spec","--no-ai", ...templatedFieldsArgs("spec", { kind: "feature", refTarget: "prd-gen-prd" })],
     dir,
   );
 
@@ -211,7 +212,7 @@ async function buildCorpus(): Promise<Observed> {
   await addScriptAc(spec, "AC-GEN-3", "A third token is present in the corpus root.", "grep -rq THIRD .", dir);
   await addScriptAc(spec, "AC-GEN-4", "A fourth token is present in the corpus root.", "grep -rq FOURTH .", dir);
 
-  await mustRun(["create", "plan", "--title", "Gen Plan", "--parent", spec, "--no-ai", "--content", "body"], dir);
+  await mustRun(["create", "plan", "--title", "Gen Plan", "--parent", spec, "--no-ai", ...planFieldsArgs(spec)], dir);
   await mustRun(
     [
       "create", "task", "--kind", "code",
@@ -219,7 +220,7 @@ async function buildCorpus(): Promise<Observed> {
       "--parent", "plan-gen-plan",
       "--plan-id", "plan-gen-plan",
       "--no-ai",
-      "--content", "body",
+      ...templatedFieldsArgs("task"),
       "--ac-scope", "AC-GEN-1",
       "--ac-scope", "AC-GEN-2",
       "--ac-scope", "AC-GEN-4",
@@ -435,9 +436,9 @@ describe("lore ac list — degrades loudly, never crashes, with no coverage to r
   beforeAll(async () => {
     errDir = mkdtempSync(join(tmpdir(), "lore-ac-oracle-gen-null-"));
     await mustRun(["init"], errDir);
-    await mustRun(["create", "prd", "--title", "Bare PRD", "--no-ai", "--content", "## Overview\nbody"], errDir);
+    await mustRun(["create", "prd", "--title", "Bare PRD", "--no-ai", ...templatedFieldsArgs("prd", { refTarget: "problem" })], errDir);
     await mustRun(
-      ["create", "spec", "--title", "Bare Spec","--no-ai", "--content", "## Overview\nbody"],
+      ["create", "spec", "--title", "Bare Spec","--no-ai", ...templatedFieldsArgs("spec", { kind: "feature", refTarget: "prd-bare-prd" })],
       errDir,
     );
     await addScriptAc("spec-bare-spec", "AC-BARE-1", "A token is present in the corpus root.", "grep -rq BARE .", errDir);
