@@ -29,6 +29,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 import { installShippedGuard } from "../integration/support/main-guard-repo.js";
 import { latestLandingCommit } from "../../src/service/milestone-review.js";
 
@@ -100,7 +101,7 @@ function worktreeOf(branch: string): string {
 
 /** A task claimed on a fresh worktree/branch, with a clean captured pass recorded from inside the worktree. */
 function claimWithPass(plan: string, title: string, branch: string, declareEmptyScope: boolean): { task: string; wt: string } {
-  const task = slugOf(mustLore(["create", "task", "--title", title, "--kind", "code", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", ...(declareEmptyScope ? ["--ac-scope", ""] : [])]));
+  const task = slugOf(mustLore(["create", "task", "--title", title, "--kind", "code", "--parent", plan, "--plan-id", plan, ...templatedFieldsArgs("task"), "--no-ai", ...(declareEmptyScope ? ["--ac-scope", ""] : [])]));
   // the contract is compiled at approve; the red run is not this file's subject (AC-DCS1-5)
   mustLore(["approve", task, "--red-waiver", "the red run is not the subject of this test"]);
   mkdirSync(join(dir, ".claude", "wt"), { recursive: true });
@@ -140,15 +141,15 @@ beforeAll(async () => {
       "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"', "",
     ].join("\n"),
   );
-  const prd = slugOf(mustLore(["create", "prd", "--title", "Landing PRD", "--content", "root", "--no-ai"]));
-  plan = slugOf(mustLore(["create", "plan", "--title", "Landing Plan", "--parent", prd, "--content", "x", "--no-ai"]));
+  const prd = slugOf(mustLore(["create", "prd", "--title", "Landing PRD", ...templatedFieldsArgs("prd"), "--no-ai"]));
+  plan = slugOf(mustLore(["create", "plan", "--title", "Landing Plan", "--parent", prd, ...planFieldsArgs(prd), "--no-ai"]));
   mustLore(["set", plan, "--status", "approved"]);
 
   // the commitless work: a corpus task (it changes no file, so it has no branch to land), approved with its contract and finished
   // at main's head by `lore finish`, in the shared checkout detached at main's tip and still clean (a landing moves main's ref
   // under the checkout, so the finish comes first). The retired route was a code task claimed on a branch whose worktree vanished,
   // closed by `lore done` with a `no-change` landing (AC-DCS1-19: a check or corpus task finishes with no claim and no landing record)
-  noChangeTask = slugOf(mustLore(["create", "task", "--title", "Unchanged work", "--kind", "corpus", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", "--ac-scope", ""]));
+  noChangeTask = slugOf(mustLore(["create", "task", "--title", "Unchanged work", "--kind", "corpus", "--parent", plan, "--plan-id", plan, ...templatedFieldsArgs("task"), "--no-ai", "--ac-scope", ""]));
   mustLore(["approve", noChangeTask]);
   git(["checkout", "-q", "--detach", "main"]);
   finishResult = lore(["finish", noChangeTask], { LORE_HARNESS_RUN: DONE_RUN });

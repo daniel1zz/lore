@@ -143,6 +143,7 @@ import { buildManifest } from "../../../../scripts/embed-assets-manifest.mjs";
 import { EMBEDDED_ASSETS_MANIFEST } from "../../src/generated/assets-manifest.js";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import { withSessionIdentity } from "../helpers/session-actor";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -378,14 +379,14 @@ describe("AC-RC-4: the coverage-floor grammar reaches BOTH shipping render surfa
     initCorpus(dir);
 
     const prdResult = runLore(
-      ["create", "prd", "--title", "T4 Coverage Floor PRD", "--content", "root", "--no-ai"],
+      ["create", "prd", "--title", "T4 Coverage Floor PRD", ...templatedFieldsArgs("prd"), "--no-ai"],
       dir,
     );
     expect(prdResult.exitCode).toBe(0);
     const prdSlug = parseSlug(prdResult.stdout);
 
     const planResult = runLore(
-      ["create", "plan", "--title", "T4 Coverage Floor Plan", "--parent", prdSlug, "--content", "x", "--no-ai"],
+      ["create", "plan", "--title", "T4 Coverage Floor Plan", "--parent", prdSlug, ...planFieldsArgs(prdSlug), "--no-ai"],
       dir,
     );
     expect(planResult.exitCode).toBe(0);

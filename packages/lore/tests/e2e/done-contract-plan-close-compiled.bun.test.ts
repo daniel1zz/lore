@@ -42,6 +42,7 @@ import { approveFixtureNodes, citeSpecViaAsyncCli, ensureLiveRuleViaAsyncCli } f
 import { DECIDED_FLAGS, DECIDED_FLAGS_OWN_REASON } from "../helpers/decision-flags";
 import { dropLoreConfigKey, patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create";
 import { fileAnswerShellLines, withFilesShell } from "../helpers/ai-double-file-answers";
 import { installShippedGuard } from "../integration/support/main-guard-repo";
 
@@ -127,10 +128,10 @@ class RuleWorld {
 
   async init(): Promise<this> {
     await this.must(["init"]);
-    const prd = await this.slug(["create", "prd", "--title", "UAT PRD", "--content", "PRD body.", "--no-ai"]);
-    const root = await this.slug(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "UAT Root"]);
-    const branch = await this.slug(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "UAT Branch"]);
-    this.leaf = await this.slug(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "UAT Leaf"]);
+    const prd = await this.slug(["create", "prd", "--title", "UAT PRD", ...templatedFieldsArgs("prd"), "--no-ai"]);
+    const root = await this.slug(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "UAT Root", ...templatedFieldsArgs("baseline", { kind: "root" })]);
+    const branch = await this.slug(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "UAT Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })]);
+    this.leaf = await this.slug(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "UAT Leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })]);
     const added = await this.must(["rule", "add", this.leaf, "--statement", "A live rule that already describes the product", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "e1"]);
     const liveRule = added.match(/\bBR-\d+\b/)?.[0];
     if (liveRule === undefined) throw new Error(`no rule id in: ${added}`);
@@ -146,7 +147,7 @@ class RuleWorld {
   /** A spec proposing one rule, with the named criteria citing it, approved; a plan under it; a task of the plan scoping `scope`. */
   async specWithPlan(label: string, criteria: ReadonlyArray<{ id: string; mode: "human" | "script"; cites: boolean }>, scope: readonly string[]): Promise<{ spec: string; plan: string; rule: string }> {
     this.counter += 1;
-    const spec = await this.slug(["create", "spec", "--title", `UAT spec ${label} ${this.counter}`, "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"]);
+    const spec = await this.slug(["create", "spec", "--title", `UAT spec ${label} ${this.counter}`, "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: this.leaf }), "--no-ai"]);
     const out = await this.must(["rule", "propose", spec, "add", "--leaf", this.leaf, ...PROPOSAL]);
     const rule = out.match(/\bBR-\d+\b/)?.[0];
     if (rule === undefined) throw new Error(`no reserved id in: ${out}`);
@@ -163,9 +164,9 @@ class RuleWorld {
   /** A plan under `spec` with one task scoping `scope`. */
   async planOf(spec: string, label: string, scope: readonly string[]): Promise<string> {
     this.counter += 1;
-    const plan = await this.slug(["create", "plan", "--title", `UAT plan ${label} ${this.counter}`, "--parent", spec, "--content", "## Plan\n\nbody", "--no-ai"]);
+    const plan = await this.slug(["create", "plan", "--title", `UAT plan ${label} ${this.counter}`, "--parent", spec, ...planFieldsArgs(spec), "--no-ai"]);
     const scopeArgs = scope.length === 0 ? ["--ac-scope", ""] : scope.flatMap((id) => ["--ac-scope", id]);
-    await this.must(["create", "task", "--title", `UAT task ${label} ${this.counter}`, "--plan-id", plan, "--kind", "check", ...scopeArgs, "--content", "## Task\n\nbody", "--no-ai"]);
+    await this.must(["create", "task", "--title", `UAT task ${label} ${this.counter}`, "--plan-id", plan, "--kind", "check", ...scopeArgs, ...templatedFieldsArgs("task"), "--no-ai"]);
     return plan;
   }
 
@@ -331,7 +332,7 @@ describe("AC-DCS2-18: a human-mode criterion counts only through a recorded verd
       ["AC-SS-1"],
     );
     // the superseding criterion lives in another spec; a superseded criterion is immutable and skipped by every reader
-    const other = await world.slug(["create", "spec", "--title", "UAT superseding spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"]);
+    const other = await world.slug(["create", "spec", "--title", "UAT superseding spec", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: spec }), "--no-ai"]);
     await world.must(["ac", "add", other, "AC-SS-NEW", "--statement", "the superseding criterion", "--mode", "human", "--note", "A person checks.", "--cite", world.liveRuleId()]);
     const superseded = await world.run(["ac", "supersede", spec, "AC-SS-OLD", "--by", `${other}:AC-SS-NEW`, "--reason", "replaced by the newer criterion", ...DECIDED_FLAGS_OWN_REASON]);
     expect(superseded.exitCode, superseded.text).toBe(0);
@@ -592,7 +593,7 @@ async function closablePlan(title: string, label: string): Promise<string> {
   const open = await fixture.createTask({ plan, kind: "corpus", title: `${label} open corpus task` });
   const landed = await landTask(code.slug);
   expect(landed.exitCode, landed.text).toBe(0);
-  const deprecated = await inProcess(fixture.dir, ["set", open, "--status", "deprecated"], OWNER);
+  const deprecated = await inProcess(fixture.dir, ["set", open, "--status", "deprecated", "--reason", "fixture: a deprecated task is not open"], OWNER);
   expect(deprecated.exitCode, deprecated.text).toBe(0);
   return plan;
 }
@@ -687,7 +688,7 @@ describe("AC-DCS2-11: the plan closes itself when its last task archives", () =>
     expect(afterDefect[issuesBefore + 1]?.title).toContain("design_necessity");
     expect(withDb((db) => (db.query("SELECT COUNT(*) AS n FROM audit WHERE action = 'plan-close-accepted-with-known-defects'").get() as { n: number }).n), "known defects are recorded").toBeGreaterThan(0);
 
-    const uatPlan = (await fixture.mustRun(["create", "plan", "--title", "Close uat plan", "--parent", fixture.spec, "--content", "## Plan\n\nBody.\n", "--no-ai", "--requires-uat"])).match(/Slug:\s+(\S+)/)?.[1] as string;
+    const uatPlan = (await fixture.mustRun(["create", "plan", "--title", "Close uat plan", "--parent", fixture.spec, ...planFieldsArgs(fixture.spec), "--no-ai", "--requires-uat"])).match(/Slug:\s+(\S+)/)?.[1] as string;
     await fixture.mustRun(["approve", uatPlan]);
     const uatTask = await finishedCodeTask(uatPlan, "pc11u");
     expect((await landTask(uatTask.slug)).exitCode).toBe(0);
@@ -717,7 +718,7 @@ describe("AC-DCS2-11: the close runs rule apply for every spec of the plan", () 
     const ruleState = async (): Promise<string> => (JSON.parse(await fixture.mustRun(["rule", "show", rule, "--json"])) as { data: { state: string } }).data.state;
     expect(await ruleState()).toBe("live");
 
-    const implemented = (await fixture.mustRun(["create", "spec", "--title", "Close implemented spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] as string;
+    const implemented = (await fixture.mustRun(["create", "spec", "--title", "Close implemented spec", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: fixture.spec }), "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] as string;
     await fixture.mustRun(["ac", "add", implemented, "AC-IM-1", "--statement", "A script criterion.", "--mode", "script", "--oracle", "test", "--command", "echo im1", "--cite", liveRule]);
     const proposed = await fixture.run(["rule", "propose", implemented, "retire", rule, "--note", "retired by the spec the plan implements"]);
     expect(proposed.exitCode, proposed.stderr).toBe(0);

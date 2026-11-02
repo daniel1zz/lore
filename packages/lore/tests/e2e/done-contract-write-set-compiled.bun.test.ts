@@ -31,6 +31,7 @@ import { FIXTURE_HOME_OUTSIDE_REPO } from "../helpers/clean-tree-repo";
 import { citeSpecViaAsyncCli } from "../helpers/cli-live-rule";
 import { patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { templatedFieldsArgs } from "../helpers/templated-create";
 import { installShippedGuard } from "../integration/support/main-guard-repo";
 import { landWithoutIntegrate } from "../helpers/done-contract-land";
 
@@ -273,7 +274,7 @@ describe("AC-DCS1-10: a claim declares its write set and overlap is judged on wr
 
   it("AC-DCS1-10: two ad-hoc tasks whose write sets overlap still conflict, and disjoint ones do not", async () => {
     const adhoc = async (title: string): Promise<string> => {
-      const created = await fixture.mustRun(["create", "task", "--title", title, "--adhoc", "--kind", "code", "--ac-scope", "", "--content", "x", "--no-ai"]);
+      const created = await fixture.mustRun(["create", "task", "--title", title, "--adhoc", "--kind", "code", "--ac-scope", "", ...templatedFieldsArgs("task"), "--no-ai"]);
       const slug = created.match(/Slug:\s+(\S+)/)?.[1];
       if (slug === undefined) throw new Error(`no slug in ${created}`);
       return slug;

@@ -77,6 +77,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create";
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up),
 // mirrors every sibling compiled-binary e2e suite's own REPO_ROOT derivation.
@@ -197,7 +198,7 @@ beforeAll(async () => {
   seedOracleFiles(dir);
 
   const prd = await runLore(
-    ["create", "prd", "--title", "Cd Chain Precheck Root", "--content", "# PRD\n\nroot.", "--no-ai"],
+    ["create", "prd", "--title", "Cd Chain Precheck Root", ...templatedFieldsArgs("prd"), "--no-ai"],
     dir,
   );
   if (prd.exitCode !== 0) throw new Error(`create prd failed: ${prd.stderr}`);
@@ -207,7 +208,7 @@ beforeAll(async () => {
       "create", "plan",
       "--title", "Cd Chain Precheck Plan",
       "--parent", parseSlug(prd.stdout),
-      "--content", "## Plan\n\nbody",
+      ...planFieldsArgs(parseSlug(prd.stdout)),
       "--no-ai",
     ],
     dir,
@@ -220,7 +221,7 @@ beforeAll(async () => {
       "--title", "Cd Chain Precheck Task",
       "--kind", "code",
       "--plan-id", parseSlug(plan.stdout),
-      "--content", "## Task\n\nbody",
+      ...templatedFieldsArgs("task"),
       "--no-ai",
     ],
     dir,

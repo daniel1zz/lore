@@ -96,6 +96,7 @@ import { saveConfig } from "@lore/core/node";
 import type { LoreConfig } from "@lore/core";
 import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../helpers/cli-live-rule.js";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create";
 
 // ─── Path / spawn setup ─────────────────────────────────────────────────────
 
@@ -246,7 +247,7 @@ async function initCorpus(dir: string): Promise<void> {
 }
 
 async function createPrd(dir: string, title: string): Promise<string> {
-  const r = await runLore(["create", "prd", "--title", title, "--content", "# PRD\n\nroot.", "--no-ai"], dir);
+  const r = await runLore(["create", "prd", "--title", title, ...templatedFieldsArgs("prd"), "--no-ai"], dir);
   if (r.exitCode !== 0) throw new Error(`create prd failed: ${r.stderr}`);
   return parseSlug(r.stdout);
 }
@@ -255,7 +256,7 @@ async function createPrd(dir: string, title: string): Promise<string> {
  *  so it resolves NO domain doc (historically §D6; irrelevant since BR-984). */
 async function createSpec(dir: string, prdSlug: string, title: string): Promise<string> {
   const r = await runLore(
-    ["create", "spec", "--title", title,"--content", "## Overview\n\nBody.", "--no-ai"],
+    ["create", "spec", "--title", title, ...templatedFieldsArgs("spec", { kind: "feature", refTarget: prdSlug }), "--no-ai"],
     dir,
   );
   if (r.exitCode !== 0) throw new Error(`create spec failed: ${r.stderr}`);
@@ -285,7 +286,7 @@ async function addScriptAc(dir: string, specSlug: string, acId: string, command:
 
 async function createPlan(dir: string, specSlug: string, title: string): Promise<string> {
   const r = await runLore(
-    ["create", "plan", "--title", title, "--parent", specSlug, "--content", "## Plan\n\nbody", "--no-ai"],
+    ["create", "plan", "--title", title, "--parent", specSlug, ...planFieldsArgs(specSlug), "--no-ai"],
     dir,
   );
   if (r.exitCode !== 0) throw new Error(`create plan failed: ${r.stderr}`);
@@ -305,8 +306,7 @@ async function createTask(dir: string, planSlug: string, title: string, kind: "c
       planSlug,
       "--ac-scope",
       acId,
-      "--content",
-      "## Task\n\nbody",
+      ...templatedFieldsArgs("task"),
       "--no-ai",
     ],
     dir,

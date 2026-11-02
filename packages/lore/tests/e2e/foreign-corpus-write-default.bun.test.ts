@@ -80,6 +80,7 @@ import { GateCheckpointConfigSchema } from "@lore/core";
 import * as loreCore from "@lore/core";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { ensureRequirementsDocSlugAsync } from "../helpers/parented-create.js";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 
 // ─── Path / spawn setup (mirrors worktree-corpus-resolution.bun.test.ts) ───
 
@@ -236,8 +237,7 @@ function knowledgeCreateArgs(titleSuffix: string, parentSlug: string): string[] 
     "reference",
     "--title",
     `AC-CP-4 fixture write ${titleSuffix}`,
-    "--content",
-    "x",
+    ...templatedFieldsArgs("knowledge", { kind: "reference" }),
     "--no-ai",
   ];
 }

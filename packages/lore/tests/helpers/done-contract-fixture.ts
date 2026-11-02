@@ -30,6 +30,7 @@ import { liveAmbient, liveWriteContext } from "../live-invocation";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "./clean-tree-repo";
 import { patchLoreConfig } from "./patch-lore-config";
 import { runLoreInProcess } from "./run-lore-in-process";
+import { planFieldsArgs, templatedExtra, templatedFieldsArgs } from "./templated-create";
 
 /** The three commands of this repository's own `.lore/config.yaml` (AC-DCS1-9); the fixture seeds the same ones. */
 export const DONE_CONTRACT_CONFIG = {
@@ -140,10 +141,11 @@ export async function makeDoneContractFixture(options: MakeFixtureOptions = {}):
     },
   });
 
-  await mustRun(["create", "prd", "--title", "Fixture PRD", "--content", "Root requirements.", "--no-ai"]);
-  // reason: a spec takes no parent (it belongs to the product trees through its criteria's citations).
+  const prd = slugOf(await mustRun(["create", "prd", "--title", "Fixture PRD", ...templatedFieldsArgs("prd"), "--no-ai"]), "the requirements document");
+  // reason: a spec takes no parent (it belongs to the product trees through its criteria's citations); the filled dimensions cite
+  // the requirements document, a document that exists, so the template's refs-resolve check passes at approve.
   const spec = slugOf(
-    await mustRun(["create", "spec", "--title", "Fixture Spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"]),
+    await mustRun(["create", "spec", "--title", "Fixture Spec", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: prd }), "--no-ai"]),
     "the spec",
   );
   await mustRun(["ac", "add", spec, "AC-FX-1", "--statement", "A script criterion.", "--mode", "script", "--oracle", "test", "--command", "echo fx1"]);
@@ -157,14 +159,14 @@ export async function makeDoneContractFixture(options: MakeFixtureOptions = {}):
     mustRun,
     git,
     async createPlan(title, integrationBranch) {
-      const plan = slugOf(await mustRun(["create", "plan", "--title", title, "--parent", spec, "--content", "## Plan\n\nBody.\n", "--no-ai"]), title);
+      const plan = slugOf(await mustRun(["create", "plan", "--title", title, "--parent", spec, ...planFieldsArgs(spec), "--no-ai"]), title);
       if (integrationBranch !== undefined) await mustRun(["plan", "integration-branch", plan, integrationBranch]);
       return plan;
     },
     async createTask(options) {
       const args = [
         "create", "task", "--title", options.title ?? `Fixture ${options.kind} task`, "--plan-id", options.plan, "--kind", options.kind,
-        "--content", "## Task\n\nBody.\n", "--no-ai",
+        ...templatedFieldsArgs("task"), "--no-ai",
       ];
       for (const anchor of options.anchors ?? []) {
         // reason: BR-1547 — approve refuses a test file that is anchored, absent at the base tip and not declared `--creates`; a
@@ -209,9 +211,8 @@ export async function seedApprovedTaskWithoutContract(fixture: DoneContractFixtu
     const created = await app.corpusService.create({
       type: "task",
       title,
-      content: "## Task\n\nApproved before the contract existed.\n",
       parent_id: plan.value.doc.id,
-      extra: { plan_id: plan.value.doc.id, ac_scope: [] },
+      extra: { plan_id: plan.value.doc.id, ac_scope: [], ...templatedExtra("task", { fields: { objective: "Approved before the contract existed." } }) },
     });
     if (!created.ok) throw new Error(`seed: create failed: ${JSON.stringify(created.error)}`);
     const approved = await app.reviewService.approve(created.value.id);
