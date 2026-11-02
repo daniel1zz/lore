@@ -15,6 +15,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatErrorFor, resolveActor } from "../utils.js";
 import { runCalibrationHook } from "../../../flows/calibration-hook.js";
 import type { DocId } from "@lore/core";
+import { findRepeatedTaskShapes, formatRepeatedTaskAdvisory } from "../../../service/task-shape-advisory.js";
 import { invocationOf } from "../command-invocation.js";
 import { printLine } from "../output.js";
 
@@ -105,6 +106,21 @@ export default defineLoreCommand({
       // dependency wired) prints nothing at all.
       for (const advisory of doc.reachability_advisories ?? []) {
         inv.io.stderr.write(`${advisory}\n`);
+      }
+
+      // reason: spec-helpers-may-change-files-by-any-means-territory-is S3 (BR-1564, AC-AT-3) — approving a plan, or a task
+      // of a plan, advises when 3+ open tasks of the plan share one body shape. Stderr only and after the approval is done:
+      // the advisory never refuses and never changes the exit code. A failed plan read is reported, not swallowed.
+      const planRef = doc.type === "plan" ? doc.id : doc.type === "task" ? doc.extra["plan_id"] : undefined;
+      if (typeof planRef === "string") {
+        const bundle = await app.corpusService.getPlanBundle(planRef);
+        if (!bundle.ok) {
+          inv.io.stderr.write(`Note: the repeated-task advisory could not read the plan (${bundle.error.code}).\n`);
+        } else {
+          for (const group of findRepeatedTaskShapes(bundle.value.tasks)) {
+            inv.io.stderr.write(`${formatRepeatedTaskAdvisory(group, bundle.value.plan.slug)}\n`);
+          }
+        }
       }
 
       // reason: ReviewService.approve() bumps doc.version by 1 as part of the
