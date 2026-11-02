@@ -65,7 +65,7 @@ async function seed(store: InMemoryStore, doc: DocRecord): Promise<DocRecord> {
 }
 
 describe("close detaches stale entries of every unit-keyed gate (O2)", () => {
-  it("AC-FP-2 STATE: an accepted security gate with a fixed file a and a still-failing b detaches a's entry and an old cites-keyed entry, and closes their issues", async () => {
+  it("O2 STATE: an accepted security gate with a fixed file a and a still-failing b detaches a's entry and an old cites-keyed entry, and closes their issues", async () => {
     const store = actedStore(new InMemoryStore());
     const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(undefined));
     const known = [
@@ -116,14 +116,14 @@ describe("close detaches stale entries of every unit-keyed gate (O2)", () => {
     expect([...closed].sort()).toEqual([1, 3]);
   });
 
-  it("AC-FP-2 NEGATIVE: an accepted gate whose failing fingerprints are unknown keeps its entries (not measured is never fixed)", () => {
+  it("O2 NEGATIVE: an accepted gate whose failing fingerprints are unknown keeps its entries (not measured is never fixed)", () => {
     const entries = [{ repo_id: REPO_ID, number: 1, dimension: "security" as const, fingerprint: "X" }];
     const split = partitionKnownDefectsAtClose(entries, { security: { verdict: "fail", failingFingerprints: [] } }, ["security"]);
     expect(split.kept.map((e) => e.number)).toEqual([1]);
   });
 
   it.each(["security", "concurrency_safety", "spec_conformance", "design_necessity", "correctness_vs_acs"] as const)(
-    "AC-FP-2 BOUNDARY: an accepted %s gate detaches an entry whose fingerprint no longer fails",
+    "O2 BOUNDARY: an accepted %s gate detaches an entry whose fingerprint no longer fails",
     (dimension) => {
       const entries = [{ repo_id: REPO_ID, number: 1, dimension, fingerprint: "OLD" }];
       const split = partitionKnownDefectsAtClose(entries, { [dimension]: { verdict: "fail", failingFingerprints: ["NEW"] } }, [dimension]);
@@ -131,7 +131,7 @@ describe("close detaches stale entries of every unit-keyed gate (O2)", () => {
     },
   );
 
-  it("AC-FP-2 REGRESSION: a snapshot_accuracy gate (one measured cause) still keeps its accepted entry", () => {
+  it("O2 REGRESSION: a snapshot_accuracy gate (one measured cause) still keeps its accepted entry", () => {
     const entries = [{ repo_id: REPO_ID, number: 1, dimension: "snapshot_accuracy" as const, fingerprint: "OLD" }];
     const split = partitionKnownDefectsAtClose(entries, { snapshot_accuracy: { verdict: "fail", failingFingerprints: ["NEW"] } }, ["snapshot_accuracy"]);
     expect(split.kept.map((e) => e.number)).toEqual([1]);
