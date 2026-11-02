@@ -60,7 +60,7 @@ import {
   type UnitDescriptor,
   type UnitLedger,
 } from "./judge-unit-ledger.js";
-import { canonicalEvidenceRowsOf, criterionUnitInput, fileUnitInput, type JudgeIdentity } from "./judge-unit-keys.js";
+import { canonicalEvidenceRowsOf, criterionUnitInput, fileUnitInput, sha256Hex, type JudgeIdentity } from "./judge-unit-keys.js";
 
 /** One judge reply with what the call cost. */
 export interface JudgeReply {
@@ -104,6 +104,11 @@ export interface JudgmentOutcome {
   readonly dimensions: Record<JudgedDimension, DimensionJudgment>;
   readonly findings: readonly DecisionFinding[];
   readonly record: JudgmentRecord;
+  /**
+   * The call-level verdict of each file gate before the per-file unit verdicts are folded in (the full call's answer, or the worst of the
+   * chunk calls): what the review reads to tell a flow no single file unit covers (BR-1552 S1).
+   */
+  readonly callLevel: Readonly<Record<"security" | "concurrency_safety", DimensionJudgment>>;
 }
 
 function aiError(message: string): LoreError {
@@ -285,6 +290,7 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
 
   const dimensions = {} as Record<JudgedDimension, DimensionJudgment>;
   let findings: readonly DecisionFinding[] = [];
+  const callLevel = {} as Record<"security" | "concurrency_safety", DimensionJudgment>;
 
   // ── per-unit state (BR-1535): one unit per shown changed file and per AI criterion, looked up before any call ──
   const { ledger, unitInstructions } = input.reuse;
@@ -365,7 +371,10 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
     const settledCall = await settleCall(answered.value, askedPaths, askedCriteria);
     if (!settledCall.ok) return settledCall;
     for (const d of askedDimensionsOf("full")) dimensions[d] = answered.value.dimensions[d] as DimensionJudgment;
-    for (const d of ["concurrency_safety", "security"] as const) dimensions[d] = combineWorst([dimensions[d], ...unitJudgments(fileStates, d)]);
+    for (const d of ["concurrency_safety", "security"] as const) {
+      callLevel[d] = dimensions[d];
+      dimensions[d] = combineWorst([dimensions[d], ...unitJudgments(fileStates, d)]);
+    }
     findings = answered.value.findings;
   } else {
     const plan = chunking as NonNullable<typeof chunking>;
@@ -408,6 +417,7 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
     dimensions.design_necessity = answered.value.dimensions.design_necessity as DimensionJudgment;
     for (const d of ["concurrency_safety", "security"] as const) {
       const all = [...perChunk[d], ...unitJudgments(fileStates, d)];
+      callLevel[d] = perChunk[d].length > 0 ? combineWorst(perChunk[d]) : notMeasured("no chunk call was made");
       dimensions[d] = all.length > 0 ? combineWorst(all) : notMeasured("no file fit a call, so none was judged");
     }
     findings = answered.value.findings;
@@ -436,6 +446,8 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
       key: settled.key,
       first_review: settled.first_review,
       answer_sha256: settled.answer_sha256,
+      // reason: BR-1552 S4 — the input hash is computed from the unit's own input whether or not reuse is on, and never reads the model or template.
+      input_sha256: sha256Hex(state.desc.canonical),
       verdicts:
         state.file !== undefined
           ? { security: state.file.security.verdict, concurrency_safety: state.file.concurrency_safety.verdict }
@@ -447,6 +459,7 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
   return ok({
     dimensions,
     findings,
+    callLevel,
     record: {
       review_token: ledger.reviewToken,
       ...(identity !== undefined

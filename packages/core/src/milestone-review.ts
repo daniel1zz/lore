@@ -258,6 +258,8 @@ export const judgeUnitRecordSchema = z.object({
   /** The review token (`judgment.review_token`) of the review that first produced the answer. */
   first_review: z.string().min(1),
   answer_sha256: z.string().min(1),
+  /** sha256 of the unit's canonical input (a file's net diff; a criterion's statement, rubric, plan diff and evidence rows): the model-independent part of `key` (BR-1552); absent on a review stored before it. */
+  input_sha256: z.string().min(1).optional(),
   verdicts: z.record(z.string(), z.enum(["pass", "fail", "na"])),
 });
 export type JudgeUnitRecord = z.infer<typeof judgeUnitRecordSchema>;
@@ -332,6 +334,17 @@ export const retiredAcRefSchema = z.object({
 });
 export type RetiredAcRef = z.infer<typeof retiredAcRefSchema>;
 
+/** One root cause of a judged dimension: its key, its label, the failing units with their input hashes, and for a cross-file cause the cited files. */
+export const judgedCauseSchema = z.object({
+  /** The cause key hashed into the fingerprint with the dimension (`unit:...`, `cross-file:...`, `plan:...`, `criterion:...`, or a legacy `cites:...`). */
+  key: z.string().min(1),
+  /** The title label: the file path for a unit cause, otherwise the judge's summary (never part of the key). */
+  label: z.string().min(1),
+  units: z.array(z.object({ id: z.string().min(1), input_sha256: z.string().min(1) })),
+  cited_files: z.array(z.string().min(1)).optional(),
+});
+export type JudgedCause = z.infer<typeof judgedCauseSchema>;
+
 /**
  * The measured causes of a review's failed findings, stored so a later batch can file them by root cause without
  * re-reviewing (BR-1379: issues are grouped by fingerprint, and a filing error retries only the filing).
@@ -345,6 +358,12 @@ export const reviewCausesSchema = z.object({
   regression_files: z.array(z.string().min(1)).optional(),
   /** Cited rule ids whose state is contradicted (the snapshot-accuracy finding's root cause), sorted. */
   contradicted_rules: z.array(z.string().min(1)).optional(),
+  /**
+   * The root causes of the JUDGED dimensions, by dimension id (BR-1552, #629): each is keyed by recorded unit input hashes
+   * (`unit:<path>:<hash>`, `cross-file:<hash>`, `plan:<hash>`, `criterion:<spec>:<ac>:<hash>`), never by the judge's cites.
+   * A dimension absent here keeps the cites-keyed cause.
+   */
+  judged: z.record(z.string(), z.array(judgedCauseSchema)).optional(),
 });
 export type ReviewCauses = z.infer<typeof reviewCausesSchema>;
 

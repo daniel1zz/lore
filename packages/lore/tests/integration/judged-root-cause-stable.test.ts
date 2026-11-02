@@ -16,6 +16,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { err, ok, type AiCriterionInput, type DocRecord, type LoreError, type MilestoneDimension, type MilestoneReview, type Result } from "@lore/core";
+import { splitDiffByFile } from "../../src/ai/diff-truncation.js";
 import { MilestoneReviewService } from "../../src/service/milestone-review-service.js";
 import type { JudgeReply } from "../../src/service/milestone-review-judgment.js";
 import { failingCausesOf, type RootCause } from "../../src/service/root-cause-fingerprint.js";
@@ -123,7 +124,7 @@ const DIMS = ["spec_conformance", "design_necessity", "concurrency_safety", "sec
 const A = "src/a.ts";
 const B = "src/b.ts";
 const C = "src/c.ts";
-const V1 = { [A]: "A1", [B]: "B1", [C]: "C1" };
+const V1: Record<string, string> = { [A]: "A1", [B]: "B1", [C]: "C1" };
 
 function makeEnv(store = new MemoryVerdictStore()) {
   let counter = 0;
@@ -212,11 +213,13 @@ function causesOf(review: MilestoneReview, dimension: MilestoneDimension, slug =
   return causes.value;
 }
 const fingerprints = (causes: readonly RootCause[]): string[] => causes.map((c) => c.fingerprint).sort();
-const unitFingerprint = (dimension: string, path: string, files: Record<string, string>): string => sha(`${dimension}|unit:${path}:${sha(diffOf({ [path]: files[path] as string }))}`);
+/** sha256 of the file's net diff section: the file unit input as the production splitter defines it. */
+const inputHash = (files: Record<string, string>, path: string): string => sha(splitDiffByFile(diffOf(files)).find((f) => f.filePath === path)?.text ?? "");
+const unitFingerprint = (dimension: string, path: string, files: Record<string, string>): string => sha(`${dimension}|unit:${path}:${inputHash(files, path)}`);
 const pairsOf = (files: Record<string, string>): string =>
   Object.keys(files)
     .sort()
-    .map((p) => `${p}\u0000${sha(diffOf({ [p]: files[p] as string }))}`)
+    .map((p) => `${p}\u0000${inputHash(files, p)}`)
     .join("\n");
 const crossFingerprint = (dimension: string, files: Record<string, string>): string => sha(`${dimension}|cross-file:${sha(pairsOf(files))}`);
 const planFingerprint = (dimension: string, files: Record<string, string>, spec = "spec-x@1"): string => sha(`${dimension}|plan:${sha(`${spec}\n${pairsOf(files)}`)}`);
@@ -274,7 +277,7 @@ describe("AC-FP-1 unchanged code keeps its causes, issues and acceptance", () =>
     for (const path of [A, B]) {
       const body = bodies.find((b) => b.includes(path));
       expect(body).toBeDefined();
-      expect(body).toContain(sha(diffOf({ [path]: V1[path] as string })));
+      expect(body).toContain(inputHash(V1, path));
     }
   });
 
@@ -398,7 +401,7 @@ describe("AC-FP-3 the model and prompt never enter a cause", () => {
     const units = (review.judgment as unknown as { units: { kind: string; id: string; input_sha256?: string }[]; reuse: { enabled: boolean } }).units;
     expect((review.judgment as unknown as { reuse: { enabled: boolean } }).reuse.enabled).toBe(false);
     const fileUnit = units.find((u) => u.id === A);
-    expect(fileUnit?.input_sha256).toBe(sha(diffOf({ [A]: "A1" })));
+    expect(fileUnit?.input_sha256).toBe(inputHash(V1, A));
     expect(units.every((u) => /^[0-9a-f]{64}$/.test(u.input_sha256 ?? ""))).toBe(true);
     expect(fingerprints(causesOf(review, "security"))).toContain(unitFingerprint("security", A, V1));
   });

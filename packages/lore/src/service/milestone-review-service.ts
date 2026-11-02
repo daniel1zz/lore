@@ -33,6 +33,7 @@ import {
   type LinkType,
   type JudgedDimension,
   type LlmMilestoneOutput,
+  type JudgedCause,
   type ReviewCauses,
   type LoreError,
   type MilestoneDecisionRef,
@@ -42,6 +43,7 @@ import {
   type Result,
   type RetiredAcRef,
 } from "@lore/core";
+import { judgedCausesOf } from "./root-cause-fingerprint.js";
 import { factsDimensions, mergeDimensions, runJudgment, type JudgePort } from "./milestone-review-judgment.js";
 import { randomUUID } from "node:crypto";
 import { UnitLedger, type JudgeVerdictStorePort } from "./judge-unit-ledger.js";
@@ -147,15 +149,21 @@ export function measuredCauses(
   dimensions: LlmMilestoneOutput["dimensions"],
   attributedFailingFiles: readonly string[],
   cited: readonly CitedRuleStateRow[],
+  judged?: Record<string, JudgedCause[]>,
 ): ReviewCauses | undefined {
   const regression =
     dimensions.regression.verdict === "fail" && attributedFailingFiles.length > 0 ? [...new Set(attributedFailingFiles)].sort() : undefined;
   const contradicted = cited.filter((r) => r.state === "contradicted").map((r) => r.rule_id);
   const rules = dimensions.snapshot_accuracy.verdict === "fail" && contradicted.length > 0 ? [...new Set(contradicted)].sort() : undefined;
-  if (regression === undefined && rules === undefined) return undefined;
+  const hasJudged = judged !== undefined && Object.keys(judged).length > 0;
+  if (regression === undefined && rules === undefined && !hasJudged) return undefined;
   // reason: BR-1496 / #540 — no review measures a full suite, so the root causes are the files the selection found red at the
   // plan's last landing and charged to it. Each file is its own cause (BR-1513): the fingerprint reads one file at a time.
-  return { ...(regression !== undefined ? { regression_files: regression } : {}), ...(rules !== undefined ? { contradicted_rules: rules } : {}) };
+  return {
+    ...(regression !== undefined ? { regression_files: regression } : {}),
+    ...(rules !== undefined ? { contradicted_rules: rules } : {}),
+    ...(hasJudged ? { judged } : {}),
+  };
 }
 
 /** The `milestone` decisions whose document is the plan, its spec or one of its tasks (newest per class+document). */
@@ -387,6 +395,15 @@ export class MilestoneReviewService {
       dimensions,
       opts.facts?.regression_files ?? [],
       citedRulesResult.value,
+      // reason: BR-1552 — judged dimensions are keyed by the recorded unit input hashes, not by the judge's cites.
+      judgedCausesOf({
+        dimensions,
+        judgedDimensions: judged.value.dimensions,
+        callLevel: judged.value.callLevel,
+        units: judgment.units ?? [],
+        aiCriteria: judgment.ai_criteria,
+        ...(bundle.spec !== undefined ? { spec: { slug: bundle.spec.slug, version: bundle.spec.version } } : {}),
+      }),
     );
     const review: MilestoneReview = {
       plan_id: bundle.plan.id,

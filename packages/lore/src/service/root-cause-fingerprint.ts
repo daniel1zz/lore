@@ -4,12 +4,15 @@
  * Purpose: give every failed finding a stable identity so a batch files ONE issue per root cause and links it to
  *   every plan that shares it, never one per plan and dimension.
  * Public surface: {@link FailedFinding}, {@link RootCause}, {@link rootCauseOf}, {@link splitFindingByFile},
- *   {@link rootCausesOf}, {@link failingCausesOf}, {@link issueTitleOf}, {@link FINGERPRINT_TITLE_TAG}, {@link fingerprintTag}.
+ *   {@link rootCausesOf}, {@link failingCausesOf}, {@link judgedCausesOf}, {@link issueTitleOf}, {@link FINGERPRINT_TITLE_TAG}, {@link fingerprintTag}.
  * Invariants:
  *   - Fingerprint = SHA-256 of `<dimension>|<cause key>`. Cause key by dimension: `regression` charged with files ->
  *     `file:<repo path>` for ONE file, independent of the plan and of every other file (BR-1513; label `main red: <path>`),
  *     so a plan charged with several files has several causes ({@link splitFindingByFile}, {@link rootCausesOf});
- *     `snapshot_accuracy` -> the sorted set of contradicted rule ids; every other dimension (and a regression the
+ *     `snapshot_accuracy` -> the sorted set of contradicted rule ids; a judged dimension whose review recorded `causes.judged`
+ *     (BR-1552, #629) -> ONE cause per recorded entry, keyed by unit input hashes (`unit:<path>:<hash>`, `cross-file:<hash>`,
+ *     `plan:<hash>`, `criterion:<spec>:<ac>:<hash>`), never by cites, wording, model or template, so the same code and spec keep
+ *     the same cause ({@link splitFindingByFile} splits a judged finding per entry); every other dimension (and a regression the
  *     selection did not charge files for) -> the sorted, unique STRUCTURED cites the judge named (AC ids, rule ids, paths,
  *     symbols), never the finding's wording; no cite is a VALIDATION_ERROR (the plan is re-reviewed).
  *   - The causes come from the MEASURED `causes` stored on the review, never from the judge's prose, whenever the
@@ -21,7 +24,7 @@
  */
 
 import { createHash } from "node:crypto";
-import type { LoreError, MilestoneDimension, MilestoneReview, ReviewCauses, Result } from "@lore/core";
+import type { JudgedCause, JudgeUnitRecord, LoreError, MilestoneDimension, MilestoneReview, ReviewCauses, Result } from "@lore/core";
 import { err, ok } from "@lore/core";
 
 /** One failed dimension of one plan's stored review, as the filing sees it. */
@@ -46,6 +49,10 @@ export interface RootCause {
   readonly short: string;
   /** Human label of the cause (`main red: a.test.ts, b.test.ts`, `contradicted rules: BR-1`, ...). */
   readonly label: string;
+  /** The failing units of a judged cause with their input hashes (BR-1552 S6); absent on a cites-, file- or rule-keyed cause. */
+  readonly units?: readonly { readonly id: string; readonly input_sha256: string }[];
+  /** The changed files the call-level verdict cited, on a cross-file cause. */
+  readonly cited_files?: readonly string[];
 }
 
 /** The title tag that makes an open issue findable by fingerprint: `[fp:<12 hex>]`. */
@@ -99,6 +106,26 @@ export function rootCauseOf(finding: FailedFinding): Result<RootCause, LoreError
     const sorted = [...new Set(rules)].sort();
     return ok({ dimension, ...digest(dimension, `rules:${sorted.join(",")}`), label: `contradicted rules: ${sorted.join(", ")}` });
   }
+  const judged = finding.causes?.judged?.[dimension];
+  if (judged !== undefined && judged.length > 0) {
+    const [entry] = judged;
+    // reason: like BR-1513, the identity is ONE recorded cause; several entries must be split first ({@link splitFindingByFile}).
+    if (entry === undefined || judged.length !== 1) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "causes.judged",
+        message: `the ${dimension} finding of ${finding.reviewSlug} carries ${String(judged.length)} root causes; a root cause is one unit, so the finding must be split first`,
+        rule: "BR-1552",
+      });
+    }
+    return ok({
+      dimension,
+      ...digest(dimension, entry.key),
+      label: entry.label,
+      ...(entry.units.length > 0 ? { units: entry.units } : {}),
+      ...(entry.cited_files !== undefined ? { cited_files: entry.cited_files } : {}),
+    });
+  }
   const cites = normalisedCites(finding.cites);
   if (cites.length === 0) {
     return err({
@@ -115,13 +142,20 @@ export function rootCauseOf(finding: FailedFinding): Result<RootCause, LoreError
 }
 
 /**
- * Splits a regression finding into one finding per charged file (BR-1513); any other finding is returned as is.
+ * Splits a finding into one finding per root cause: a regression per charged file (BR-1513), a judged dimension per recorded
+ * unit cause (BR-1552); any other finding is returned as is.
  *
  * @param finding - a failed finding
- * @returns one finding per distinct charged file, sorted by path, each carrying only its own file; `[finding]` when the
- *   finding is not a regression or no file was charged to it (a not-measured regression stays cites-keyed)
+ * @returns one finding per distinct charged file (sorted by path) or per distinct recorded judged cause (recorded order), each
+ *   carrying only its own; `[finding]` when nothing was recorded for the dimension (a not-measured regression stays cites-keyed)
  */
 export function splitFindingByFile(finding: FailedFinding): FailedFinding[] {
+  const judged = finding.causes?.judged?.[finding.dimension];
+  if (finding.causes !== undefined && judged !== undefined && judged.length > 0) {
+    const { causes } = finding;
+    const distinct = [...new Map(judged.map((entry) => [entry.key, entry])).values()];
+    return distinct.map((entry) => ({ ...finding, causes: { ...causes, judged: { ...causes.judged, [finding.dimension]: [entry] } } }));
+  }
   const files = finding.causes?.regression_files;
   if (finding.dimension !== "regression" || files === undefined || files.length === 0) return [finding];
   return [...new Set(files)].sort().map((file) => ({ ...finding, causes: { ...finding.causes, regression_files: [file] } }));
@@ -159,4 +193,101 @@ export function failingCausesOf(planSlug: string, reviewSlug: string, review: Pi
 /** The issue title of a root cause: `<dimension>: <label> [fp:<12 hex>]`. */
 export function issueTitleOf(cause: RootCause): string {
   return `${cause.dimension}: ${cause.label.slice(0, 120)} ${fingerprintTag(cause.short)}`;
+}
+
+/** What {@link judgedCausesOf} reads of one review. */
+export interface JudgedCausesInput {
+  /** The review's final dimensions. */
+  readonly dimensions: Readonly<Record<MilestoneDimension, { readonly verdict: string; readonly reason: string; readonly cites?: readonly string[] | undefined }>>;
+  /** The dimensions as the judge answered them, before the measured rules: a plan-level cause is recorded only for a verdict that is still the judge's. */
+  readonly judgedDimensions: Readonly<Partial<Record<MilestoneDimension, { readonly verdict: string; readonly reason: string }>>>;
+  /** The call-level security and concurrency_safety verdicts before the per-file units were folded in. */
+  readonly callLevel: Readonly<Record<"security" | "concurrency_safety", { readonly verdict: string; readonly cites?: readonly string[] | undefined; readonly reason: string }>>;
+  /** Every unit of the review (`judgment.units`). */
+  readonly units: readonly JudgeUnitRecord[];
+  /** The AI criteria verdicts (`judgment.ai_criteria`). */
+  readonly aiCriteria: readonly { readonly spec: string; readonly ac: string; readonly verdict: string; readonly reason: string }[];
+  /** The reviewed spec; absent when the plan has none. */
+  readonly spec?: { readonly slug: string; readonly version: number };
+}
+
+function summaryOf(reason: string): string {
+  return reason.replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+function citesPath(cite: string, path: string): boolean {
+  return cite === path || cite.startsWith(`${path}:`) || cite.startsWith(`${path}#`);
+}
+
+function sha256Of(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+/**
+ * The root causes of the judged dimensions of one review, keyed by the recorded unit input hashes (BR-1552, #629): the model,
+ * the template, the judge's cites and its wording never enter a key.
+ *
+ * - `security` / `concurrency_safety`: one `unit:<path>:<sha256 of the file unit input>` cause per failing file unit, plus one
+ *   `cross-file:<sha256 of every changed file's (path, input hash) pairs>` cause when the call-level verdict fails and cites a
+ *   changed file whose own unit passes, or when no file unit fails.
+ * - `spec_conformance` / `design_necessity`: `plan:<sha256 of spec slug@version and the (path, input hash) pairs>`.
+ * - `correctness_vs_acs`: `criterion:<spec>:<ac>:<sha256 of the criterion unit input>` per failing AI criterion; failing script
+ *   criteria keep a `cites:` cause.
+ *
+ * @param input - the review's dimensions, call-level verdicts and recorded units
+ * @returns the causes by dimension; a dimension that did not fail on the judge's own verdict, or whose units carry no input hash
+ *   (a review stored before BR-1552), has no entry and stays cites-keyed
+ */
+export function judgedCausesOf(input: JudgedCausesInput): Record<string, JudgedCause[]> {
+  const out: Record<string, JudgedCause[]> = {};
+  const files = input.units.filter((u) => u.kind === "file").sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const pairs: { id: string; input_sha256: string }[] = [];
+  for (const u of files) if (u.input_sha256 !== undefined) pairs.push({ id: u.id, input_sha256: u.input_sha256 });
+  const hashed = pairs.length === files.length;
+  const pairText = pairs.map((p) => `${p.id}\u0000${p.input_sha256}`).join("\n");
+  const hashOf = (id: string): string => pairs.find((p) => p.id === id)?.input_sha256 ?? "";
+  const stillJudged = (d: MilestoneDimension): boolean =>
+    input.dimensions[d].verdict === "fail" && input.judgedDimensions[d]?.verdict === "fail" && input.judgedDimensions[d]?.reason === input.dimensions[d].reason;
+
+  if (hashed) {
+    for (const d of ["security", "concurrency_safety"] as const) {
+      if (input.dimensions[d].verdict !== "fail") continue;
+      const causes: JudgedCause[] = [];
+      const failing = files.filter((u) => u.verdicts[d] === "fail");
+      for (const u of failing) causes.push({ key: `unit:${u.id}:${hashOf(u.id)}`, label: u.id, units: [{ id: u.id, input_sha256: hashOf(u.id) }] });
+      const call = input.callLevel[d];
+      if (call.verdict === "fail") {
+        const cites = call.cites ?? [];
+        const passingCited = files.filter((u) => u.verdicts[d] !== "fail" && cites.some((c) => citesPath(c, u.id))).map((u) => u.id);
+        if (failing.length === 0 || passingCited.length > 0) {
+          const cited = failing.length === 0 ? files.filter((u) => cites.some((c) => citesPath(c, u.id))).map((u) => u.id) : passingCited;
+          causes.push({ key: `cross-file:${sha256Of(pairText)}`, label: `cross-file: ${summaryOf(call.reason)}`, units: pairs, cited_files: cited });
+        }
+      }
+      if (causes.length > 0) out[d] = causes;
+    }
+    const specRef = input.spec === undefined ? "none@0" : `${input.spec.slug}@${String(input.spec.version)}`;
+    for (const d of ["spec_conformance", "design_necessity"] as const) {
+      if (!stillJudged(d)) continue;
+      out[d] = [{ key: `plan:${sha256Of(`${specRef}\n${pairText}`)}`, label: summaryOf(input.dimensions[d].reason), units: pairs }];
+    }
+  }
+  if (input.dimensions.correctness_vs_acs.verdict === "fail") {
+    const causes: JudgedCause[] = [];
+    const failingIds = new Set<string>();
+    for (const c of input.aiCriteria) {
+      if (c.verdict !== "fail") continue;
+      const id = `${c.spec}:${c.ac}`;
+      const unit = input.units.find((u) => u.kind === "criterion" && u.id === id);
+      if (unit?.input_sha256 === undefined) continue;
+      failingIds.add(id);
+      causes.push({ key: `criterion:${id}:${unit.input_sha256}`, label: `${id}: ${summaryOf(c.reason)}`, units: [{ id, input_sha256: unit.input_sha256 }] });
+    }
+    if (causes.length > 0) {
+      const rest = normalisedCites(input.dimensions.correctness_vs_acs.cites).filter((c) => !failingIds.has(c));
+      if (rest.length > 0) causes.push({ key: `cites:${rest.join(",")}`, label: summaryOf(input.dimensions.correctness_vs_acs.reason), units: [] });
+      out["correctness_vs_acs"] = causes;
+    }
+  }
+  return out;
 }
