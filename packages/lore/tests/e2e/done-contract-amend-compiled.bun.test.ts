@@ -226,15 +226,26 @@ describe("a stored contract changes only through one audited amendment", () => {
   it("AC-DCF-2: two corrections held together: exactly one exits 0, the other exactly 5, and one version is written", async () => {
     const file = "tests/am-d.test.ts";
     const slug = await approvedTask({ tests: [file] });
-    await fixture.mustRun(["anchor", "rm", slug, file]);
-    const before = await fixture.readTask(slug);
-    const [one, two] = await Promise.all([
-      loreIn(["set", slug, "--correction", "first writer"], "amend-d-1"),
-      loreIn(["set", slug, "--correction", "second writer"], "amend-d-2"),
-    ]);
-    expect([one.exitCode, two.exitCode].sort(), `${one.text}\n${two.text}`).toEqual([0, 5]);
-    expect((await fixture.readTask(slug)).version).toBe(before.version + 1);
-    expect((await amendmentRows(slug)).length).toBe(1);
+    // reason: whether the second call reads before or after the first one's write is the scheduler's choice; a call that reads
+    // after it finds nothing left to amend and exits 0. Every round therefore must end in one of the two legal outcomes with ONE
+    // version written, and some round must show the lost race (exit 5); the rounds alternate the pending change (anchor rm / add).
+    let sawLostRace = false;
+    for (let round = 0; round < 12 && !sawLostRace; round += 1) {
+      const present = idsOf(await contractOf(slug)).includes(`test:${file}`);
+      await fixture.mustRun(present ? ["anchor", "rm", slug, file] : ["anchor", "add", slug, file]);
+      const before = await fixture.readTask(slug);
+      const rowsBefore = (await amendmentRows(slug)).length;
+      const [one, two] = await Promise.all([
+        loreIn(["set", slug, "--correction", `first writer ${round}`], `amend-d-1-${round}`),
+        loreIn(["set", slug, "--correction", `second writer ${round}`], `amend-d-2-${round}`),
+      ]);
+      const exits = [one.exitCode, two.exitCode].sort();
+      expect([[0, 0], [0, 5]], `${one.text}\n${two.text}`).toContainEqual(exits);
+      expect((await fixture.readTask(slug)).version).toBe(before.version + 1);
+      expect((await amendmentRows(slug)).length).toBe(rowsBefore + 1);
+      if (exits[1] === 5) sawLostRace = true;
+    }
+    expect(sawLostRace, "two corrections held together never produced the lost-race exit 5").toBe(true);
   });
 
   it("AC-DCF-2: start after anchor add recompiles with reason start-drift naming the file, adds its oracle, writes one audit row and drops no oracle even when an anchor was removed", async () => {
