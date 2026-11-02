@@ -100,6 +100,7 @@ import {
 } from "@lore/core";
 import { EMBEDDED_ASSETS_MANIFEST } from "../../src/generated/assets-manifest.js";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 
 // ─── Path / spawn setup ─────────────────────────────────────────────────────
 
@@ -201,14 +202,14 @@ describe("AC-CP-4: resume ticket scope closure on the compiled CLI stdout (D3)",
     initCorpus(dir);
 
     const prdResult = runLore(
-      ["create", "prd", "--title", "T5 Scope Closure PRD", "--content", "root", "--no-ai"],
+      ["create", "prd", "--title", "T5 Scope Closure PRD", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"],
       dir,
     );
     expect(prdResult.exitCode).toBe(0);
     const prdSlug = parseSlug(prdResult.stdout);
 
     const planResult = runLore(
-      ["create", "plan", "--title", "T5 Scope Closure Plan", "--parent", prdSlug, "--content", "x", "--no-ai"],
+      ["create", "plan", "--title", "T5 Scope Closure Plan", "--parent", prdSlug, ...planFieldsArgs(prdSlug), "--no-ai"],
       dir,
     );
     expect(planResult.exitCode).toBe(0);
@@ -289,12 +290,12 @@ describe("AC-CP-6: throwaway out-of-tree corpus reproduces both boundary declara
     expect(existsSync(join(dir, ".lore", "lore.db"))).toBe(true);
 
     const markerTitle = `T5 Fresh Install Marker ${Math.random().toString(36).slice(2)}`;
-    const prdResult = runLore(["create", "prd", "--title", markerTitle, "--content", "root", "--no-ai"], dir);
+    const prdResult = runLore(["create", "prd", "--title", markerTitle, ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"], dir);
     expect(prdResult.exitCode).toBe(0);
     const prdSlug = parseSlug(prdResult.stdout);
 
     const planResult = runLore(
-      ["create", "plan", "--title", "T5 Fresh Install Plan", "--parent", prdSlug, "--content", "x", "--no-ai"],
+      ["create", "plan", "--title", "T5 Fresh Install Plan", "--parent", prdSlug, ...planFieldsArgs(prdSlug), "--no-ai"],
       dir,
     );
     expect(planResult.exitCode).toBe(0);

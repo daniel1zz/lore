@@ -45,6 +45,7 @@ import { tmpdir } from "os";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import type { CalibrationOutcome, CalibrationRecord, DocRecord, DocType, ReviewJudgment } from "@lore/core";
 import { actedStore } from "../live-invocation.js";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -338,7 +339,7 @@ describe("Scenario 4: approve/reject still work when there is no judgment to cal
 
   it("REGRESSION: approve on a doc with no AI judgment still exits 0 and transitions to 'approved'", () => {
     const createResult = runLore(
-      ["create", "prd", "--title", "Calibration Regression Approve", "--json", "--no-ai"],
+      ["create", "prd", "--title", "Calibration Regression Approve", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--json", "--no-ai"],
       tmpDir,
     );
     expect(createResult.exitCode).toBe(0);
@@ -352,7 +353,7 @@ describe("Scenario 4: approve/reject still work when there is no judgment to cal
 
   it("REGRESSION: reject on a doc with no AI judgment still exits 0 and the doc remains 'draft'", () => {
     const createResult = runLore(
-      ["create", "prd", "--title", "Calibration Regression Reject", "--json", "--no-ai"],
+      ["create", "prd", "--title", "Calibration Regression Reject", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--json", "--no-ai"],
       tmpDir,
     );
     expect(createResult.exitCode).toBe(0);

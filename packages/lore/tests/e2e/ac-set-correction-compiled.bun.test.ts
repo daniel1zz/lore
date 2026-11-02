@@ -33,6 +33,7 @@ import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../helpers/cli-live-rule.js";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { DECIDED_FLAGS } from "../helpers/decision-flags.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 
 setDefaultTimeout(120_000);
 
@@ -89,13 +90,13 @@ describe("lore ac set --correction, compiled binary (AC-CC-2)", () => {
     dir = mkdtempSync(join(tmpdir(), "lore-ac-correction-e2e-"));
     expect(dir.startsWith(PROJECT_ROOT)).toBe(false);
     await mustLore(["init"]);
-    await mustLore(["create", "prd", "--title", "Correction PRD", "--content", "PRD body.", "--no-ai"]);
+    const prd = parseSlug(await mustLore(["create", "prd", "--title", "Correction PRD", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"]));
     // The review-judgment checkpoint defaults spec/adr into `judgment_required_types`; disabled so the approval
     // below is a fixture step, not the behaviour under test.
     patchLoreConfig(dir, { workflow: { review: { judgment_required_types: [] } } });
 
     spec = parseSlug(
-      await mustLore(["create", "spec", "--title", "Correction Spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"]),
+      await mustLore(["create", "spec", "--title", "Correction Spec", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: prd }), "--no-ai"]),
     );
     await mustLore([
       "ac", "add", spec, AC_ID, "--statement", "Original statement of the criterion.",
@@ -106,10 +107,10 @@ describe("lore ac set --correction, compiled binary (AC-CC-2)", () => {
 
     // One evidence row on a task of a plan under the spec: the state in which `lore reopen` is refused.
     const plan = parseSlug(
-      await mustLore(["create", "plan", "--title", "Correction Plan", "--parent", spec, "--content", "## Plan\n\nbody", "--no-ai"]),
+      await mustLore(["create", "plan", "--title", "Correction Plan", "--parent", spec, ...planFieldsArgs(spec), "--no-ai"]),
     );
     const task = parseSlug(
-      await mustLore(["create", "task", "--title", "Correction Task", "--kind", "code", "--plan-id", plan, "--ac-scope", AC_ID, "--content", "## Task\n\nbody", "--no-ai"]),
+      await mustLore(["create", "task", "--title", "Correction Task", "--kind", "code", "--plan-id", plan, "--ac-scope", AC_ID, ...templatedFieldsArgs("task"), "--no-ai"]),
     );
     await mustLore(["evidence", task, "--oracle", "test", "--result", "pass", "--command", "echo evidence-ok", "--capture", "--ac", AC_ID]);
   });

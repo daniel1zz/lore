@@ -30,6 +30,7 @@ import { basename, join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 import { FIXTURE_DONE_CONTRACT_CONFIG } from "../helpers/landed-code-task";
 
 /**
@@ -90,9 +91,9 @@ interface Seeded {
 async function seed(dir: string): Promise<Seeded> {
   makeCleanTreeRepo(dir);
   await mustRun(["init"], dir);
-  const prd = parseSlug((await mustRun(["create", "prd", "--title", "Seat PRD", "--content", "r", "--no-ai"], dir)).stdout);
+  const prd = parseSlug((await mustRun(["create", "prd", "--title", "Seat PRD", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"], dir)).stdout);
   const plan = parseSlug(
-    (await mustRun(["create", "plan", "--title", "Seat Plan", "--parent", prd, "--content", "x", "--no-ai"], dir)).stdout,
+    (await mustRun(["create", "plan", "--title", "Seat Plan", "--parent", prd, ...planFieldsArgs(prd), "--no-ai"], dir)).stdout,
   );
   return { prd, plan };
 }
@@ -112,7 +113,7 @@ async function claimTask(dir: string, plan: string, worktree: string, approve = 
   const session = `c1a1${taskCounter.toString(16).padStart(4, "0")}-seat-e2e-claimant`;
   const slug = parseSlug(
     (await mustRun(
-      ["create", "task", "--title", `Seat task ${taskCounter}`, "--kind", "code", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"],
+      ["create", "task", "--title", `Seat task ${taskCounter}`, "--kind", "code", "--parent", plan, "--plan-id", plan, ...templatedFieldsArgs("task"), "--no-ai"],
       dir,
     )).stdout,
   );

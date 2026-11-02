@@ -38,6 +38,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { templatedFieldsArgs } from "../helpers/templated-create";
 
 setDefaultTimeout(120_000);
 
@@ -103,9 +104,9 @@ describe("lore ac add / ac set falsifier exit-code range, compiled binary (AC-EH
     await mustLore(["init"]);
     // The command and the falsifier target are real files in the corpus dir (declaration-time path precheck).
     writeFileSync(join(dir, "target.txt"), "MAGIC marker\n", "utf8");
-    await mustLore(["create", "prd", "--title", "Range PRD", "--content", "PRD body.", "--no-ai"]);
+    await mustLore(["create", "prd", "--title", "Range PRD", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"]);
     spec = parseSlug(
-      await mustLore(["create", "spec", "--title", "Range Spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"]),
+      await mustLore(["create", "spec", "--title", "Range Spec", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: "problem" }), "--no-ai"]),
     );
   });
 

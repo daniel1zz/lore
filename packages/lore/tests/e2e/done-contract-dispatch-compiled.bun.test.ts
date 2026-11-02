@@ -35,6 +35,7 @@ import { FIXTURE_HOME_OUTSIDE_REPO } from "../helpers/clean-tree-repo";
 import { citeSpecViaAsyncCli } from "../helpers/cli-live-rule";
 import { patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { templatedFieldsArgs } from "../helpers/templated-create";
 import { createApp } from "../../src/app";
 import { liveAmbient, liveWriteContext } from "../live-invocation";
 
@@ -101,7 +102,7 @@ async function approvedTask(planSlug: string, kind: "code" | "check" | "corpus",
   sequence += 1;
   const created = await fixture.run([
     "create", "task", "--title", `Dispatch ${kind} task ${sequence}`, "--plan-id", planSlug, "--kind", kind,
-    "--content", `## Task\n\n${BODY_MARKER}\n`, "--no-ai",
+    ...templatedFieldsArgs("task", { fields: { objective: BODY_MARKER } }), "--no-ai",
     ...(kind === "corpus" ? ["--ac-scope", ""] : ["--ac-scope", "AC-FX-1"]),
   ]);
   expect(created.exitCode, created.stderr).toBe(0);
@@ -213,7 +214,7 @@ describe("lore dispatch prints the whole subagent prompt from the stored contrac
     const unknown = await loreIn(["dispatch", "task-no-such-task-anywhere"]);
     expect(unknown.exitCode, unknown.text).not.toBe(0);
     sequence += 1;
-    const created = await fixture.mustRun(["create", "task", "--title", `Dispatch draft ${sequence}`, "--plan-id", plan, "--kind", "code", "--content", "## Task\n\nDraft.\n", "--ac-scope", "AC-FX-1", "--no-ai"]);
+    const created = await fixture.mustRun(["create", "task", "--title", `Dispatch draft ${sequence}`, "--plan-id", plan, "--kind", "code", ...templatedFieldsArgs("task", { fields: { objective: "Draft." } }), "--ac-scope", "AC-FX-1", "--no-ai"]);
     const draft = created.match(/Slug:\s+(\S+)/)?.[1] ?? "";
     const out = await loreIn(["dispatch", draft]);
     expect(out.exitCode, out.text).toBe(4);

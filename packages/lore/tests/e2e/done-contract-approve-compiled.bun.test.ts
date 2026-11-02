@@ -41,6 +41,7 @@ import { cleanDirs, makeIssueFixture, STUB_REPO_ID, type IssueFixture } from "..
 import { FIXTURE_HOME_OUTSIDE_REPO } from "../helpers/clean-tree-repo";
 import { dropLoreConfigKey, patchLoreConfig, readLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { templatedExtra, templatedFieldsArgs } from "../helpers/templated-create";
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 240_000 });
 
@@ -116,7 +117,7 @@ describe("AC-DCS1-4: the task kind is required at create and immutable once appr
   it("AC-DCS1-4: lore create task without --kind exits 2 naming code, check and corpus together with the other missing flags, and writes nothing", async () => {
     const before = await countDocs("task");
     // Neither --plan-id nor --kind: ONE message names both flags and the three kinds.
-    const both = await fixture.run(["create", "task", "--title", "No kind, no plan", "--content", "x", "--no-ai"]);
+    const both = await fixture.run(["create", "task", "--title", "No kind, no plan", ...templatedFieldsArgs("task"), "--no-ai"]);
     expect(both.exitCode, both.stderr).toBe(2);
     expect(both.stderr).toContain("--plan-id");
     expect(both.stderr).toContain("--kind");
@@ -124,13 +125,13 @@ describe("AC-DCS1-4: the task kind is required at create and immutable once appr
     expect(both.stdout).toBe("");
 
     // A plan but no kind: the false green is a default kind of `code`, which would exit 0 here.
-    const kindOnly = await fixture.run(["create", "task", "--title", "No kind", "--plan-id", plan, "--ac-scope", "", "--content", "x", "--no-ai"]);
+    const kindOnly = await fixture.run(["create", "task", "--title", "No kind", "--plan-id", plan, "--ac-scope", "", ...templatedFieldsArgs("task"), "--no-ai"]);
     expect(kindOnly.exitCode, kindOnly.stderr).toBe(2);
     expect(kindOnly.stderr).toContain("--kind");
     expect(namesAllKinds(kindOnly.stderr), kindOnly.stderr).toBe(true);
 
     // An --adhoc task relaxes --plan-id and --parent only; the kind stays required.
-    const adhoc = await fixture.run(["create", "task", "--title", "Adhoc no kind", "--adhoc", "--ac-scope", "", "--content", "x", "--no-ai"]);
+    const adhoc = await fixture.run(["create", "task", "--title", "Adhoc no kind", "--adhoc", "--ac-scope", "", ...templatedFieldsArgs("task"), "--no-ai"]);
     expect(adhoc.exitCode, adhoc.stderr).toBe(2);
     expect(namesAllKinds(adhoc.stderr), adhoc.stderr).toBe(true);
 
@@ -140,7 +141,7 @@ describe("AC-DCS1-4: the task kind is required at create and immutable once appr
   it("AC-DCS1-4: --kind with a value outside the three kinds exits 2 and writes nothing", async () => {
     const before = await countDocs("task");
     for (const bad of ["Code", "test", "spec", " "]) {
-      const result = await fixture.run(["create", "task", "--title", `Bad kind ${bad}`, "--plan-id", plan, "--kind", bad, "--ac-scope", "", "--content", "x", "--no-ai"]);
+      const result = await fixture.run(["create", "task", "--title", `Bad kind ${bad}`, "--plan-id", plan, "--kind", bad, "--ac-scope", "", ...templatedFieldsArgs("task"), "--no-ai"]);
       expect(result.exitCode, `--kind '${bad}': ${result.stderr}`).toBe(2);
       expect(namesAllKinds(result.stderr), result.stderr).toBe(true);
     }
@@ -152,7 +153,7 @@ describe("AC-DCS1-4: the task kind is required at create and immutable once appr
       const slug = await fixture.createTask({ plan, kind, title: `Stored ${kind}` });
       expect((await fixture.readTask(slug)).extra["kind"]).toBe(kind);
     }
-    const adhocOut = await fixture.mustRun(["create", "task", "--title", "Adhoc check", "--adhoc", "--kind", "check", "--ac-scope", "", "--content", "x", "--no-ai"]);
+    const adhocOut = await fixture.mustRun(["create", "task", "--title", "Adhoc check", "--adhoc", "--kind", "check", "--ac-scope", "", ...templatedFieldsArgs("task"), "--no-ai"]);
     const adhocSlug = adhocOut.match(/Slug:\s+(\S+)/)?.[1] ?? "";
     expect((await fixture.readTask(adhocSlug)).extra["kind"]).toBe("check");
   });
@@ -243,24 +244,25 @@ describe("AC-DCS1-4: the task kind is required at create and immutable once appr
   it("AC-DCS1-4: the HTTP create route answers 400 naming the three kinds without a kind, and stores extra.kind when given", async () => {
     const planId = await docId(plan);
     const before = await countDocs("task");
-    const base = { type: "task", title: "HTTP task", content: "x", parent_id: planId };
+    const base = { type: "task", title: "HTTP task", parent_id: planId };
+    const taskFields = templatedExtra("task");
 
-    const missing = await httpJson("POST", "/api/docs", { ...base, extra: { plan_id: planId, ac_scope: [] } });
+    const missing = await httpJson("POST", "/api/docs", { ...base, extra: { plan_id: planId, ac_scope: [], ...taskFields } });
     expect(missing.status).toBe(400);
     expect(namesAllKinds(JSON.stringify(missing.json)), JSON.stringify(missing.json)).toBe(true);
 
-    const unknown = await httpJson("POST", "/api/docs", { ...base, extra: { plan_id: planId, ac_scope: [], kind: "test" } });
+    const unknown = await httpJson("POST", "/api/docs", { ...base, extra: { plan_id: planId, ac_scope: [], kind: "test", ...taskFields } });
     expect(unknown.status).toBe(400);
     expect(await countDocs("task")).toBe(before);
 
-    const inExtra = await httpJson("POST", "/api/docs", { ...base, title: "HTTP task extra kind", extra: { plan_id: planId, ac_scope: [], kind: "check" } });
+    const inExtra = await httpJson("POST", "/api/docs", { ...base, title: "HTTP task extra kind", extra: { plan_id: planId, ac_scope: [], kind: "check", ...taskFields } });
     expect(inExtra.status, JSON.stringify(inExtra.json)).toBe(201);
-    const topLevel = await httpJson("POST", "/api/docs", { ...base, title: "HTTP task top kind", kind: "corpus", extra: { plan_id: planId, ac_scope: [] } });
+    const topLevel = await httpJson("POST", "/api/docs", { ...base, title: "HTTP task top kind", kind: "corpus", extra: { plan_id: planId, ac_scope: [], ...taskFields } });
     expect(topLevel.status, JSON.stringify(topLevel.json)).toBe(201);
     expect(await countDocs("task")).toBe(before + 2);
 
     // A document that is not a task needs no kind.
-    const knowledge = await httpJson("POST", "/api/docs", { type: "knowledge", title: "No kind needed", content: "x", parent_id: planId, extra: { sub_type: "research" } });
+    const knowledge = await httpJson("POST", "/api/docs", { type: "knowledge", title: "No kind needed", parent_id: planId, extra: { sub_type: "research", ...templatedExtra("knowledge", { kind: "research" }) } });
     expect(knowledge.status, JSON.stringify(knowledge.json)).toBe(201);
   });
 
@@ -434,17 +436,18 @@ describe("AC-DCS1-4: the dashboard create route requires a kind too (BR-1488)", 
   it("AC-DCS1-4: POST /api/dashboard/docs for a task without a kind answers 400 naming code, check and corpus; with a kind it stores extra.kind", async () => {
     const planId = await docId(plan);
     const before = await countDocs("task");
-    const base = { type: "task", title: "Dashboard task", content: "x", parent_id: planId };
+    const base = { type: "task", title: "Dashboard task", parent_id: planId };
+    const taskFields = templatedExtra("task");
 
-    const missing = await dashboardJson("POST", "/api/dashboard/docs", { ...base, extra: { plan_id: planId, ac_scope: [] } });
+    const missing = await dashboardJson("POST", "/api/dashboard/docs", { ...base, extra: { plan_id: planId, ac_scope: [], ...taskFields } });
     expect(missing.status, JSON.stringify(missing.json)).toBe(400);
     expect(namesAllKinds(JSON.stringify(missing.json)), JSON.stringify(missing.json)).toBe(true);
 
-    const unknown = await dashboardJson("POST", "/api/dashboard/docs", { ...base, extra: { plan_id: planId, ac_scope: [], kind: "test" } });
+    const unknown = await dashboardJson("POST", "/api/dashboard/docs", { ...base, extra: { plan_id: planId, ac_scope: [], kind: "test", ...taskFields } });
     expect(unknown.status, JSON.stringify(unknown.json)).toBe(400);
     expect(await countDocs("task")).toBe(before);
 
-    const given = await dashboardJson("POST", "/api/dashboard/docs", { ...base, title: "Dashboard task kind", extra: { plan_id: planId, ac_scope: [], kind: "check" } });
+    const given = await dashboardJson("POST", "/api/dashboard/docs", { ...base, title: "Dashboard task kind", extra: { plan_id: planId, ac_scope: [], kind: "check", ...taskFields } });
     expect(given.status, JSON.stringify(given.json)).toBe(201);
     const created = (given.json["data"] as { doc?: { slug: string } } | undefined)?.doc ?? (given.json as { doc?: { slug: string } }).doc;
     expect(created?.slug, JSON.stringify(given.json)).toBeDefined();
@@ -452,7 +455,7 @@ describe("AC-DCS1-4: the dashboard create route requires a kind too (BR-1488)", 
     expect(await countDocs("task")).toBe(before + 1);
 
     // A document that is not a task needs no kind.
-    const knowledge = await dashboardJson("POST", "/api/dashboard/docs", { type: "knowledge", title: "Dashboard knowledge", content: "x", parent_id: planId, extra: { sub_type: "research" } });
+    const knowledge = await dashboardJson("POST", "/api/dashboard/docs", { type: "knowledge", title: "Dashboard knowledge", parent_id: planId, extra: { sub_type: "research", ...templatedExtra("knowledge", { kind: "research" }) } });
     expect(knowledge.status, JSON.stringify(knowledge.json)).toBe(201);
   });
 });
@@ -492,7 +495,7 @@ describe("the done contract compiled at approve", () => {
     cf.git(["commit", "-q", "-m", "seed anchored files"]);
     // A second spec whose criterion supersedes one of the first spec's (a superseded criterion gives no oracle).
     await cf.mustRun(["ac", "add", cf.spec, "AC-FX-SUP", "--statement", "Soon superseded.", "--mode", "script", "--oracle", "test", "--command", "echo sup"]);
-    const spec2Out = await cf.mustRun(["create", "spec", "--title", "Fixture Spec Two", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"]);
+    const spec2Out = await cf.mustRun(["create", "spec", "--title", "Fixture Spec Two", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: "problem" }), "--no-ai"]);
     const spec2 = spec2Out.match(/Slug:\s+(\S+)/)?.[1] ?? "";
     await cf.mustRun(["ac", "add", spec2, "AC-FX2-1", "--statement", "Supersedes.", "--mode", "script", "--oracle", "test", "--command", "echo fx2"]);
     await cf.mustRun(["ac", "supersede", cf.spec, "AC-FX-SUP", "--by", `${spec2}:AC-FX2-1`, "--reason", "Replaced by the second spec."]);
@@ -725,7 +728,7 @@ describe("the done contract compiled at approve", () => {
     });
 
     it("AC-DCS1-2: an ac_scope id declared by a spec the plan implements (not its parent) resolves", async () => {
-      const spec3Out = await cf.mustRun(["create", "spec", "--title", "Fixture Spec Three", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"]);
+      const spec3Out = await cf.mustRun(["create", "spec", "--title", "Fixture Spec Three", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: "problem" }), "--no-ai"]);
       const spec3 = spec3Out.match(/Slug:\s+(\S+)/)?.[1] ?? "";
       await cf.mustRun(["ac", "add", spec3, "AC-IMPL-1", "--statement", "On the implemented spec.", "--mode", "script", "--oracle", "test", "--command", "echo impl"]);
       const plan3 = await cf.createPlan("Plan that implements spec three");
@@ -789,9 +792,8 @@ describe("the done contract compiled at approve", () => {
         const created = await app.corpusService.create({
           type: "task",
           title: "Already holds a contract",
-          content: "x",
           parent_id: planDoc.value.doc.id,
-          extra: { plan_id: planDoc.value.doc.id, ac_scope: [], kind: "code", done_contract: stored },
+          extra: { plan_id: planDoc.value.doc.id, ac_scope: [], kind: "code", done_contract: stored, ...templatedExtra("task") },
         });
         if (!created.ok) throw new Error(`seed failed: ${JSON.stringify(created.error)}`);
         slug = created.value.slug;
@@ -885,7 +887,7 @@ describe("AC-DCF-1: approve refuses an absent undeclared test anchor; --creates 
   });
 
   it("AC-DCF-1: lore create task --creates declares it at creation; a task anchored to an existing file approves unchanged (control)", async () => {
-    const out = await df.run(["create", "task", "--title", "Creates at create", "--plan-id", dfPlan, "--kind", "code", "--content", "x", "--no-ai", "--ac-scope", "", "--creates", "tests/born.test.ts"]);
+    const out = await df.run(["create", "task", "--title", "Creates at create", "--plan-id", dfPlan, "--kind", "code", ...templatedFieldsArgs("task"), "--no-ai", "--ac-scope", "", "--creates", "tests/born.test.ts"]);
     expect(out.exitCode, out.stderr).toBe(0);
     const slug = out.stdout.match(/Slug:\s+(\S+)/)?.[1] ?? "";
     expect((await df.run(["approve", slug])).exitCode).toBe(0);

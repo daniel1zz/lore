@@ -48,6 +48,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { approveFixtureNodes } from "../helpers/cli-live-rule.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -120,10 +121,10 @@ function buildCorpus(label: string, setup: GateSetup): Corpus {
   expect(dir.startsWith(REPO_ROOT)).toBe(false);
   mustRun(["init"], dir);
   const prdSlug = parseSlug(
-    mustRun(["create", "prd", "--title", "Slice2 Rollback Root", "--content", "# PRD\n\nroot.", "--no-ai"], dir).stdout,
+    mustRun(["create", "prd", "--title", "Slice2 Rollback Root", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"], dir).stdout,
   );
   const specSlug = parseSlug(
-    mustRun(["create", "spec", "--title", "Slice2 Rollback Spec","--content", "## Spec\n\nbody", "--no-ai"], dir)
+    mustRun(["create", "spec", "--title", "Slice2 Rollback Spec", ...templatedFieldsArgs("spec", { kind: "feature", refTarget: prdSlug }), "--no-ai"], dir)
       .stdout,
   );
   mustRun(
@@ -132,11 +133,11 @@ function buildCorpus(label: string, setup: GateSetup): Corpus {
   );
   mustRun(["ac", "add", specSlug, "AC-S2-2", "--statement", "human criterion", "--mode", "human"], dir);
   const planSlug = parseSlug(
-    mustRun(["create", "plan", "--title", "Slice2 Rollback Plan", "--parent", specSlug, "--content", "## Plan", "--no-ai"], dir).stdout,
+    mustRun(["create", "plan", "--title", "Slice2 Rollback Plan", "--parent", specSlug, ...planFieldsArgs(specSlug), "--no-ai"], dir).stdout,
   );
   const taskSlug = parseSlug(
     mustRun(
-      ["create", "task", "--title", "Slice2 Rollback Task", "--kind", "code", "--plan-id", planSlug, "--parent", planSlug, "--content", "## Task", "--ac-scope", "AC-S2-1", "--no-ai"],
+      ["create", "task", "--title", "Slice2 Rollback Task", "--kind", "code", "--plan-id", planSlug, "--parent", planSlug, ...templatedFieldsArgs("task"), "--ac-scope", "AC-S2-1", "--no-ai"],
       dir,
     ).stdout,
   );
@@ -145,13 +146,13 @@ function buildCorpus(label: string, setup: GateSetup): Corpus {
   let ruleId: string | undefined;
   if (setup.kind === "baseline") {
     const root = parseBaselineSlug(
-      mustRun(["baseline", "add", prdSlug, "--node", "root", "--label", "Root", "--title", "S2 BL Root"], dir).stdout,
+      mustRun(["baseline", "add", prdSlug, "--node", "root", "--label", "Root", "--title", "S2 BL Root", ...templatedFieldsArgs("baseline", { kind: "root" })], dir).stdout,
     );
     branchSlug = parseBaselineSlug(
-      mustRun(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "S2 BL Branch"], dir).stdout,
+      mustRun(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "S2 BL Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })], dir).stdout,
     );
     const leaf = parseBaselineSlug(
-      mustRun(["baseline", "add", branchSlug, "--node", "leaf", "--label", "Leaf", "--title", "S2 BL Leaf"], dir).stdout,
+      mustRun(["baseline", "add", branchSlug, "--node", "leaf", "--label", "Leaf", "--title", "S2 BL Leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })], dir).stdout,
     );
     const ruleOut = mustRun(
       ["rule", "add", leaf, "--statement", "Users see the first thing", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one"],

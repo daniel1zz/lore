@@ -30,6 +30,12 @@ import { tmpdir } from "os";
 
 import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
 import { readShippedTemplateSeeds } from "../../src/adapters/cli/template-seeds.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
+
+/** `--fields-file` args for a PRD, with top-level overrides. */
+const PRD_FIELDS = (fields?: Record<string, unknown>): string[] => templatedFieldsArgs("prd", { refTarget: "problem", ...(fields === undefined ? {} : { fields }) });
+/** `--fields-file` args for a feature spec. */
+const SPEC_FIELDS = (): string[] => templatedFieldsArgs("spec", { kind: "feature", refTarget: "problem" });
 
 /** The approved template documents `lore init` seeds (BR-807 as modified): one per shipped seed. */
 const SEED_COUNT = (() => {
@@ -224,7 +230,7 @@ describe("Scenario 2: full CRUD lifecycle", () => {
   it("HAPPY: create → get → set → delete full lifecycle", () => {
     // Create (AC-E2E-001.04)
     // reason: --no-ai bypasses AI generation (SPEC-017 default) so e2e tests don't require claude binary.
-    const createResult = runLore(["create", "prd", "--title", "Test PRD", "--json", "--no-ai"], tmpDir);
+    const createResult = runLore(["create", "prd", "--title", "Test PRD", ...PRD_FIELDS(), "--json", "--no-ai"], tmpDir);
     expect(createResult.exitCode).toBe(0);
     const created = parseJson<{ id: string; slug: string; title: string; status: string }>(
       createResult,
@@ -272,22 +278,22 @@ describe("Scenario 2: full CRUD lifecycle", () => {
   });
 
   it("HAPPY: create outputs slug in human-readable mode", () => {
-    const result = runLore(["create", "prd", "--title", "My Document", "--no-ai"], tmpDir);
+    const result = runLore(["create", "prd", "--title", "My Document", ...PRD_FIELDS(), "--no-ai"], tmpDir);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("prd-my-document");
     expect(result.stdout).toContain("Created prd document");
   });
 
   it("HAPPY: create spec with no parent leaves parent_id null; create plan with --parent links to parent", () => {
-    const prdResult = runLore(["create", "prd", "--title", "Parent PRD", "--json", "--no-ai"], tmpDir);
+    const prdResult = runLore(["create", "prd", "--title", "Parent PRD", ...PRD_FIELDS(), "--json", "--no-ai"], tmpDir);
     const prd = parseJson<{ id: string; slug: string }>(prdResult).data!;
 
-    const specResult = runLore(["create", "spec", "--title", "Free Spec", "--json", "--no-ai"], tmpDir);
+    const specResult = runLore(["create", "spec", "--title", "Free Spec", ...SPEC_FIELDS(), "--json", "--no-ai"], tmpDir);
     expect(specResult.exitCode).toBe(0);
     expect(parseJson<{ parent_id: string | null }>(specResult).data!.parent_id).toBeNull();
 
     const planResult = runLore(
-      ["create", "plan", "--title", "Child Plan", "--parent", prd.slug, "--json", "--no-ai"],
+      ["create", "plan", "--title", "Child Plan", "--parent", prd.slug, ...planFieldsArgs(prd.slug), "--json", "--no-ai"],
       tmpDir,
     );
     expect(planResult.exitCode).toBe(0);
@@ -295,10 +301,10 @@ describe("Scenario 2: full CRUD lifecycle", () => {
   }, 30_000);
 
   it("NEGATIVE: create spec with --parent is refused, exit 4, naming `lore ac cite` (BR-2)", () => {
-    const prdResult = runLore(["create", "prd", "--title", "Parent PRD", "--json", "--no-ai"], tmpDir);
+    const prdResult = runLore(["create", "prd", "--title", "Parent PRD", ...PRD_FIELDS(), "--json", "--no-ai"], tmpDir);
     const prd = parseJson<{ slug: string }>(prdResult).data!;
     const specResult = runLore(
-      ["create", "spec", "--title", "Filed Spec", "--parent", prd.slug, "--no-ai"],
+      ["create", "spec", "--title", "Filed Spec", "--parent", prd.slug, ...SPEC_FIELDS(), "--no-ai"],
       tmpDir,
     );
     expect(specResult.exitCode).toBe(4);
@@ -328,16 +334,16 @@ describe("Scenario 2: full CRUD lifecycle", () => {
     // The old "exits code 2 when no flags" behaviour is gone; editor-flow is tested in
     // unit/adapters/cli-editor-integration.bun.test.ts. This e2e test verifies the
     // --content flag path still works correctly in the subprocess context.
-    const createResult = runLore(["create", "prd", "--title", "Setme", "--json", "--no-ai"], tmpDir);
+    const createResult = runLore(["create", "prd", "--title", "Setme", ...PRD_FIELDS(), "--json", "--no-ai"], tmpDir);
     const slug = parseJson<{ slug: string }>(createResult).data!.slug;
 
-    const result = runLore(["set", slug, "--content", "updated body"], tmpDir);
+    const result = runLore(["set", slug, ...PRD_FIELDS({ problem: { statement: "updated body", evidence: [{ claim: "c", source: "s" }] } })], tmpDir);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Updated");
   });
 
   it("BOUNDARY: title with special characters round-trips correctly", () => {
-    const result = runLore(["create", "prd", "--title", "Test: Edge & Cases", "--json", "--no-ai"], tmpDir);
+    const result = runLore(["create", "prd", "--title", "Test: Edge & Cases", ...PRD_FIELDS(), "--json", "--no-ai"], tmpDir);
     expect(result.exitCode).toBe(0);
     const doc = parseJson<{ title: string }>(result).data!;
     expect(doc.title).toBe("Test: Edge & Cases");
@@ -364,10 +370,10 @@ describe("Scenario 3: spec with parent and tree hierarchy", () => {
   });
 
   it("HAPPY: tree --json shows PRD with plan as child (AC-E2E-001.11; a spec takes no parent, BR-2)", () => {
-    const prdResult = runLore(["create", "prd", "--title", "Parent PRD", "--json", "--no-ai"], tmpDir);
+    const prdResult = runLore(["create", "prd", "--title", "Parent PRD", ...PRD_FIELDS(), "--json", "--no-ai"], tmpDir);
     const prd = parseJson<{ id: string; slug: string }>(prdResult).data!;
 
-    runLore(["create", "plan", "--title", "Auth Plan", "--parent", prd.slug, "--no-ai"], tmpDir);
+    runLore(["create", "plan", "--title", "Auth Plan", "--parent", prd.slug, ...planFieldsArgs(prd.slug), "--no-ai"], tmpDir);
 
     const treeResult = runLore(["tree", "--json"], tmpDir);
     expect(treeResult.exitCode).toBe(0);
@@ -381,9 +387,9 @@ describe("Scenario 3: spec with parent and tree hierarchy", () => {
   }, 30_000);
 
   it("HAPPY: tree human-readable output contains parent and child titles", () => {
-    const prdResult = runLore(["create", "prd", "--title", "Root Doc", "--json", "--no-ai"], tmpDir);
+    const prdResult = runLore(["create", "prd", "--title", "Root Doc", ...PRD_FIELDS(), "--json", "--no-ai"], tmpDir);
     const prd = parseJson<{ slug: string }>(prdResult).data!;
-    runLore(["create", "plan", "--title", "Child Plan", "--parent", prd.slug, "--no-ai"], tmpDir);
+    runLore(["create", "plan", "--title", "Child Plan", "--parent", prd.slug, ...planFieldsArgs(prd.slug), "--no-ai"], tmpDir);
 
     const treeResult = runLore(["tree"], tmpDir);
     expect(treeResult.exitCode).toBe(0);
@@ -410,10 +416,11 @@ describe("Scenario 4: discovery (list + search)", () => {
     disableAllGates(tmpDir);
 
     // Seed 3 docs of different types (prd, spec, plan — no extra fields required)
-    const prdResult = runLore(["create", "prd", "--title", "My PRD", "--json", "--no-ai"], tmpDir);
+    const prdResult = runLore(["create", "prd", "--title", "My PRD", ...PRD_FIELDS(), "--json", "--no-ai"], tmpDir);
     prdSlug = parseJson<{ slug: string }>(prdResult).data!.slug;
-    runLore(["create", "spec", "--title", "Auth Feature Spec","--no-ai"], tmpDir);
-    runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", "General Plan", "--no-ai"], tmpDir);
+    runLore(["create", "spec", "--title", "Auth Feature Spec", ...SPEC_FIELDS(), "--no-ai"], tmpDir);
+    const reqDoc = ensureRequirementsDocSlug((a) => runLore(a, tmpDir));
+    runLore(["create", "plan", "--parent", reqDoc, "--title", "General Plan", ...planFieldsArgs(reqDoc), "--no-ai"], tmpDir);
   });
 
   afterEach(() => {
@@ -509,7 +516,7 @@ describe("Scenario 5: review workflow (pending → approve)", () => {
 
   it("HAPPY: pending shows draft, approve removes it from pending (AC-E2E-001.08)", () => {
     // Create draft
-    const createResult = runLore(["create", "prd", "--title", "Review Me", "--json", "--no-ai"], tmpDir);
+    const createResult = runLore(["create", "prd", "--title", "Review Me", ...PRD_FIELDS(), "--json", "--no-ai"], tmpDir);
     const doc = parseJson<{ id: string }>(createResult).data!;
 
     // Pending shows it
@@ -537,7 +544,7 @@ describe("Scenario 5: review workflow (pending → approve)", () => {
   });
 
   it("HAPPY: pending --json returns well-formed envelope with draft docs", () => {
-    runLore(["create", "prd", "--title", "Draft Doc", "--no-ai"], tmpDir);
+    runLore(["create", "prd", "--title", "Draft Doc", ...PRD_FIELDS(), "--no-ai"], tmpDir);
     const result = runLore(["pending", "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
     const json = parseJson<{ docs: Array<{ status: string }> }>(result);
@@ -571,7 +578,7 @@ describe("Scenario 6: version history (log + diff)", () => {
     disableAllGates(tmpDir);
 
     // Create doc (v1) then update (v2)
-    const createResult = runLore(["create", "prd", "--title", "Version Test", "--json", "--no-ai"], tmpDir);
+    const createResult = runLore(["create", "prd", "--title", "Version Test", ...PRD_FIELDS(), "--json", "--no-ai"], tmpDir);
     const doc = parseJson<{ id: string; slug: string }>(createResult).data!;
     docId = doc.id;
     docSlug = doc.slug;
@@ -647,7 +654,7 @@ describe("Scenario 7: error handling and exit codes", () => {
   });
 
   it("HAPPY: delete without --confirm → exit code 4 (AC-E2E-001.07)", () => {
-    const createResult = runLore(["create", "prd", "--title", "DeleteMe", "--json", "--no-ai"], tmpDir);
+    const createResult = runLore(["create", "prd", "--title", "DeleteMe", ...PRD_FIELDS(), "--json", "--no-ai"], tmpDir);
     const slug = parseJson<{ slug: string }>(createResult).data!.slug;
 
     const result = runLore(["delete", slug], tmpDir);
@@ -679,9 +686,10 @@ describe("Scenario 8: JSON output composability", () => {
     tmpDir = makeTempDir("json");
     runLore(["init"], tmpDir);
     disableAllGates(tmpDir);
-    runLore(["create", "prd", "--title", "JSON PRD", "--no-ai"], tmpDir);
-    // plan requires no extra fields (knowledge/adr require extra.sub_type/decision_status)
-    runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", "JSON Plan", "--no-ai"], tmpDir);
+    runLore(["create", "prd", "--title", "JSON PRD", ...PRD_FIELDS(), "--no-ai"], tmpDir);
+    // a plan's fields come from the shipped template (knowledge/adr also need their sub_type / decision_status)
+    const reqDoc = ensureRequirementsDocSlug((a) => runLore(a, tmpDir));
+    runLore(["create", "plan", "--parent", reqDoc, "--title", "JSON Plan", ...planFieldsArgs(reqDoc), "--no-ai"], tmpDir);
   });
 
   afterEach(() => {
@@ -715,7 +723,8 @@ describe("Scenario 8: JSON output composability", () => {
 
   it("HAPPY: create --json returns doc envelope with all required fields", () => {
     // Use plan type — no parent or extra fields required (spec/adr/knowledge/task all have requirements)
-    const result = runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", "Extra Plan", "--json", "--no-ai"], tmpDir);
+    const reqDoc = ensureRequirementsDocSlug((a) => runLore(a, tmpDir));
+    const result = runLore(["create", "plan", "--parent", reqDoc, "--title", "Extra Plan", ...planFieldsArgs(reqDoc), "--json", "--no-ai"], tmpDir);
     expect(result.exitCode).toBe(0);
     const json = parseJson<{
       id: string;
@@ -733,7 +742,7 @@ describe("Scenario 8: JSON output composability", () => {
   });
 
   it("HAPPY: get --json returns envelope with doc and navigation sub-objects (AC-E2E-001.03)", () => {
-    const createResult = runLore(["create", "prd", "--title", "Nav Test PRD", "--json", "--no-ai"], tmpDir);
+    const createResult = runLore(["create", "prd", "--title", "Nav Test PRD", ...PRD_FIELDS(), "--json", "--no-ai"], tmpDir);
     const slug = parseJson<{ slug: string }>(createResult).data!.slug;
 
     const result = runLore(["get", slug, "--json"], tmpDir);
@@ -778,9 +787,10 @@ describe("Scenario 9: status command", () => {
   });
 
   it("HAPPY: status after creating docs reflects count by type (AC-E2E-001.10)", () => {
-    runLore(["create", "prd", "--title", "PRD 1", "--no-ai"], tmpDir);
-    // plan requires no extra fields (knowledge requires extra.sub_type)
-    runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", "Plan 1", "--no-ai"], tmpDir);
+    runLore(["create", "prd", "--title", "PRD 1", ...PRD_FIELDS(), "--no-ai"], tmpDir);
+    // a plan's fields come from the shipped template (knowledge also needs extra.sub_type)
+    const reqDoc = ensureRequirementsDocSlug((a) => runLore(a, tmpDir));
+    runLore(["create", "plan", "--parent", reqDoc, "--title", "Plan 1", ...planFieldsArgs(reqDoc), "--no-ai"], tmpDir);
 
     const result = runLore(["status", "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
@@ -791,7 +801,7 @@ describe("Scenario 9: status command", () => {
   });
 
   it("HAPPY: status human-readable output shows section headers", () => {
-    runLore(["create", "prd", "--title", "Status PRD", "--no-ai"], tmpDir);
+    runLore(["create", "prd", "--title", "Status PRD", ...PRD_FIELDS(), "--no-ai"], tmpDir);
     const result = runLore(["status"], tmpDir);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Corpus Status");
