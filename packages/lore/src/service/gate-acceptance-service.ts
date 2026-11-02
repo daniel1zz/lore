@@ -402,8 +402,8 @@ export class GateAcceptanceService {
     }
     const subject = gateAcceptanceSubject(plan.id, dimension, cause.value.fingerprint);
     // reason: a regression is accepted file by file (BR-1513) and a judged gate cause by cause (BR-1552), so the question and every
-    // refusal name the cause it is about (its file or "cross-file"); snapshot_accuracy has one cause per gate and stays bare.
-    const what = dimension === "snapshot_accuracy" ? dimension : `${dimension} (${cause.value.label})`;
+    // refusal name the cause it is about (its file or "cross-file").
+    const what = `${dimension} (${cause.value.label})`;
     const detail: DecisionDetail = {
       summary: `Accept the failed ${what} gate of plan ${plan.slug} as a known defect (review ${reviewSlug})`,
       requested_by: "the agent session that ran `lore assess --accept-gate`",
