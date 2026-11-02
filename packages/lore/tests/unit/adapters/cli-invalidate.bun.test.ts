@@ -57,6 +57,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { withSessionIdentity } from "../../helpers/session-actor";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
 import { createLiveApp } from "../../helpers/live-app.js";
@@ -96,7 +97,7 @@ async function initCorpus(tmpDir: string): Promise<void> {
 
 async function createKnowledge(tmpDir: string, title: string): Promise<string> {
   const result = await runLore(
-    ["create", "knowledge", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)), "--title", title, "--sub-type", "reference", "--no-ai", "--content", "Body.", "--json"],
+    ["create", "knowledge", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)), "--title", title, "--sub-type", "reference", "--no-ai", ...templatedFieldsArgs("knowledge", { kind: "reference" }), "--json"],
     tmpDir,
   );
   if (result.exitCode !== 0) throw new Error(`create knowledge failed: ${result.stderr}`);
@@ -105,7 +106,7 @@ async function createKnowledge(tmpDir: string, title: string): Promise<string> {
 
 async function createAdr(tmpDir: string, title: string): Promise<string> {
   const result = await runLore(
-    ["create", "adr", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)), "--title", title, "--decision-status", "accepted", "--no-ai", "--content", "Body.", "--json"],
+    ["create", "adr", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)), "--title", title, "--decision-status", "accepted", "--no-ai", ...templatedFieldsArgs("adr"), "--json"],
     tmpDir,
   );
   if (result.exitCode !== 0) throw new Error(`create adr failed: ${result.stderr}`);
@@ -113,7 +114,7 @@ async function createAdr(tmpDir: string, title: string): Promise<string> {
 }
 
 async function createPlan(tmpDir: string, title: string): Promise<string> {
-  const result = await runLore(["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)), "--title", title, "--no-ai", "--content", "Body.", "--json"], tmpDir);
+  const result = await runLore(["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)), "--title", title, "--no-ai", ...templatedFieldsArgs("plan"), "--json"], tmpDir);
   if (result.exitCode !== 0) throw new Error(`create plan failed: ${result.stderr}`);
   return parseJsonSlug(result.stdout);
 }
@@ -221,8 +222,7 @@ describe("lore create adr --supersedes — HAPPY (SPEC-043 D11)", () => {
         "--supersedes",
         oldSlug,
         "--no-ai",
-        "--content",
-        "Body.",
+        ...templatedFieldsArgs("adr"),
         "--json",
       ],
       tmpDir,

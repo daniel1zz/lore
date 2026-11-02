@@ -55,6 +55,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { planFieldsArgs, templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 // tests/unit/adapters/ -> tests/unit/ -> tests/ -> packages/lore/ (3 levels up).
 const PROJECT_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -130,7 +131,7 @@ beforeAll(() => {
   if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.stderr}`);
 
   const prd = runLore(
-    ["create", "prd", "--title", "Pipe Wiring Root", "--content", "# PRD\n\nroot.", "--no-ai"],
+    ["create", "prd", "--title", "Pipe Wiring Root", ...templatedFieldsArgs("prd"), "--no-ai"],
     dir,
   );
   if (prd.exitCode !== 0) throw new Error(`create prd failed: ${prd.stderr}`);
@@ -140,7 +141,7 @@ beforeAll(() => {
       "create", "plan",
       "--title", "Pipe Wiring Plan",
       "--parent", parseSlug(prd.stdout),
-      "--content", "## Plan\n\nbody",
+      ...planFieldsArgs(parseSlug(prd.stdout)),
       "--no-ai",
     ],
     dir,
@@ -153,7 +154,7 @@ beforeAll(() => {
       "--title", "Pipe Wiring Task",
       "--kind", "code",
       "--plan-id", parseSlug(plan.stdout),
-      "--content", "## Task\n\nbody",
+      ...templatedFieldsArgs("task"),
       "--no-ai",
     ],
     dir,

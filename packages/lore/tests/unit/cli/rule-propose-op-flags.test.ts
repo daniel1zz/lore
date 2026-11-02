@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 import { asyncLoreRunnerFor, ensureLiveRuleViaAsyncCli } from "../../helpers/cli-live-rule";
 
 interface RunResult {
@@ -54,7 +55,7 @@ function slugOf(stdout: string): string {
 }
 
 async function createSpec(title: string): Promise<string> {
-  return slugOf(await loreOk(["create", "spec", "--title", title, "--kind", "feature", "--no-ai", "--content", "## Overview\n\nFixture body.", "--json"]));
+  return slugOf(await loreOk(["create", "spec", "--title", title, "--kind", "feature", "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature" }), "--json"]));
 }
 
 async function proposeAdd(spec: string): Promise<string> {
@@ -74,16 +75,16 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "rule-propose-op-flags-"));
   await loreOk(["init"]);
   patchLoreConfig(dir, ["workflow:", "  review:", "    judgment_required_types: []", "  gates:", "    spec-create:", "      enabled: false", "    spec-promote:", "      enabled: false", ""].join("\n"));
-  const prd = slugOf(await loreOk(["create", "prd", "--title", "Fixture PRD", "--no-ai", "--content", "## Overview\n\nFixture body.", "--json"]));
+  const prd = slugOf(await loreOk(["create", "prd", "--title", "Fixture PRD", "--no-ai", ...templatedFieldsArgs("prd"), "--json"]));
   liveRuleId = await ensureLiveRuleViaAsyncCli(
     asyncLoreRunnerFor(async (args, cwd) => await runLoreInProcess(args, { cwd, home: cwd, env: { ...process.env, HOME: cwd, EDITOR: "true" } }), dir),
     dir,
     prd,
   );
   leafA = (JSON.parse(await loreOk(["rule", "show", liveRuleId, "--json"])) as { data: { leaf: string } }).data.leaf;
-  const root = slugOf(await loreOk(["baseline", "add", prd, "--node", "root", "--label", "Root2", "--title", "Second Root"]));
-  const branch = slugOf(await loreOk(["baseline", "add", root, "--node", "branch", "--label", "Branch2", "--title", "Second Branch"]));
-  leafB = slugOf(await loreOk(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf2", "--title", "Second Leaf"]));
+  const root = slugOf(await loreOk(["baseline", "add", prd, "--node", "root", "--label", "Root2", "--title", "Second Root", ...templatedFieldsArgs("baseline", { kind: "root" })]));
+  const branch = slugOf(await loreOk(["baseline", "add", root, "--node", "branch", "--label", "Branch2", "--title", "Second Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })]));
+  leafB = slugOf(await loreOk(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf2", "--title", "Second Leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })]));
 }, 180_000);
 
 afterAll(() => {

@@ -77,6 +77,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 import { evidenceEntrySchema } from "@lore/core";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -169,7 +170,7 @@ function readEvidenceRows(slug: string, cwd: string): StoredEvidenceRow[] {
  */
 function createAdhocTask(cwd: string, title: string): string {
   const created = mustRun(
-    ["create", "task", "--title", title, "--kind", "code", "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"],
+    ["create", "task", "--title", title, "--kind", "code", "--adhoc", "--ac-scope", "", ...templatedFieldsArgs("task"), "--no-ai", "--json"],
     cwd,
   );
   return (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
@@ -204,7 +205,7 @@ beforeAll(() => {
   // 2 CLI spawns. An `--adhoc` task parents to the corpus root PRD
   // (CorpusService._createImpl), so one must exist before any task is created.
   mustRun(["init"], tmpDir);
-  mustRun(["create", "prd", "--title", "AC-CT-2 Root", "--content", "## Overview\nroot", "--no-ai"], tmpDir);
+  mustRun(["create", "prd", "--title", "AC-CT-2 Root", ...templatedFieldsArgs("prd"), "--no-ai"], tmpDir);
 }, 60_000);
 
 afterAll(() => {

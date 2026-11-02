@@ -59,6 +59,7 @@ import { parseDocument } from "yaml";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
@@ -163,7 +164,7 @@ function setConfigPaths(dir: string, entries: ReadonlyArray<readonly [readonly s
 
 async function createPrd(tmpDir: string): Promise<string> {
   const result = await runLore(
-    ["create", "prd", "--title", "Drift Fixture Root PRD", "--no-ai", "--content", "## Overview\n\nBody.", "--json"],
+    ["create", "prd", "--title", "Drift Fixture Root PRD", "--no-ai", ...templatedFieldsArgs("prd"), "--json"],
     tmpDir,
   );
   if (result.exitCode !== 0) throw new Error(`create prd failed: ${result.stderr}`);
@@ -179,8 +180,7 @@ async function createSpec(tmpDir: string, prdSlug: string, title: string, codeAn
     "--kind",
     "feature",
     "--no-ai",
-    "--content",
-    "## Overview\n\nBody.",
+    ...templatedFieldsArgs("spec", { kind: "feature" }),
     "--json",
   ];
   for (const anchor of codeAnchors) {

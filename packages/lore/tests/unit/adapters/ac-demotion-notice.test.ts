@@ -55,6 +55,7 @@ import { tmpdir } from "os";
 import { saveConfig } from "@lore/core/node";
 import type { LoreConfig } from "@lore/core";
 import { citeSpecViaCli } from "../../helpers/cli-live-rule.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../../helpers/templated-create.js";
 import { DECIDED_FLAGS } from "../../helpers/decision-flags.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/
@@ -126,14 +127,14 @@ afterEach(() => {
 });
 
 function createPrd(dir: string, title: string): string {
-  const r = runLore(["create", "prd", "--title", title, "--content", "PRD body.", "--no-ai"], dir);
+  const r = runLore(["create", "prd", "--title", title, ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"], dir);
   if (r.exitCode !== 0) throw new Error(`create prd failed: ${r.stderr}`);
   return parseSlug(r.stdout);
 }
 
 function createSpec(dir: string, parentSlug: string, title: string): string {
   const r = runLore(
-    ["create", "spec", "--title", title,"--content", "## Overview\n\nBody.", "--no-ai"],
+    ["create", "spec", "--title", title, ...templatedFieldsArgs("spec", { kind: "feature", refTarget: parentSlug }), "--no-ai"],
     dir,
   );
   if (r.exitCode !== 0) throw new Error(`create spec failed: ${r.stderr}`);
@@ -164,7 +165,7 @@ function approveDoc(dir: string, slug: string): void {
 
 function createPlan(dir: string, parentSlug: string, title: string): string {
   const r = runLore(
-    ["create", "plan", "--title", title, "--parent", parentSlug, "--content", "## Plan\n\nbody", "--no-ai"],
+    ["create", "plan", "--title", title, "--parent", parentSlug, ...planFieldsArgs(parentSlug), "--no-ai"],
     dir,
   );
   if (r.exitCode !== 0) throw new Error(`create plan failed: ${r.stderr}`);
@@ -173,7 +174,7 @@ function createPlan(dir: string, parentSlug: string, title: string): string {
 
 function createTask(dir: string, planSlug: string, title: string): string {
   const r = runLore(
-    ["create", "task", "--plan-id", planSlug, "--title", title, "--kind", "code", "--content", "task body", "--no-ai"],
+    ["create", "task", "--plan-id", planSlug, "--title", title, "--kind", "code", ...templatedFieldsArgs("task"), "--no-ai"],
     dir,
   );
   if (r.exitCode !== 0) throw new Error(`create task failed: ${r.stderr}`);

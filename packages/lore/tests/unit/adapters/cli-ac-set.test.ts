@@ -29,6 +29,7 @@ import { spawnSync } from "child_process";
 import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -86,7 +87,7 @@ describe("BOUNDARY — `lore ac set` with zero field flags (AC-ACS-3)", () => {
   // spec-a-test-case-s-timeout-budget-must-be-declared-when-its D1.
   it("no field flag exits 2", { timeout: 60_000 }, () => {
     const prd = runLore(
-      ["create", "prd", "--title", "AC Set CLI PRD", "--content", "root", "--no-ai"],
+      ["create", "prd", "--title", "AC Set CLI PRD", ...templatedFieldsArgs("prd"), "--no-ai"],
       tmpDir,
     );
     if (prd.exitCode !== 0) throw new Error(`create prd failed: ${prd.stderr}`);
@@ -98,8 +99,7 @@ describe("BOUNDARY — `lore ac set` with zero field flags (AC-ACS-3)", () => {
         "spec",
         "--title",
         "AC Set CLI Spec",
-        "--content",
-        "## Overview/Goal\nbody",
+        ...templatedFieldsArgs("spec", { kind: "feature" }),
         "--no-ai",
       ],
       tmpDir,

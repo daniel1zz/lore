@@ -49,6 +49,7 @@ import { saveConfig } from "@lore/core/node";
 import { PLAN_PROMOTE_ADVISORY_NON_BLOCKING, REACHABILITY_NO_SPEC_ANCESTOR } from "../../../src/service/checkpoint-registry.js";
 import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../../helpers/cli-live-rule.js";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { planFieldsArgs, templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -89,14 +90,14 @@ async function initCorpus(dir: string): Promise<void> {
 }
 
 async function createPrd(dir: string, title: string): Promise<string> {
-  const result = await runLore(["create", "prd", "--title", title, "--content", "PRD body.", "--no-ai"], dir);
+  const result = await runLore(["create", "prd", "--title", title, ...templatedFieldsArgs("prd"), "--no-ai"], dir);
   if (result.exitCode !== 0) throw new Error(`create prd failed: ${result.stderr}`);
   return parseSlug(result.stdout);
 }
 
 async function createPlan(dir: string, parentSlug: string, title: string): Promise<string> {
   const result = await runLore(
-    ["create", "plan", "--title", title, "--parent", parentSlug, "--content", "Plan body.", "--no-ai"],
+    ["create", "plan", "--title", title, "--parent", parentSlug, ...planFieldsArgs(parentSlug), "--no-ai"],
     dir,
   );
   if (result.exitCode !== 0) throw new Error(`create plan failed: ${result.stderr}`);
@@ -160,8 +161,7 @@ describe("lore approve <plan-under-reachable-spec> — no advisory (AC-VRW-5b)",
         "spec",
         "--title",
         "Reachable Spec",
-        "--content",
-        "## Overview\n\nSpec body for the reachability advisory e2e.\n",
+        ...templatedFieldsArgs("spec", { kind: "feature", refTarget: prdSlug }),
         "--no-ai",
       ],
       tmpDir,

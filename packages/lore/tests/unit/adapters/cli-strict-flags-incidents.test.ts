@@ -31,6 +31,7 @@ import { tmpdir } from "os";
 import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor.js";
 
 import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -84,7 +85,7 @@ afterEach(() => {
 
 function createKnowledgeDoc(title: string): string {
   const r = runLore(
-    ["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--sub-type", "reference", "--title", title, "--content", "body", "--no-ai"],
+    ["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--sub-type", "reference", "--title", title, ...templatedFieldsArgs("knowledge", { kind: "reference" }), "--no-ai"],
     tmpDir,
   );
   if (r.exitCode !== 0) throw new Error(`create knowledge failed: ${r.stderr}`);

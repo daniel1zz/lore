@@ -28,6 +28,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { liveInvocation, runHandlerForExit } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
+import { planFieldsArgs, templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 // ─── Command type with required run handler ────────────────────────────────────
 
@@ -81,6 +82,30 @@ function captureExit() {
  * This eliminates TS2722 "Cannot invoke an object which is possibly 'undefined'"
  * at every callsite — the check happens once, here.
  */
+/**
+ * BR-1528: a templated type is created from FIELDS. This file is about the create command's parent, kind, status and
+ * gate behaviour, not the body's source, so a create that names no fields file gets the filled approved template of its
+ * (type, kind) here, in the one place every create passes through.
+ */
+const SHIPPED_KINDS: Record<string, readonly string[]> = {
+  spec: ["feature", "design", "tech", "domain-overview"],
+  knowledge: ["assessment", "handoff", "ideation", "milestone-review", "prompt", "reference", "research", "retro", "skill", "uat"],
+};
+
+function withFields(args: Record<string, unknown>): Record<string, unknown> {
+  const type = args["type"];
+  if (typeof type !== "string" || args["fields-file"] !== undefined || args["content"] !== undefined) return args;
+  if (type === "plan") {
+    return typeof args["parent"] === "string" ? { ...args, "fields-file": planFieldsArgs(args["parent"])[1] } : { ...args, "fields-file": templatedFieldsArgs("plan")[1] };
+  }
+  const kind = type === "spec" ? args["kind"] ?? "feature" : type === "knowledge" ? args["sub-type"] : undefined;
+  if (!["prd", "spec", "task", "adr", "knowledge"].includes(type)) return args;
+  // A negative case names a kind or sub-type no template exists for (a bogus value, or none): it stays as written so the
+  // command's own refusal is the assertion.
+  if ((type === "knowledge" || type === "spec") && !(typeof kind === "string" && SHIPPED_KINDS[type]?.includes(kind))) return args;
+  return { ...args, "fields-file": templatedFieldsArgs(type, typeof kind === "string" ? { kind } : {})[1] };
+}
+
 async function runCmd(
   cmd: { run?: RunnableCommand["run"] },
   args: Record<string, unknown>,
@@ -89,7 +114,8 @@ async function runCmd(
     throw new Error("Command is missing run handler");
   }
   const run = cmd.run;
-  lastExitCode = await runHandlerForExit(() => run({ args, inv: liveInvocation() }));
+  const filled = withFields(args);
+  lastExitCode = await runHandlerForExit(() => run({ args: filled, inv: liveInvocation() }));
 }
 
 async function importCreateCommand(): Promise<RunnableCommand> {
@@ -917,7 +943,6 @@ describe("lore create — state verification", () => {
       await runCmd(cmd, {
         type: "spec",
         title: "Undeclared Kind Spec",
-        content: "## Overview\n\nbody",
         ai: false,
       });
     } catch (e: unknown) {
@@ -969,7 +994,6 @@ describe("lore create — state verification", () => {
         type: "spec",
         title: "Design Kind Spec",
         kind: "design",
-        content: "## Overview\n\nbody",
         ai: false,
       });
     } catch (e: unknown) {
@@ -1347,7 +1371,6 @@ describe("lore create — regression guards", () => {
         type: "spec",
         title: "Spec With Parent",
         parent: prdSlug,
-        content: "## Overview\n\nbody",
         ai: false,
       });
     } finally {

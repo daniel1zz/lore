@@ -1,4 +1,5 @@
 // @reads assets/project/lore-config-template.yaml
+// @layer cli-editor AC-CR-1 AC-CR-2 AC-CR-3 AC-CR-4 (SPEC-003 editor-flow criteria; the same ids now also exist in another spec, whose owners are elsewhere)
 /**
  * @spec_ref SPEC-003 §3.1 — editor integration for create and set commands
  *
@@ -27,6 +28,8 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { liveInvocation, runHandlerForExit } from "../../live-invocation.js";
 import type { Invocation } from "@lore/core";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -160,11 +163,20 @@ async function initLoreDb(): Promise<void> {
   }
 }
 
+/**
+ * The editor-as-body create path (AC-CR-1/3/4) IS the legacy body path: with `require_create` ON a templated create takes
+ * fields, never an editor body. These cases test that path itself, so each pins the switch OFF in its own throwaway corpus.
+ */
+function pinLegacyBodyCreate(): void {
+  patchLoreConfig(tmpDir, { workflow: { structured_documents: { require_create: false } } });
+}
+
 // ─── CREATE command — AC-CR-1: editor opens when --content omitted ─────────────
 
 describe("lore create — AC-CR-1: editor opens when --content is absent", () => {
   it.skipIf(isWindows)("uses editor content as doc body when --content is not provided", async () => {
     await initLoreDb();
+    pinLegacyBodyCreate();
 
     // Fake editor writes "editor content here" to the file (EDITOR env var)
     process.env["EDITOR"] = writeEditorScript(scriptDir, "writer.sh", "editor content here");
@@ -209,7 +221,7 @@ describe("lore create — AC-CR-2: --content flag bypasses editor", () => {
       await runCmd(cmd, {
         type: "prd",
         title: "Explicit Content PRD",
-        content: "my explicit content",
+        "fields-file": templatedFieldsArgs("prd")[1],
       });
     } finally {
       output.restore();
@@ -227,6 +239,7 @@ describe("lore create — AC-CR-2: --content flag bypasses editor", () => {
 describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
   it.skipIf(isWindows)("exits with code 4 when editor exits non-zero", async () => {
     await initLoreDb();
+    pinLegacyBodyCreate();
 
     const failScript = join(scriptDir, "fail1.sh");
     writeFileSync(failScript, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
@@ -251,6 +264,7 @@ describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
 
   it.skipIf(isWindows)("exits with code 4 when editor writes empty content", async () => {
     await initLoreDb();
+    pinLegacyBodyCreate();
 
     const eraserScript = join(scriptDir, "eraser.sh");
     writeFileSync(eraserScript, "#!/bin/sh\n: > \"$1\"\n", { mode: 0o755 });
@@ -279,6 +293,7 @@ describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
 describe("lore create — AC-CR-4: --json mode + editor flow", () => {
   it.skipIf(isWindows)("outputs JSON envelope when --json is set and editor provides content", async () => {
     await initLoreDb();
+    pinLegacyBodyCreate();
 
     process.env["EDITOR"] = writeEditorScript(scriptDir, "writer2.sh", "json editor content");
 
@@ -319,7 +334,7 @@ describe("lore set — AC-SET-1: editor opens when no flags provided", () => {
       await runCmd(createCmd, {
         type: "prd",
         title: "Set Test PRD",
-        content: "original content",
+        "fields-file": templatedFieldsArgs("prd")[1],
       });
     } finally {
       out1.restore();
@@ -357,7 +372,7 @@ describe("lore set — AC-SET-1: editor opens when no flags provided", () => {
     expect(out2.stderr).toHaveLength(0);
   });
 
-  it.skipIf(isWindows)("bumps version when editor returns different content", async () => {
+  it.skipIf(isWindows)("refuses an editor-written body for a templated document and keeps its version", async () => {
     await initLoreDb();
 
     const createMod = await import("../../../src/adapters/cli/commands/create.js");
@@ -370,7 +385,7 @@ describe("lore set — AC-SET-1: editor opens when no flags provided", () => {
       await runCmd(createCmd, {
         type: "prd",
         title: "Version Bump PRD",
-        content: "original body",
+        "fields-file": templatedFieldsArgs("prd")[1],
       });
     } finally {
       out1.restore();
@@ -401,9 +416,11 @@ describe("lore set — AC-SET-1: editor opens when no flags provided", () => {
       out2.restore();
     }
 
-    expect(exit2.code).toBeUndefined();
-    expect(out2.stdout.join("\n")).toContain("Updated");
-    expect(out2.stdout.join("\n")).toContain("v2"); // version bumped from 1 → 2
+    // A templated document's content is its fields (BR-1528): an editor-written body is refused and names the fields path,
+    // so the version does not move.
+    expect(exit2.code).toBe(4);
+    expect(out2.stdout.join("\n")).not.toContain("Updated");
+    expect(out2.stderr.join("\n")).toContain("--fields-file");
   });
 });
 
@@ -423,7 +440,7 @@ describe("lore set — AC-SET-2: any flag bypasses editor", () => {
       await runCmd(createCmd, {
         type: "prd",
         title: "Title Only PRD",
-        content: "body",
+        "fields-file": templatedFieldsArgs("prd")[1],
       });
     } finally {
       out1.restore();
@@ -478,7 +495,7 @@ describe("lore set — AC-SET-3: editor error produces exit code 4", () => {
       await runCmd(createCmd, {
         type: "prd",
         title: "Set Error PRD",
-        content: "body",
+        "fields-file": templatedFieldsArgs("prd")[1],
       });
     } finally {
       out1.restore();

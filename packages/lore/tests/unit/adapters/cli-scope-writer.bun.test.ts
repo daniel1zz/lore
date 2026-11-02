@@ -56,6 +56,7 @@ import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { planFieldsArgs, templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 // reason: the fixture chain below spawns ~10 compiled-binary processes; bun's
 // 5s default applies to HOOKS too, so the one-time `beforeAll` seed and every
@@ -164,9 +165,9 @@ async function seedFixture(cwd: string): Promise<void> {
       "",
     ].join("\n"),
   );
-  await mustRun(["create", "prd", "--title", "Scope Root", "--content", "## Overview\nroot", "--no-ai"], cwd);
+  await mustRun(["create", "prd", "--title", "Scope Root", ...templatedFieldsArgs("prd"), "--no-ai"], cwd);
   await mustRun(
-    ["create", "spec", "--title", "Scope Fixture","--content", "## Overview\nspec body", "--no-ai"],
+    ["create", "spec", "--title", "Scope Fixture", ...templatedFieldsArgs("spec", { kind: "feature" }), "--no-ai"],
     cwd,
   );
   for (const id of ["AC-SC-1", "AC-SC-2"]) {
@@ -175,13 +176,13 @@ async function seedFixture(cwd: string): Promise<void> {
       cwd,
     );
   }
-  await mustRun(["create", "plan", "--title", "Scope Fixture", "--parent", SPEC_SLUG, "--content", "plan body", "--no-ai"], cwd);
+  await mustRun(["create", "plan", "--title", "Scope Fixture", "--parent", SPEC_SLUG, ...planFieldsArgs(SPEC_SLUG), "--no-ai"], cwd);
   await mustRun(["phase", "add", PLAN_SLUG, "Alpha"], cwd);
 
   // Source task for the phase migration — its evidence (ac_ref AC-SC-1) is
   // merged onto the phase doc, then the task itself is archived.
   await mustRun(
-    ["create", "task", "--title", "Migration Source", "--kind", "code", "--parent", PLAN_SLUG, "--plan-id", PLAN_SLUG, "--phase", "Alpha", "--content", "body", "--no-ai"],
+    ["create", "task", "--title", "Migration Source", "--kind", "code", "--parent", PLAN_SLUG, "--plan-id", PLAN_SLUG, "--phase", "Alpha", ...templatedFieldsArgs("task"), "--no-ai"],
     cwd,
   );
   // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
@@ -216,8 +217,7 @@ async function createTask(
     PLAN_SLUG,
     "--plan-id",
     PLAN_SLUG,
-    "--content",
-    "body",
+    ...templatedFieldsArgs("task"),
     "--no-ai",
     "--json",
   ];

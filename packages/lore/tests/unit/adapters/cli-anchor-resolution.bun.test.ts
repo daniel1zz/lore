@@ -58,6 +58,7 @@ import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 setDefaultTimeout(60_000);
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
@@ -128,8 +129,7 @@ async function createTask(cwd: string, title: string, planSlug: string, anchors:
       planSlug,
       "--kind",
       "code",
-      "--content",
-      "body",
+      ...templatedFieldsArgs("task"),
       "--no-ai",
       "--json",
       ...anchors.flatMap((a) => ["--anchor", a]),
@@ -169,7 +169,7 @@ beforeEach(async () => {
   mkdirSync(join(tmpDir, "src", "existing-dir"), { recursive: true });
   writeFileSync(join(tmpDir, "src", "real.ts"), "export const real = 1;\n");
   planSlug = parseSlug(
-    (await mustRun(["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((a) => mustRun(a, tmpDir)), "--title", "Anchor Probe Plan", "--content", "# Plan", "--no-ai", "--json"], tmpDir))
+    (await mustRun(["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((a) => mustRun(a, tmpDir)), "--title", "Anchor Probe Plan", ...templatedFieldsArgs("plan"), "--no-ai", "--json"], tmpDir))
       .stdout,
   );
 });

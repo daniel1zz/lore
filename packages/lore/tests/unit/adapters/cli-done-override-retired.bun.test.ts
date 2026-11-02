@@ -25,6 +25,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 import { makeCleanTreeRepo } from "../../helpers/clean-tree-repo";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
@@ -64,7 +65,7 @@ async function auditCount(slug: string, cwd: string): Promise<number> {
 
 async function createAdhocTask(cwd: string, title: string): Promise<string> {
   const created = await mustRun(
-    ["create", "task", "--title", title, "--kind", "code", "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"],
+    ["create", "task", "--title", title, "--kind", "code", "--adhoc", "--ac-scope", "", ...templatedFieldsArgs("task"), "--no-ai", "--json"],
     cwd,
   );
   return (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
@@ -76,7 +77,7 @@ beforeEach(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-done-override-retired-"));
   makeCleanTreeRepo(tmpDir);
   await mustRun(["init"], tmpDir);
-  await mustRun(["create", "prd", "--title", "Retired Override Root", "--content", "## Overview\nroot", "--no-ai"], tmpDir);
+  await mustRun(["create", "prd", "--title", "Retired Override Root", ...templatedFieldsArgs("prd"), "--no-ai"], tmpDir);
 });
 
 afterEach(() => {

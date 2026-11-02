@@ -48,6 +48,7 @@ import { saveConfig } from "@lore/core/node";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -82,7 +83,7 @@ async function initCorpus(tmpDir: string): Promise<void> {
 
 async function createKnowledge(tmpDir: string, title: string): Promise<string> {
   const result = await runLore(
-    ["create", "knowledge", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)), "--title", title, "--sub-type", "reference", "--no-ai", "--content", "Body.", "--json"],
+    ["create", "knowledge", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, tmpDir)), "--title", title, "--sub-type", "reference", "--no-ai", ...templatedFieldsArgs("knowledge", { kind: "reference" }), "--json"],
     tmpDir,
   );
   if (result.exitCode !== 0) throw new Error(`create knowledge failed: ${result.stderr}`);
@@ -270,7 +271,7 @@ describe("lore review --staleness --list — BOUNDARY (no provider call)", () =>
     expect(beforeData.docs.some((d) => d.slug === slug)).toBe(true);
 
     // Edit the doc — bumps its version, dropping it off the fresh-escalate list.
-    const editResult = await runLore(["set", slug, "--content", "Edited body.", "--json"], tmpDir);
+    const editResult = await runLore(["set", slug, ...templatedFieldsArgs("knowledge", { kind: "reference", fields: { subject: "Edited subject" } }), "--json"], tmpDir);
     expect(editResult.exitCode).toBe(0);
 
     const listAfter = await runLore(["review", "--staleness", "--list", "--json"], tmpDir);

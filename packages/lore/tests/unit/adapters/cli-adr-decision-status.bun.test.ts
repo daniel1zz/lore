@@ -42,6 +42,7 @@ import { DECIDED_FLAGS } from "../../helpers/decision-flags";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 
 import { ensureRequirementsDocSlugAsync } from "../../helpers/parented-create.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -93,8 +94,7 @@ async function createAdr(
       "--decision-status",
       decisionStatus,
       "--no-ai",
-      "--content",
-      "Body.",
+      ...templatedFieldsArgs("adr", { refTarget: "context" }),
       "--json",
     ],
     tmpDir,
@@ -113,8 +113,7 @@ async function createKnowledge(tmpDir: string, title: string): Promise<string> {
       "--sub-type",
       "reference",
       "--no-ai",
-      "--content",
-      "Body.",
+      ...templatedFieldsArgs("knowledge", { kind: "reference" }),
       "--json",
     ],
     tmpDir,

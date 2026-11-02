@@ -55,6 +55,8 @@ import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { planFieldsArgs, templatedFieldsArgs } from "../../helpers/templated-create.js";
+import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root.
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -123,9 +125,9 @@ beforeAll(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-get-structured-extra-"));
   await mustRun(["init"], tmpDir);
 
-  const prdSlug = parseSlug((await mustRun(["create", "prd", "--title", "Extra Notice Root", "--no-ai", "--content", "body"], tmpDir)).stdout);
+  const prdSlug = parseSlug((await mustRun(["create", "prd", "--title", "Extra Notice Root", "--no-ai", ...templatedFieldsArgs("prd")], tmpDir)).stdout);
   const planSlug = parseSlug(
-    (await mustRun(["create", "plan", "--title", "Extra Notice Plan", "--no-ai", "--parent", prdSlug, "--content", "body"], tmpDir)).stdout,
+    (await mustRun(["create", "plan", "--title", "Extra Notice Plan", "--no-ai", "--parent", prdSlug, ...planFieldsArgs(prdSlug)], tmpDir)).stdout,
   );
   taskSlug = parseSlug(
     (await mustRun(
@@ -136,19 +138,24 @@ beforeAll(async () => {
         "--parent", planSlug,
         "--plan-id", planSlug,
         "--no-ai",
-        "--content", "Task body.",
+        ...templatedFieldsArgs("task", { fields: { objective: "Task body." } }),
         "--anchor", "src/first.ts",
         "--anchor", "src/second.ts",
       ],
       tmpDir,
     )).stdout,
   );
+  // The AC-2 negative control is by definition a LEGACY document (scalars-only `extra`, no `fields`), which a structured
+  // corpus can no longer create. It is the one document in this file made with a body, with the create switch pinned OFF
+  // for that single write and ON again right after (BR-1528: legacy documents stay readable until they are converted).
+  patchLoreConfig(tmpDir, { workflow: { structured_documents: { require_create: false } } });
   plainKnowledgeSlug = parseSlug(
     (await mustRun(
       ["create", "knowledge", "--title", "Extra Notice Plain", "--sub-type", "reference", "--no-ai", "--parent", prdSlug, "--content", "Plain body."],
       tmpDir,
     )).stdout,
   );
+  patchLoreConfig(tmpDir, { workflow: { structured_documents: { require_create: true } } });
   // BR-1528: `lore handoff` creates the document structured through the approved `knowledge/handoff` template.
   await mustRun(["migrate", "templates", "--apply"], tmpDir);
   handoffSlug = parseSlug(
