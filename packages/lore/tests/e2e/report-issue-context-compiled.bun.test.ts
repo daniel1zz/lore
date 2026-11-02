@@ -21,6 +21,7 @@ import { join, resolve } from "node:path";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import { cleanupPayloadGhStubDir, payloadGhStubDir } from "../integration/helpers/payload-gh-stub";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 
 const WORKTREE_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..");
 const DIST_LORE = join(WORKTREE_ROOT, "dist", "lore");
@@ -83,7 +84,7 @@ function fileFromProject(origin: string): { result: RunResult; body: string } {
   git(root, ["remote", "add", "origin", origin]);
   const initResult = run(["init"], root);
   if (initResult.exitCode !== 0) throw new Error(`'lore init' failed: ${initResult.stderr}`);
-  const prd = run(["create", "prd", "--title", "RI-6 throwaway root PRD", "--content", "Throwaway root PRD for the RI-6 wiring test."], root);
+  const prd = run(["create", "prd", "--title", "RI-6 throwaway root PRD", ...templatedFieldsArgs("prd")], root);
   if (prd.exitCode !== 0) throw new Error(`root PRD creation failed: ${prd.stderr}`);
   patchLoreConfig(root, ["feedback:", "  upstream:", `    repo: ${UPSTREAM_REPO}`, ""].join("\n"));
   mkdirSync(join(root, "tests"));

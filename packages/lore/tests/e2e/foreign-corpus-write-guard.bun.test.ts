@@ -103,6 +103,7 @@ import {
   type ForeignCorpusWriteContext,
 } from "../../src/service/foreign-corpus-write-guard.js";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create";
 
 // ─── Path / spawn setup (mirrors foreign-corpus-write-default.bun.test.ts) ──
 
@@ -237,14 +238,14 @@ function parseSlug(stdout: string): string {
  */
 async function seedPlan(dir: string, titleSuffix: string): Promise<string> {
   const prdResult = await runLore(
-    ["create", "prd", "--title", `FCWG E2E PRD ${titleSuffix}`, "--content", "root", "--no-ai"],
+    ["create", "prd", "--title", `FCWG E2E PRD ${titleSuffix}`, ...templatedFieldsArgs("prd"), "--no-ai"],
     dir,
   );
   expect(prdResult.exitCode).toBe(0);
   const prdSlug = parseSlug(prdResult.stdout);
 
   const planResult = await runLore(
-    ["create", "plan", "--title", `FCWG E2E Plan ${titleSuffix}`, "--parent", prdSlug, "--content", "x", "--no-ai"],
+    ["create", "plan", "--title", `FCWG E2E Plan ${titleSuffix}`, "--parent", prdSlug, ...planFieldsArgs(prdSlug), "--no-ai"],
     dir,
   );
   expect(planResult.exitCode).toBe(0);
@@ -485,8 +486,7 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
           "reference",
           "--title",
           "FCWG E2E fixture cell3",
-          "--content",
-          "x",
+          ...templatedFieldsArgs("knowledge", { kind: "reference" }),
           "--no-ai",
         ],
         worktreePath,

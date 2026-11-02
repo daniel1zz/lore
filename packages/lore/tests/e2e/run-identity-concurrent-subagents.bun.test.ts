@@ -31,6 +31,7 @@ import { delimiter, dirname, join } from "node:path";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import { registerRunInDb } from "../helpers/test-run-identity";
 import { ensureRequirementsDocSlug } from "../helpers/parented-create";
+import { templatedFieldsArgs } from "../helpers/templated-create";
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
@@ -135,7 +136,8 @@ beforeAll(() => {
     const p = spawnSync(LORE_BIN, args, { cwd: corpus, env: agentEnv({ LORE_HARNESS_RUN: MAIN_RUN }), encoding: "utf8" });
     return { stdout: p.stdout, stderr: p.stderr, exitCode: p.status };
   });
-  WRITE = `lore create knowledge --parent ${parentSlug} --sub-type reference --title "$1" --content body --no-ai`;
+  const fieldsFile = templatedFieldsArgs("knowledge", { kind: "reference" })[1];
+  WRITE = `lore create knowledge --parent ${parentSlug} --sub-type reference --title "$1" --fields-file "${fieldsFile}" --no-ai`;
 });
 
 afterAll(() => {

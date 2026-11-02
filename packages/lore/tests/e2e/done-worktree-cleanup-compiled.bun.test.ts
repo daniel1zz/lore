@@ -30,6 +30,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FIXTURE_DONE_CONTRACT_CONFIG, landCodeTask } from "../helpers/landed-code-task";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { templatedFieldsArgs } from "../helpers/templated-create";
 
 const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -135,8 +136,8 @@ beforeAll(async () => {
   // reason: `lore init` arms state binding (AC-CT-3); evidence captured on a dirty tree is unbound and refused by `lore done`.
   mustOk(git(repo, "add", "-A"), "git add corpus");
   mustOk(git(repo, "commit", "-q", "-m", "lore corpus"), "git commit corpus");
-  mustOk(await lore(["create", "prd", "--title", "Root", "--content", "Root PRD.", "--no-ai", "--json"], "init-0"), "create prd");
-  const createdSpec = mustOk(await lore(["create", "spec", "--title", "Cleanup spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai", "--json"], "init-0"), "create spec");
+  mustOk(await lore(["create", "prd", "--title", "Root", ...templatedFieldsArgs("prd"), "--no-ai", "--json"], "init-0"), "create prd");
+  const createdSpec = mustOk(await lore(["create", "spec", "--title", "Cleanup spec", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech" }), "--no-ai", "--json"], "init-0"), "create spec");
   spec = (JSON.parse(createdSpec.stdout) as { data: { slug: string } }).data.slug;
 }, 300_000);
 

@@ -29,6 +29,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 import { installShippedGuard } from "../integration/support/main-guard-repo.js";
 import { latestLandingCommit } from "../../src/service/milestone-review.js";
 
@@ -140,8 +141,8 @@ beforeAll(async () => {
       "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"', "",
     ].join("\n"),
   );
-  const prd = slugOf(mustLore(["create", "prd", "--title", "Landing PRD", "--content", "root", "--no-ai"]));
-  plan = slugOf(mustLore(["create", "plan", "--title", "Landing Plan", "--parent", prd, "--content", "x", "--no-ai"]));
+  const prd = slugOf(mustLore(["create", "prd", "--title", "Landing PRD", ...templatedFieldsArgs("prd"), "--no-ai"]));
+  plan = slugOf(mustLore(["create", "plan", "--title", "Landing Plan", "--parent", prd, ...planFieldsArgs(prd), "--no-ai"]));
   mustLore(["set", plan, "--status", "approved"]);
 
   // the commitless work: a corpus task (it changes no file, so it has no branch to land), approved with its contract and finished

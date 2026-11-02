@@ -28,6 +28,7 @@ import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 
 import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 setDefaultTimeout(120_000);
 
 interface RunResult {
@@ -68,7 +69,7 @@ function parseSlug(stdout: string): string {
 /** A spec with one cited criterion, approved — the state the record-edit gate locks. */
 function createApprovedSpec(title: string, acId: string): string {
   const slug = parseSlug(
-    mustLore(["create", "spec", "--title", title, "--kind", "tech", "--content", "## Overview\n\nOriginal body.\n", "--no-ai"]),
+    mustLore(["create", "spec", "--title", title, "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", fields: { architecture: "Original body." } }), "--no-ai"]),
   );
   mustLore([
     "ac", "add", slug, acId, "--statement", `${title} behaves as stated.`,
@@ -94,14 +95,14 @@ describe("record-edit gate and read surfaces, compiled binary (AC-DR-5)", () => 
     assertFreshBinary(LORE_BIN, [join(PROJECT_ROOT, "packages", "lore", "src"), join(PROJECT_ROOT, "packages", "core", "src")]);
     dir = mkdtempSync(join(tmpdir(), "lore-record-lock-e2e-"));
     mustLore(["init"]);
-    mustLore(["create", "prd", "--title", "Record Lock PRD", "--content", "PRD body.", "--no-ai"]);
+    mustLore(["create", "prd", "--title", "Record Lock PRD", ...templatedFieldsArgs("prd"), "--no-ai"]);
     // SPEC-103 M2's review-judgment checkpoint defaults spec/adr into `judgment_required_types`; disabled so the
     // approvals below are fixture steps, not the behaviour under test.
     patchLoreConfig(dir, { workflow: { review: { judgment_required_types: [] } } });
 
     lockedSpec = createApprovedSpec("Locked Spec", "AC-LK-1");
     newerSpec = parseSlug(
-      mustLore(["create", "spec", "--title", "Newer Spec", "--kind", "tech", "--content", "## Overview\n\nNewer.\n", "--no-ai"]),
+      mustLore(["create", "spec", "--title", "Newer Spec", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", fields: { architecture: "Newer." } }), "--no-ai"]),
     );
     mustLore(["link", newerSpec, lockedSpec, "--type", "relates-to"]);
     reopenCliSpec = createApprovedSpec("Reopen Cli Spec", "AC-RC-1");
@@ -111,8 +112,8 @@ describe("record-edit gate and read surfaces, compiled binary (AC-DR-5)", () => 
     if (dir !== "") rmSync(dir, { recursive: true, force: true });
   });
 
-  it("lore set --content on an approved spec exits exactly 4 naming 'locked record' and 'lore reopen'", () => {
-    const r = runLore(["set", lockedSpec, "--content", "## Overview\n\nRewritten.\n"]);
+  it("lore set (fields) on an approved spec exits exactly 4 naming 'locked record' and 'lore reopen'", () => {
+    const r = runLore(["set", lockedSpec, ...templatedFieldsArgs("spec", { kind: "tech", fields: { architecture: "Rewritten." } })]);
     expect(r.exitCode).toBe(4);
     expect(r.stderr).toContain("locked record");
     expect(r.stderr).toContain("lore reopen");
@@ -138,7 +139,7 @@ describe("record-edit gate and read surfaces, compiled binary (AC-DR-5)", () => 
   });
 
   it("lore set --correction exits 0, then get shows Standing: record, locked (approved) and Corrections: 1", () => {
-    const set = runLore(["set", lockedSpec, "--content", "## Overview\n\nOriginal body, typo fixed.\n", "--correction", "typo", ...DECIDED_FLAGS]);
+    const set = runLore(["set", lockedSpec, ...templatedFieldsArgs("spec", { kind: "tech", fields: { architecture: "Original body, typo fixed." } }), "--correction", "typo", ...DECIDED_FLAGS]);
     expect(set.exitCode, set.stderr).toBe(0);
     const out = mustLore(["get", lockedSpec]);
     expect(out).toContain("Standing: record");
@@ -156,7 +157,7 @@ describe("record-edit gate and read surfaces, compiled binary (AC-DR-5)", () => 
 
   it("a knowledge reference shows 'Standing: living'", () => {
     const slug = parseSlug(
-      mustLore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => ({ stdout: mustLore(a), stderr: "", exitCode: 0 })), "--title", "Living Reference", "--sub-type", "reference", "--content", "Reference body.", "--no-ai"]),
+      mustLore(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => ({ stdout: mustLore(a), stderr: "", exitCode: 0 })), "--title", "Living Reference", "--sub-type", "reference", ...templatedFieldsArgs("knowledge", { kind: "reference" }), "--no-ai"]),
     );
     const out = mustLore(["get", slug]);
     expect(out).toContain("Standing: living");
