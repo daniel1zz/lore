@@ -120,7 +120,7 @@ export interface KnownDefectsAtClose {
  * An entry is detached only when the review MEASURED its dimension and no longer has its cause: the verdict is `pass`,
  * or `fail` with a set of fingerprints that does not include the entry's. It is kept when its fingerprint is a failing
  * cause, when the dimension is `not-measured` or `na`, when the review has no fact for the dimension, or when it is a
- * gate accepted with `--accept-gate` (`acceptedGates`; a regression only while its file is still red): not measured is never read as fixed.
+ * gate accepted with `--accept-gate` (`acceptedGates`; every dimension but snapshot_accuracy only while its own fingerprint is still failing): not measured is never read as fixed.
  *
  * @param entries - the plan's known defects, in stored order
  * @param facts - the closing review's verdict and failing fingerprints per dimension
@@ -136,11 +136,11 @@ export function partitionKnownDefectsAtClose(
   const detached: DetachedKnownDefect[] = [];
   for (const entry of entries) {
     const fact = facts[entry.dimension];
-    // reason: BR-1513 — a REGRESSION is accepted file by file, so an accepted regression gate shields an entry only while its file
-    // is still red: the entry of a file that is no longer red is detached even though the gate stays accepted. Every other
-    // gate keeps its entries as before (one cause per gate).
+    // reason: BR-1513 / BR-1552 — a regression (per file) and every judged or AI-criterion dimension (per unit) is accepted cause by
+    // cause, so an accepted gate shields an entry only while its fingerprint is still failing: a fixed unit's entry, or an old
+    // cites-keyed one, is detached even though the gate stays accepted (spec O2). Only snapshot_accuracy keeps one cause per gate.
     const staleUnderAcceptedGate =
-      entry.dimension === "regression" &&
+      entry.dimension !== "snapshot_accuracy" &&
       fact !== undefined &&
       fact.verdict === "fail" &&
       fact.failingFingerprints.length > 0 &&

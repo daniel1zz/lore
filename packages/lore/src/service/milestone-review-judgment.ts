@@ -472,7 +472,7 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
             },
           }
         : {}),
-      reuse: ledger.enabled ? { enabled: true as const, ...(ledger.note !== undefined ? { note: ledger.note } : {}) } : { enabled: false as const, cause: ledger.disabledCause as string },
+      reuse: ledger.enabled ? { enabled: true as const, ...(ledger.note !== undefined ? { note: ledger.note } : {}) } : { enabled: false as const, cause: ledger.disabledCause as string, note: "reuse is disabled, so this review's judged causes may vary between reviews of unchanged code (spec S7)" },
       units,
       calls: t.calls,
       ...(t.tokens_in !== undefined ? { tokens_in: t.tokens_in } : {}),
