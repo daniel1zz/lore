@@ -50,7 +50,7 @@
   - Wire dependencies: lore link <blocker> <blocked> --type=blocks
 
   ## 4b. Cancel tasks (NOT delete — preserve history)
-  - lore set <task> --status approved && lore set <task> --status deprecated
+  - lore set <task> --status approved && lore set <task> --status deprecated --reason "<why>"
     (draft tasks fast-track through approved; content edit first if a cancellation
      rationale should be recorded in the task body)
   - ⛔ Rewire dependents: a deprecated blocker NEVER satisfies readiness (only archived

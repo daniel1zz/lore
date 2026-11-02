@@ -190,7 +190,7 @@ describe("AC-LRD-3 — one working copy carries one unlanded task", () => {
     const second = createTask("Second");
     mustRun(["claim", first, "--worktree", "feat-archived"]);
     mustRun(["set", first, "--status", "approved"]);
-    mustRun(["set", first, "--status", "deprecated"]);
+    mustRun(["set", first, "--status", "deprecated", "--reason", "superseded by the second task"]);
 
     const claimed = runLore(["claim", second, "--worktree", "feat-archived"]);
 
