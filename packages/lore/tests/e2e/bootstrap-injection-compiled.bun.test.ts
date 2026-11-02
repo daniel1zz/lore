@@ -85,6 +85,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 
 // ─── Path / spawn setup ─────────────────────────────────────────────────────
 
@@ -146,14 +147,14 @@ interface SeededCorpus {
  */
 async function seedCorpus(dir: string): Promise<SeededCorpus> {
   const prdResult = await runLore(
-    ["create", "prd", "--title", "T6 Bootstrap Injection E2E PRD", "--content", "root", "--no-ai"],
+    ["create", "prd", "--title", "T6 Bootstrap Injection E2E PRD", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"],
     dir,
   );
   expect(prdResult.exitCode).toBe(0);
   const prdSlug = parseSlug(prdResult.stdout);
 
   const planAResult = await runLore(
-    ["create", "plan", "--title", "Plan A actionable", "--parent", prdSlug, "--content", "x", "--no-ai"],
+    ["create", "plan", "--title", "Plan A actionable", "--parent", prdSlug, ...planFieldsArgs(prdSlug), "--no-ai"],
     dir,
   );
   expect(planAResult.exitCode).toBe(0);
@@ -171,8 +172,7 @@ async function seedCorpus(dir: string): Promise<SeededCorpus> {
       planASlug,
       "--plan-id",
       planASlug,
-      "--content",
-      "x",
+      ...templatedFieldsArgs("task"),
       "--no-ai",
     ],
     dir,
@@ -180,7 +180,7 @@ async function seedCorpus(dir: string): Promise<SeededCorpus> {
   expect(taskAResult.exitCode).toBe(0);
 
   const planBResult = await runLore(
-    ["create", "plan", "--title", "Plan B actionable", "--parent", prdSlug, "--content", "x", "--no-ai"],
+    ["create", "plan", "--title", "Plan B actionable", "--parent", prdSlug, ...planFieldsArgs(prdSlug), "--no-ai"],
     dir,
   );
   expect(planBResult.exitCode).toBe(0);
@@ -198,8 +198,7 @@ async function seedCorpus(dir: string): Promise<SeededCorpus> {
       planBSlug,
       "--plan-id",
       planBSlug,
-      "--content",
-      "x",
+      ...templatedFieldsArgs("task"),
       "--no-ai",
     ],
     dir,
@@ -209,7 +208,7 @@ async function seedCorpus(dir: string): Promise<SeededCorpus> {
   // Plan C: zero tasks -> ready:0, claimed:0 -> "dead", excluded from the
   // injection's active_plans regardless of max_active_plans (SPEC-080 D4).
   const planCResult = await runLore(
-    ["create", "plan", "--title", "Plan C dead", "--parent", prdSlug, "--content", "x", "--no-ai"],
+    ["create", "plan", "--title", "Plan C dead", "--parent", prdSlug, ...planFieldsArgs(prdSlug), "--no-ai"],
     dir,
   );
   expect(planCResult.exitCode).toBe(0);
@@ -338,12 +337,12 @@ describe("AC-097-4: archive_candidates injection surfacing (spec-lifecycle-archi
     // plans are judged by default (BR-281 / BR-1237) and this plan is approved only to be archived.
     patchLoreConfig(dir, `workflow:\n  gates:\n    "plan-close":\n      enabled: false\n  review:\n    judgment_required_types: []\n`);
 
-    const prdResult = await runLore(["create", "prd", "--title", "Archive Candidates PRD", "--content", "root", "--no-ai"], dir);
+    const prdResult = await runLore(["create", "prd", "--title", "Archive Candidates PRD", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"], dir);
     expect(prdResult.exitCode).toBe(0);
     const prdSlug = parseSlug(prdResult.stdout);
 
     const planResult = await runLore(
-      ["create", "plan", "--title", "Archive Candidates Plan", "--parent", prdSlug, "--content", "x", "--no-ai"],
+      ["create", "plan", "--title", "Archive Candidates Plan", "--parent", prdSlug, ...planFieldsArgs(prdSlug), "--no-ai"],
       dir,
     );
     expect(planResult.exitCode).toBe(0);
@@ -367,8 +366,7 @@ describe("AC-097-4: archive_candidates injection surfacing (spec-lifecycle-archi
         planSlug,
         "--plan-id",
         planSlug,
-        "--content",
-        "x",
+        ...templatedFieldsArgs("task"),
         "--no-ai",
       ],
       dir,

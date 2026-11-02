@@ -36,6 +36,7 @@ import { FIXTURE_HOME_OUTSIDE_REPO } from "../helpers/clean-tree-repo";
 import { citeSpecViaAsyncCli } from "../helpers/cli-live-rule";
 import { patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create";
 import { installShippedGuard } from "../integration/support/main-guard-repo";
 
 vi.setConfig({ testTimeout: 240_000, hookTimeout: 240_000 });
@@ -283,7 +284,7 @@ describe("AC-DCS1-15: finish runs every oracle at the commit it read and keeps t
 
   it("AC-DCS1-15: a contract AC declared only by a spec the plan implements (not its parent) runs under finish: exit 0 and the output names ac:AC-IMPL-F (issue 622)", async () => {
     useConfig(PASS_CONFIG);
-    const implemented = (await fixture.mustRun(["create", "spec", "--title", "Finish implemented spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] ?? "";
+    const implemented = (await fixture.mustRun(["create", "spec", "--title", "Finish implemented spec", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: "problem" }), "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] ?? "";
     expect(implemented).not.toBe("");
     await fixture.mustRun(["ac", "add", implemented, "AC-IMPL-F", "--statement", "Declared on the implemented spec only.", "--mode", "script", "--oracle", "test", "--command", "echo impl-f"]);
     const plan = await fixture.createPlan("Finish implements plan");
@@ -357,11 +358,11 @@ describe("AC-DCS1-16: finish reports every unmet item at once and refuses before
   it("AC-DCS1-16: an AC superseded after approve is refused as ac-superseded pointing at the correction (exit 4)", async () => {
     useConfig(PASS_CONFIG);
     // reason: the superseding spec stays a draft, so the supersede needs no decision; the claim gate that demands an approved spec is off for this scenario.
-    const spec2 = (await fixture.mustRun(["create", "spec", "--title", "Supersede one", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] ?? "";
-    const spec3 = (await fixture.mustRun(["create", "spec", "--title", "Supersede two", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] ?? "";
+    const spec2 = (await fixture.mustRun(["create", "spec", "--title", "Supersede one", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: "problem" }), "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] ?? "";
+    const spec3 = (await fixture.mustRun(["create", "spec", "--title", "Supersede two", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: "problem" }), "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] ?? "";
     await fixture.mustRun(["ac", "add", spec2, "AC-SA-1", "--statement", "Soon superseded.", "--mode", "script", "--oracle", "test", "--command", "echo sa1"]);
     await fixture.mustRun(["ac", "add", spec3, "AC-SB-1", "--statement", "The correction.", "--mode", "script", "--oracle", "test", "--command", "echo sb1"]);
-    const plan = (await fixture.mustRun(["create", "plan", "--title", "Superseded plan", "--parent", spec2, "--content", "## Plan\n\nBody.\n", "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] ?? "";
+    const plan = (await fixture.mustRun(["create", "plan", "--title", "Superseded plan", "--parent", spec2, ...planFieldsArgs(spec2), "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] ?? "";
     const slug = await approvedTask(plan, ONE_ANCHORED, "Finish superseded", ["AC-SA-1"]);
     patchLoreConfig(fixture.dir, { workflow: { gates: { "task-claim": { enabled: false } } } });
     const tree = addWorktree("sup");

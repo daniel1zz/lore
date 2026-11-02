@@ -53,6 +53,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -116,10 +117,10 @@ async function buildControlCorpus(label: string): Promise<Corpus> {
   const dir = mkdtempSync(join(tmpdir(), `lore-baseline-rollback-${label}-`));
   expect(dir.startsWith(REPO_ROOT)).toBe(false);
   await mustRun(["init"], dir);
-  const prd = await mustRun(["create", "prd", "--title", "Rollback Root", "--content", "# PRD\n\nroot.", "--no-ai"], dir);
+  const prd = await mustRun(["create", "prd", "--title", "Rollback Root", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"], dir);
   const prdSlug = parseSlug(prd.stdout);
   const spec = await mustRun(
-    ["create", "spec", "--title", SPEC_TITLE,"--content", "## Spec\n\nbody", "--no-ai"],
+    ["create", "spec", "--title", SPEC_TITLE, ...templatedFieldsArgs("spec", { kind: "feature", refTarget: prdSlug }), "--no-ai"],
     dir,
   );
   const specSlug = parseSlug(spec.stdout);
@@ -129,12 +130,12 @@ async function buildControlCorpus(label: string): Promise<Corpus> {
   );
   await mustRun(["ac", "add", specSlug, "AC-RB-2", "--statement", "human criterion", "--mode", "human"], dir);
   const plan = await mustRun(
-    ["create", "plan", "--title", "Rollback Plan", "--parent", specSlug, "--content", "## Plan", "--no-ai"],
+    ["create", "plan", "--title", "Rollback Plan", "--parent", specSlug, ...planFieldsArgs(specSlug), "--no-ai"],
     dir,
   );
   const planSlug = parseSlug(plan.stdout);
   await mustRun(
-    ["create", "task", "--title", "Rollback Task", "--kind", "code", "--plan-id", planSlug, "--parent", planSlug, "--content", "## Task", "--ac-scope", "AC-RB-1", "--no-ai"],
+    ["create", "task", "--title", "Rollback Task", "--kind", "code", "--plan-id", planSlug, "--parent", planSlug, ...templatedFieldsArgs("task"), "--ac-scope", "AC-RB-1", "--no-ai"],
     dir,
   );
   return { dir, specSlug, prdSlug };
@@ -144,13 +145,13 @@ async function buildControlCorpus(label: string): Promise<Corpus> {
 async function adoptAndRollBackBaseline(corpus: Corpus): Promise<void> {
   const { dir, specSlug, prdSlug } = corpus;
   const root = parseBaselineSlug(
-    (await mustRun(["baseline", "add", prdSlug, "--node", "root", "--label", "Root", "--title", "Rollback BL Root"], dir)).stdout,
+    (await mustRun(["baseline", "add", prdSlug, "--node", "root", "--label", "Root", "--title", "Rollback BL Root", ...templatedFieldsArgs("baseline", { kind: "root" })], dir)).stdout,
   );
   const branch = parseBaselineSlug(
-    (await mustRun(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "Rollback BL Branch"], dir)).stdout,
+    (await mustRun(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "Rollback BL Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })], dir)).stdout,
   );
   const leaf = parseBaselineSlug(
-    (await mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "Rollback BL Leaf"], dir)).stdout,
+    (await mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "Leaf", "--title", "Rollback BL Leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })], dir)).stdout,
   );
   for (const [statement, enforcedBy, example] of [
     ["Users see the first thing", "guaranteed", "example one"],

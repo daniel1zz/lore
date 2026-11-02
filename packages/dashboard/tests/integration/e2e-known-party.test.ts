@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { endHumanSession, knownPartyEnv, startHumanSession } from "../e2e/known-party.js";
+import { templatedFieldsArgs } from "../../../lore/tests/helpers/templated-create.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 const ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
@@ -36,7 +37,7 @@ function lore(args: string[], cwd: string, env: NodeJS.ProcessEnv): { status: nu
   return { status: proc.status, stderr: proc.stderr };
 }
 
-const CREATE = ["create", "prd", "--title", "Known party probe", "--content", "probe", "--json"];
+const CREATE = ["create", "prd", "--title", "Known party probe", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--json"];
 
 describe("e2e known-party helper", () => {
   const dirs: string[] = [];

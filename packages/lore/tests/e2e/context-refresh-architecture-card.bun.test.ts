@@ -12,6 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 
 const TIMEOUT_MS = 180_000;
 
@@ -73,18 +74,18 @@ let cardSlug = "";
 describe("lore context refresh links module files to their architecture card", () => {
   beforeAll(() => {
     withCard = newCorpus();
-    const prd = parseSlug(mustRun(["create", "prd", "--title", "Card Link Root", "--content", "# PRD\n\nroot.", "--no-ai"], withCard).stdout);
+    const prd = parseSlug(mustRun(["create", "prd", "--title", "Card Link Root", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"], withCard).stdout);
     const root = parseBaselineSlug(
-      mustRun(["baseline", "add", prd, "--tree", "architecture", "--node", "root", "--label", "ARCH", "--title", "Card Arch Root"], withCard).stdout,
+      mustRun(["baseline", "add", prd, "--tree", "architecture", "--node", "root", "--label", "ARCH", "--title", "Card Arch Root", ...templatedFieldsArgs("baseline", { kind: "root" })], withCard).stdout,
     );
     const section = parseBaselineSlug(
-      mustRun(["baseline", "add", root, "--tree", "architecture", "--node", "section", "--label", "SECT", "--title", "Card Section"], withCard).stdout,
+      mustRun(["baseline", "add", root, "--tree", "architecture", "--node", "section", "--label", "SECT", "--title", "Card Section", ...templatedFieldsArgs("baseline", { kind: "section" })], withCard).stdout,
     );
-    const cardBody = join(withCard, "card-body.md");
-    writeFileSync(cardBody, "# Module card: svc\n\nSource: `packages/svc/CLAUDE.md`.\n");
+    // The card names the module file it describes in its `paths` field (the structured twin of the old free body's "Source:" line).
+    const cardFields = templatedFieldsArgs("baseline", { kind: "module-card", fields: { purpose: "Module card: svc", paths: [MODULE_FILE] } });
     cardSlug = parseBaselineSlug(
       mustRun(
-        ["baseline", "add", section, "--tree", "architecture", "--node", "module-card", "--label", "MSVC", "--title", "Module card: svc", "--content-file", cardBody],
+        ["baseline", "add", section, "--tree", "architecture", "--node", "module-card", "--label", "MSVC", "--title", "Module card: svc", ...cardFields],
         withCard,
       ).stdout,
     );
