@@ -273,6 +273,17 @@ describe("a stored contract changes only through one audited amendment", () => {
     expect(typeof after.extra["template_ref"]).toBe("string");
     expect((await auditRows(slug)).length - auditBefore).toBe(1);
 
+    // an approved task nobody claimed yet is kept approved too, with its contract
+    const unclaimed = await approvedTask({ tests: ["tests/am-f3.test.ts"] });
+    dbRun((db) => db.query("UPDATE docs SET extra = json_remove(extra, '$.template_ref', '$.fields', '$.dimensions') WHERE slug = ?").run(unclaimed));
+    const unclaimedBefore = await fixture.readTask(unclaimed);
+    const convertedUnclaimed = await loreIn(["convert", unclaimed], "amend-f3");
+    expect(convertedUnclaimed.exitCode, convertedUnclaimed.text).toBe(0);
+    const unclaimedAfter = await fixture.readTask(unclaimed);
+    expect(unclaimedAfter.status).toBe("approved");
+    expect(unclaimedAfter.extra["done_contract"]).toEqual(unclaimedBefore.extra["done_contract"]);
+    expect(typeof unclaimedAfter.extra["template_ref"]).toBe("string");
+
     // an older convert left a task in draft holding its contract
     const stranded = await approvedTask({ tests: ["tests/am-f2.test.ts"] });
     dbRun((db) => db.query("UPDATE docs SET status = 'draft' WHERE slug = ?").run(stranded));

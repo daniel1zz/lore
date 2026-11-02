@@ -389,6 +389,8 @@ export interface App {
    * contract. Wired by {@link wireDoneContract} at both composition sites.
    */
   taskStartService?: TaskStartService;
+  /** The contract compile and its one amendment route (BR-1548): `lore set <task> --correction` calls `amend`. Wired by {@link wireDoneContract}. */
+  doneContractService?: DoneContractService;
   createDispatchService?: (assets: DispatchAssets) => DispatchService;
   /**
    * `lore integrate`'s evidence at landing (AC-DCS2-1..4): selects the landing tasks, runs the union of their contract oracles on the
@@ -1882,6 +1884,7 @@ function wireDoneContract(app: App, store: StoreInterface, config: LoreConfig | 
   const commands = config?.workflow?.done_contract ?? {};
   const contracts = new DoneContractService(store, commands, createRealDoneContractGit(repoRoot), app.corpusService);
   app.reviewService.setDoneContractPort(contracts);
+  app.doneContractService = contracts;
   // reason: AC-DCS2-15 — a task past done is reviewed by the contract check of the workflow service, never by the AI judge.
   app.reviewService.setContractCheckPort(app.taskWorkflowService);
   // reason: AC-DCS2-14 — the log writer shares the one write route; AcService appends `superseded` entries through it.

@@ -19,6 +19,7 @@
 import {
   anchorsOverlap,
   err,
+  doneContractSchema,
   extractCreatesAnchors,
   formatTaskKindRequiredMessage,
   isTaskKind,
@@ -161,7 +162,45 @@ export function describeContractChanges(stored: DoneContract, next: DoneContract
     if (old === undefined) changes.push({ field: `oracles.${oracle.id}`, old: null, new: oracle });
     else if (canonical(old) !== canonical(oracle)) changes.push({ field: `oracles.${oracle.id}`, old, new: oracle });
   }
+  // reason: only the `set --correction` caller drops an oracle; the start caller's merge keeps every one, so it never lands here.
+  for (const old of stored.oracles) {
+    if (!next.oracles.some((candidate) => candidate.id === old.id)) changes.push({ field: `oracles.${old.id}`, old, new: null });
+  }
   return changes;
+}
+
+/**
+ * The paths a start-drift amendment names: each changed oracle keyed `oracles.test:<path>` gives its path, any other changed field or
+ * oracle gives its name.
+ */
+function startDriftPaths(changes: readonly ContractChange[]): string[] {
+  return changes.map((change) => change.field.replace(/^oracles\./, "").replace(/^test:/, ""));
+}
+
+/** The two callers of the one amendment (BR-1548): `lore set <task> --correction` and `lore start` on drift. */
+export type AmendCaller =
+  | { readonly kind: "set"; readonly reason: string }
+  | { readonly kind: "start" };
+
+/** Oracle ids whose source is an audited write (an anchor, a scope entry): the ones `set --correction` may add or remove. */
+const SOURCE_DERIVED_ORACLE = /^(ac|test):/;
+
+/**
+ * The contract `set --correction` stores: the recompile with the oracle set bounded by BR-1548. An oracle whose source left (an
+ * `ac:` or `test:` id the recompile no longer lists) leaves; every other stored oracle stays and takes the recompiled command; a
+ * config-derived oracle (typecheck, corpus check) the stored contract did not hold is never added. `added_oracles` and the kind stay.
+ *
+ * @param stored - the contract the task holds
+ * @param fresh - the recompiled contract
+ */
+export function amendedContractOf(stored: DoneContract, fresh: DoneContract): DoneContract {
+  const oracles: DoneContractOracle[] = [];
+  for (const candidate of fresh.oracles) {
+    const known = stored.oracles.some((old) => old.id === candidate.id);
+    if (known || SOURCE_DERIVED_ORACLE.test(candidate.id)) oracles.push(candidate);
+  }
+  for (const old of stored.oracles) if (!SOURCE_DERIVED_ORACLE.test(old.id) && !oracles.some((known) => known.id === old.id)) oracles.push(old);
+  return { ...fresh, kind: stored.kind, oracles, added_oracles: stored.added_oracles };
 }
 
 /**
@@ -172,11 +211,11 @@ export function describeContractChanges(stored: DoneContract, next: DoneContract
  * @param next - the contract after
  * @param changes - {@link describeContractChanges} of the two (non-empty)
  */
-export function driftLogEntry(at: string, stored: DoneContract, next: DoneContract, changes: readonly ContractChange[]): ExecutionLogEntry {
+export function driftLogEntry(at: string, stored: DoneContract, next: DoneContract, changes: readonly ContractChange[], detailOverride?: string): ExecutionLogEntry {
   return {
     kind: "drift",
     at,
-    detail: `contract recompiled at start, ${stored.compiled_at_commit.slice(0, 12)} to ${next.compiled_at_commit.slice(0, 12)}: ${changes.map((change) => change.field).join(", ")}`,
+    detail: detailOverride ?? `contract recompiled at start, ${stored.compiled_at_commit.slice(0, 12)} to ${next.compiled_at_commit.slice(0, 12)}: ${changes.map((change) => change.field).join(", ")}`,
     old: Object.fromEntries(changes.map((change) => [change.field, change.old])),
     new: Object.fromEntries(changes.map((change) => [change.field, change.new])),
   };
@@ -311,15 +350,70 @@ export class DoneContractService implements ApproveContractPort {
    * @returns whether anything was stored, or the write error (a lost version race is reported, never retried over a changed contract)
    */
   async applyRecompile(task: DocRecord, stored: DoneContract, fresh: DoneContract, nowIso: string): Promise<Result<{ readonly stored: boolean }, LoreError>> {
-    const next = mergeRecompiledContract(stored, fresh);
-    const changes = describeContractChanges(stored, next);
-    if (changes.length === 0) return ok({ stored: false });
-    const written = await this.storeDrift(task, next, driftLogEntry(nowIso, stored, next, changes), nowIso);
-    return written.ok ? ok({ stored: true }) : written;
+    const amended = await this.applyAmendment(task, stored, fresh, { kind: "start" }, nowIso);
+    return amended.ok ? ok({ stored: amended.value.amended }) : amended;
   }
 
-  private async storeDrift(task: DocRecord, next: DoneContract, entry: ExecutionLogEntry, nowIso: string): Promise<Result<DocRecord, LoreError>> {
-    if (this.writer === undefined) return err({ code: "VALIDATION_ERROR", field: "writer", message: "DoneContractService has no write route: a drifted contract cannot be stored", value: null });
+  /**
+   * `lore set <task> --correction "<reason>"` for a task that holds a contract (BR-1548): recompiles it (the SAME gather and compile as
+   * approve, anchors checked) and stores the amendment in ONE write that keeps the claim and returns a task stranded in draft to
+   * approved. An oracle whose source left leaves; nothing changes (and nothing is written) when the recompile equals the stored contract.
+   *
+   * @param task - the task as read (its version guards the write; a concurrent write is reported as STALE_VERSION)
+   * @param reason - the non-blank reason
+   * @param nowIso - the write time
+   * @returns whether anything was written, or the refusal (`done-contract-uncompilable` naming every cause, or a write error)
+   */
+  async amend(task: DocRecord, reason: string, nowIso: string): Promise<Result<{ readonly amended: boolean; readonly status: string }, LoreError>> {
+    const parsed = doneContractSchema.safeParse(task.extra["done_contract"]);
+    if (!parsed.success) return err({ code: "VALIDATION_ERROR", field: "done_contract", message: `${task.slug} holds no readable done contract to amend.`, value: null });
+    if (task.status !== "draft" && task.status !== "approved" && task.status !== "active") {
+      return err({ code: "VALIDATION_ERROR", field: "status", message: `${task.slug} is ${task.status}: the contract of a finished task is not amended.`, value: task.status });
+    }
+    const stored = parsed.data;
+    const gathered = await this.gather(task, stored.kind, stored.red_required ? undefined : stored.red_waiver_reason, true);
+    if (!gathered.ok) return gathered;
+    const compiled = compileDoneContract(gathered.value.input);
+    if (!compiled.ok) return compiled;
+    const applied = await this.applyAmendment(task, stored, compiled.value, { kind: "set", reason }, nowIso);
+    if (!applied.ok) return applied;
+    return ok({ amended: applied.value.amended, status: applied.value.status });
+  }
+
+  private async applyAmendment(
+    task: DocRecord,
+    stored: DoneContract,
+    fresh: DoneContract,
+    caller: AmendCaller,
+    nowIso: string,
+  ): Promise<Result<{ readonly amended: boolean; readonly status: string }, LoreError>> {
+    const next = caller.kind === "set" ? amendedContractOf(stored, fresh) : mergeRecompiledContract(stored, fresh);
+    const changes = describeContractChanges(stored, next);
+    const returnsToApproved = caller.kind === "set" && task.status === "draft";
+    if (changes.length === 0 && !returnsToApproved) return ok({ amended: false, status: task.status });
+    const written = await this.recordAmendment(task, stored, next, changes, caller, returnsToApproved, nowIso);
+    return written.ok ? ok({ amended: true, status: written.value.status }) : written;
+  }
+
+  /**
+   * The ONE write of a contract amendment (BR-1548), for both callers: the new contract, one execution-log entry and one audit row
+   * holding the reason and the old and new oracle ids and commands, in a single versioned write that keeps the claim.
+   */
+  private async recordAmendment(
+    task: DocRecord,
+    stored: DoneContract,
+    next: DoneContract,
+    changes: readonly ContractChange[],
+    caller: AmendCaller,
+    returnsToApproved: boolean,
+    nowIso: string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    if (this.writer === undefined) return err({ code: "VALIDATION_ERROR", field: "writer", message: "DoneContractService has no write route: an amended contract cannot be stored", value: null });
+    const reason = caller.kind === "set" ? caller.reason : `start-drift ${startDriftPaths(changes).join(", ")}`;
+    const entry: ExecutionLogEntry =
+      changes.length > 0
+        ? driftLogEntry(nowIso, stored, next, changes, `contract amended (${caller.kind === "set" ? "set --correction" : "start"}): ${reason}; changed: ${changes.map((change) => change.field).join(", ")}`)
+        : { kind: "drift", at: nowIso, detail: `contract amended (set --correction): ${reason}; returned to approved`, old: { status: task.status }, new: { status: "approved" } };
     let extra: Record<string, unknown>;
     try {
       extra = { ...withExecutionLogEntries(task.extra, [entry]), done_contract: next };
@@ -328,12 +422,21 @@ export class DoneContractService implements ApproveContractPort {
     }
     const written = await this.writer.writeDoc({
       doc: task,
-      patch: { extra },
+      patch: { extra, ...(returnsToApproved ? { status: "approved" as const } : {}) },
       action: "update",
-      changeSummary: "done contract recompiled at start (drift)",
+      changeSummary: caller.kind === "set" ? "done contract amended (set --correction)" : "done contract recompiled at start (drift)",
       auditAction: "update",
-      auditDetails: { operation: "start-drift", execution_log: "drift" },
-      auditSessionId: `start-drift-${task.id}`,
+      auditDetails: {
+        operation: "contract-amendment",
+        caller: caller.kind,
+        reason,
+        execution_log: "drift",
+        old_oracles: stored.oracles,
+        new_oracles: next.oracles,
+        changes: changes.map((change) => change.field),
+        ...(returnsToApproved ? { status_from: task.status, status_to: "approved" } : {}),
+      },
+      auditSessionId: `contract-amendment-${task.id}`,
       lock: "none",
       now: nowIso,
       foreignIntent: readClaimRecord(task)?.worktree !== undefined,
