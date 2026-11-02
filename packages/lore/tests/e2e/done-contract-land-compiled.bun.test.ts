@@ -452,32 +452,43 @@ describe("AC-DCS2-9: land resumes after a failed step and is idempotent", () => 
   });
 });
 
-describe("AC-DCS2-9: the done walk of the main route resumes without integrating again", () => {
-  it("AC-DCS2-9: a done walk that refuses after the integrate exits 4 naming the next command and keeps the landed entry; the resume skips the integrate and archives; a third run changes nothing", async () => {
+describe("AC-DCS2-9: a task whose anchored test file the landed tree lacks is refused and never archived", () => {
+  // CHANGED (BR-1547, AC-DCF-1; T1 on main). OLD assertion: the task anchors a test file its branch never creates; finish exits 0,
+  // the integrate lands the branch, then `lore done` refuses (oracle-file-missing), so land exits 4 AFTER the landing, keeps the
+  // landed entry, and a second run resumes at the done step without integrating again. WHY it changed: approve now refuses an
+  // absent undeclared test anchor, so the fixture declares it with --creates; a declared-but-absent file is then refused already
+  // by `lore finish` (exit 4, test-file-absent), and so land refuses (exit 4, land-contract-unmet) BEFORE anything moves. NEW
+  // assertion: finish exits 4 naming test-file-absent; land exits 4 with land-contract-unmet; main does not move, no landed entry
+  // is written, the task stays approved, and a second land changes nothing. The post-integrate resume branch is no longer reachable through a missing test file.
+  it("AC-DCS2-9: land of a task whose --creates test file is absent exits 4 naming test-file-absent; main, the log and the task stay unchanged; a second run changes nothing", async () => {
     const plan = await fixture.createPlan("Land resume main plan");
-    // the task anchors a test file its branch never creates: the finish runs the file's oracle command, the integrate lands the
-    // branch, but lore done refuses the task (oracle-file-missing: the landed tree lacks a contract test file)
-    const x = await codeTask(plan, "resume-main", { work: { "src/resume-main.ts": "export const resumeMain = 1;\n" } });
+    const x = await codeTask(plan, "resume-main", { finish: false, work: { "src/resume-main.ts": "export const resumeMain = 1;\n" } });
+    const mainBefore = mainTip();
+
+    // finish names the absent file and does not mark the claim finished (it records the measurable rows, so the task is not compared
+    // byte for byte before it); land, which needs a finished claim, then refuses before anything moves
+    const finished = await loreIn(x.tree.path, ["finish", x.slug], OWNER);
+    expect(finished.exitCode, finished.text).toBe(4);
+    expect(finished.text).toContain("test-file-absent");
+    expect(finished.text).toContain("tests/resume-main.test.ts");
+    const taskAfterFinish = await fixture.readTask(x.slug);
+
     const refused = await land(x.slug);
     expect(refused.exitCode, refused.text).toBe(4);
-    expect(refused.text).toContain(`lore land ${x.slug}`);
-    const landedMain = mainTip();
-    expect(isAncestor(x.tip, landedMain), "the landing stays").toBe(true);
-    expect((await logOf(x.slug)).filter((entry) => entry.kind === "landed").length).toBe(1);
+    expect(refused.text).toContain("land-contract-unmet");
+    expect(refused.text).toContain("tests/resume-main.test.ts");
+    expect(mainTip()).toBe(mainBefore);
+    expect(isAncestor(x.tip, mainTip()), "nothing landed").toBe(false);
+    expect((await logOf(x.slug)).filter((entry) => entry.kind === "landed").length).toBe(0);
     expect(await statusOf(x.slug)).toBe("approved");
+    expect(await fixture.readTask(x.slug)).toEqual(taskAfterFinish);
 
-    // run again: the step already in the log is skipped (no integrate runs, main stays), the walk resumes at the done step and says
-    // what still refuses. A cause that is judged against the landed commit cannot be fixed by landing again; the repair is named.
-    const version = (await fixture.readTask(x.slug)).version;
-    const resumed = await land(x.slug);
-    expect(resumed.exitCode, resumed.text).toBe(4);
-    expect(resumed.text, "the integrate is not run again").not.toContain("integrate:");
-    expect(resumed.text).toContain("already landed");
-    expect(resumed.text).toContain("oracle-file-missing");
-    expect(mainTip()).toBe(landedMain);
-    expect((await logOf(x.slug)).filter((entry) => entry.kind === "landed").length).toBe(1);
+    const again = await land(x.slug);
+    expect(again.exitCode, again.text).toBe(4);
+    expect(again.text).toContain("land-contract-unmet");
+    expect(mainTip()).toBe(mainBefore);
     expect(await statusOf(x.slug)).toBe("approved");
-    expect((await fixture.readTask(x.slug)).version).toBe(version);
+    expect(await fixture.readTask(x.slug)).toEqual(taskAfterFinish);
   });
 });
 
