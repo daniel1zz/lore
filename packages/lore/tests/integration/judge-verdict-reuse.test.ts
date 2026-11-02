@@ -520,6 +520,7 @@ describe("AC-JR-3: model and prompt version are in the key", () => {
     const reuse = (second.review.judgment as unknown as { reuse?: { enabled: boolean; cause?: string } }).reuse;
     expect(reuse?.enabled).toBe(false);
     expect(reuse?.cause).toContain("ai.assess.model");
+    expect((reuse as { note?: string } | undefined)?.note).toMatch(/judged causes may vary/);
     expect(unitsOf(second.review).every((u) => u.source === "fresh")).toBe(true);
   });
 

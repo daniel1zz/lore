@@ -401,8 +401,9 @@ export class GateAcceptanceService {
       return err(refuse("accept-gate", `the ${dimension} failure of ${plan.slug} has no identifiable root cause (${cause.error.code}), so it cannot be accepted: it needs a new review. Nothing was written.`));
     }
     const subject = gateAcceptanceSubject(plan.id, dimension, cause.value.fingerprint);
-    // reason: a regression is accepted file by file (BR-1513), so the question and every refusal name the file it is about.
-    const what = dimension === "regression" ? `${dimension} (${cause.value.label})` : dimension;
+    // reason: a regression is accepted file by file (BR-1513) and a judged gate cause by cause (BR-1552), so the question and every
+    // refusal name the cause it is about (its file or "cross-file"); snapshot_accuracy has one cause per gate and stays bare.
+    const what = dimension === "snapshot_accuracy" ? dimension : `${dimension} (${cause.value.label})`;
     const detail: DecisionDetail = {
       summary: `Accept the failed ${what} gate of plan ${plan.slug} as a known defect (review ${reviewSlug})`,
       requested_by: "the agent session that ran `lore assess --accept-gate`",

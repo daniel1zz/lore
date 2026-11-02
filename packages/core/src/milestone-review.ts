@@ -270,7 +270,8 @@ export type JudgeUnitRecord = z.infer<typeof judgeUnitRecordSchema>;
  */
 export const judgeReuseRecordSchema = z.discriminatedUnion("enabled", [
   z.object({ enabled: z.literal(true), note: z.string().min(1).optional() }),
-  z.object({ enabled: z.literal(false), cause: z.string().min(1) }),
+  /** A disabled review also notes that its judged causes may vary (spec S7): nothing stored anchors them. */
+  z.object({ enabled: z.literal(false), cause: z.string().min(1), note: z.string().min(1).optional() }),
 ]);
 export type JudgeReuseRecord = z.infer<typeof judgeReuseRecordSchema>;
 

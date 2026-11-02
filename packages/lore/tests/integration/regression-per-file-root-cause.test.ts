@@ -341,7 +341,8 @@ describe("AC-PF-2 a fixed file closes only its own issue", () => {
     expect(w.github.closed).toEqual([]);
   });
 
-  it("AC-PF-2 NEGATIVE: an accepted security gate keeps an entry with an older fingerprint, as before (only a regression is per file)", () => {
+  // BR-1552 reverses the old regression-only rule: judged dimensions are per unit now, so a stale security entry is detached too.
+  it("AC-PF-2 NEGATIVE: an accepted security gate detaches an entry with an older fingerprint, like a regression (every unit-keyed gate is per cause)", () => {
     const entries = [
       { repo_id: REPO_ID, number: 1, dimension: "security" as const, fingerprint: "OLD" },
       { repo_id: REPO_ID, number: 2, dimension: "regression" as const, fingerprint: "OLD-FILE" },
@@ -351,8 +352,8 @@ describe("AC-PF-2 a fixed file closes only its own issue", () => {
       { security: { verdict: "fail", failingFingerprints: ["NEW"] }, regression: { verdict: "fail", failingFingerprints: ["NEW-FILE"] } },
       ["security", "regression"],
     );
-    expect(split.kept.map((e) => e.number)).toEqual([1]);
-    expect(split.detached.map((d) => d.entry.number)).toEqual([2]);
+    expect(split.kept.map((e) => e.number)).toEqual([]);
+    expect(split.detached.map((d) => d.entry.number)).toEqual([1, 2]);
   });
 
   it("AC-PF-2 REGRESSION: still-red a and b keep both entries, so a failing set that did not shrink detaches nothing", async () => {
