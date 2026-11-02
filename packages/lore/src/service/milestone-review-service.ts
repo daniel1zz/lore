@@ -45,7 +45,7 @@ import {
 import { factsDimensions, mergeDimensions, runJudgment, type JudgePort } from "./milestone-review-judgment.js";
 import { randomUUID } from "node:crypto";
 import { UnitLedger, type JudgeVerdictStorePort } from "./judge-unit-ledger.js";
-import type { JudgeIdentity } from "./judge-unit-keys.js";
+import { sha256Hex, type JudgeIdentity } from "./judge-unit-keys.js";
 import {
   MILESTONE_REVIEW_PROMPT_VERSION,
   UNIT_INSTRUCTION_TEMPLATE,
@@ -312,6 +312,7 @@ export class MilestoneReviewService {
         command: e.command,
         result: e.result,
         attested: e.attestation !== undefined,
+        output_tail_sha256: sha256Hex(e.output_tail ?? ""),
         ...(e.ac_ref !== undefined ? { ac_ref: e.ac_ref } : {}),
       })),
     }));

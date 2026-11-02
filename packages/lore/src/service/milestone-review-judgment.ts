@@ -60,7 +60,7 @@ import {
   type UnitDescriptor,
   type UnitLedger,
 } from "./judge-unit-ledger.js";
-import { criterionUnitInput, fileUnitInput, type JudgeIdentity } from "./judge-unit-keys.js";
+import { canonicalEvidenceRowsOf, criterionUnitInput, fileUnitInput, type JudgeIdentity } from "./judge-unit-keys.js";
 
 /** One judge reply with what the call cost. */
 export interface JudgeReply {
@@ -312,7 +312,7 @@ export async function runJudgment(input: JudgmentInput): Promise<Result<Judgment
   // reason: BR-1535 S2 — an AI criterion's verdict may depend on any changed file, so its input is its text and the WHOLE plan diff.
   const planDiff = hasDiff ? (input.diffText as string) : "";
   for (const c of expectedCriteria) {
-    const registered = await register(criterionStates, { kind: "criterion", id: `${c.spec}:${c.ac}`, canonical: criterionUnitInput(c, planDiff) });
+    const registered = await register(criterionStates, { kind: "criterion", id: `${c.spec}:${c.ac}`, canonical: criterionUnitInput(c, planDiff, canonicalEvidenceRowsOf(input.base.tasks, c)) });
     if (!registered.ok) return registered;
   }
   const askedFilesOf = (paths: readonly string[]): string[] => paths.filter((p) => fileStates.get(p)?.reusedAnswer === undefined);
