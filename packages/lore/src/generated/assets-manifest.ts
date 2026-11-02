@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "c09e0b45eb5c91ad801ca866cd7242379ac389e969c7a03734dd1cab56ad00b5",
+  tree_digest: "b158254a39254a46092b4fc36760f1ea6c9048a427621f63854c38cdf4ac4630",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "7482ef5769ffe05d794f762c2e140b3ccccd2f63c5e224aaa5dec34a48d80415" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -58,7 +58,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "context/corpus-workflow-3-execute.md", kind: "context", ownership: "managed", sha256: "6be4b3d513bad2f0616f1b1c90536c2fb31fd236f4276df57eeeb6e68bff4353" },
   { path: "context/corpus-workflow-4-close.md", kind: "context", ownership: "managed", sha256: "c5ca43ec936e2e0f6c5fc4aee1958daa2c3891a053ce9e991493b0cb0c7f42da" },
   { path: "context/decision-records.md", kind: "context", ownership: "managed", sha256: "f1995a527c7492926125751659b1e1c12012782f2d88d4ca9bc71f40ccc74d51" },
-  { path: "context/dispatch-bundle.md", kind: "context", ownership: "managed", sha256: "e748d87ff02b7748e65bfeec898e333aa7e7af99dca25467f60e1c2cd0cf6f01" },
+  { path: "context/dispatch-bundle.md", kind: "context", ownership: "managed", sha256: "369ab9fc39995a4e3b604edd513af816900413ca8131e4524382f130ad853f92" },
   { path: "context/evidence-attestation.md", kind: "context", ownership: "managed", sha256: "ff7c40eaa2041334be95e7cd5a0681e63c42a24d0a979d6610c64110406a9c86" },
   { path: "context/worktree-dispatch.md", kind: "context", ownership: "managed", sha256: "79b564d9a8b5e6597df8734f1b1b2a22291b4b95628b585bb4f22e1e20fbcd75" },
   { path: "dispatch-standing-rules.md", kind: "root", ownership: "managed", sha256: "70c5b114b8be5926a6c14a4d19c3d73c023574923806237e2f4c2a1b8482d9ef" },
