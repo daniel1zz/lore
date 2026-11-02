@@ -159,6 +159,61 @@ describe("AC-RV-10: a claim ends with its run", () => {
     expect(await claimedBy()).toBe(R1);
   });
 
+  describe("live shape (#633): a subagent run's claim recorded with its branch name", () => {
+    const SESSION = "live633session";
+    const SUB = `cc:${SESSION}:agentx`;
+    const PARENT = `cc:${SESSION}`;
+    const BY_SESSION = `agent:session-${SESSION.slice(0, 8)}`;
+    const BRANCH = "worktree-agent-x";
+
+    async function seedSubagentRun(): Promise<void> {
+      await withStore(async (store) => {
+        const inserted = await store.insertRun({
+          id: SUB,
+          kind: "subagent",
+          harness: "claude-code",
+          sessionRef: SESSION,
+          agentRef: "agentx",
+          agentType: "lore-implementer",
+          parentRunId: null,
+          branch: BRANCH,
+          composition: { schemaVersion: 1, fragments: [{ id: "frag-1", sha256: "a".repeat(64) }] },
+          registeredAt: STAMP,
+        });
+        if (!inserted.ok) throw new Error(`insertRun failed: ${JSON.stringify(inserted.error)}`);
+        const ended = await store.endRun(SUB as RunId, new Date().toISOString(), "subagent-stop");
+        if (!ended.ok) throw new Error(`endRun failed: ${JSON.stringify(ended.error)}`);
+        // reason: the live run row records the checkout directory it registered in; the claim records only the branch name.
+        const checkout = join(tmpRoot, "subagent-checkout");
+        mkdirSync(checkout, { recursive: true });
+        git(checkout, ["init", "-q", "-b", BRANCH]);
+        git(checkout, ["-c", "user.email=f@example.invalid", "-c", "user.name=f", "commit", "-q", "--allow-empty", "-m", "init"]);
+        const recorded = await store.recordRunProcess(SUB as RunId, { pid: null, startTime: null, worktree: checkout });
+        if (!recorded.ok) throw new Error(`recordRunProcess failed: ${JSON.stringify(recorded.error)}`);
+      });
+    }
+
+    it("a new run claims it without a steal naming the run as ended, and the parent session releases it", async () => {
+      await seedRun(R2);
+      await seedSubagentRun();
+      const held = await app.taskWorkflowService.claim(taskSlug, { by: BY_SESSION, harnessRun: SUB as RunId, worktree: BRANCH });
+      expect(held.ok, JSON.stringify(held)).toBe(true);
+      const claim = await app.taskWorkflowService.claim(taskSlug, { by: BY_R2, harnessRun: R2 as RunId, worktree: "wt-ended-claim-r2" });
+      expect(claim.ok, JSON.stringify(claim)).toBe(true);
+      expect(JSON.stringify(claim)).toContain(SUB);
+      expect(JSON.stringify(claim)).toContain("ended");
+      expect(await claimedBy()).toBe(R2);
+    });
+
+    it("the parent session's plain release of the ended subagent's claim is accepted", async () => {
+      await seedSubagentRun();
+      const held = await app.taskWorkflowService.claim(taskSlug, { by: BY_SESSION, harnessRun: SUB as RunId, worktree: BRANCH });
+      expect(held.ok, JSON.stringify(held)).toBe(true);
+      const released = await app.taskWorkflowService.release(taskSlug, { by: BY_SESSION, harnessRun: PARENT as RunId });
+      expect(released.ok, JSON.stringify(released)).toBe(true);
+    });
+  });
+
   describe("with a real git worktree recorded on the claim", () => {
     let repoDir: string;
     let worktreeDir: string;
