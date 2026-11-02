@@ -268,7 +268,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative } from "node:path";
 import { z } from "zod";
 import { err, ok, checkScopeDeclaredOnSpec, extractGoverningSpecRef, governingSpecMissingError, classifyEvidenceStamps, unboundReasonOfReading, findMissingOracleFiles, hasPassOnRecord, extractDeclaredPhases, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result, readClaimRecord } from "@lore/core";
@@ -3762,6 +3762,33 @@ export class TaskWorkflowService {
       const live = await this.isClaimLive(other, nowIso, endedRuns);
       if (!live.ok) return live;
       if (live.value) return ok(`branch ${branch} is also recorded by the live claim of ${other.slug}; each task needs its own branch.`);
+    }
+    return ok(undefined);
+  }
+
+  /**
+   * Refuses while ANOTHER task's live claim records `worktree` as its working copy (BR-1550, issue #623): `lore start` run inside
+   * a linked worktree adopts it only when no fresh claim holds it. The comparison is by real path, so a symlinked spelling of the
+   * same directory still matches.
+   *
+   * @param task - the task about to adopt the worktree
+   * @param worktree - the absolute path of the caller's worktree
+   * @param nowIso - the one reading of "now"
+   * @returns `ok` when no other fresh claim records the worktree; `CLAIM_CONFLICT` (exit 5) naming the holder otherwise
+   */
+  async refuseWorktreeHeldByAnotherClaim(task: DocRecord, worktree: string, nowIso: string): Promise<Result<void, LoreError>> {
+    const real = (path: string): string => (existsSync(path) ? realpathSync(path) : path);
+    const wanted = real(worktree);
+    const tasks = await this.store.findMany({ type: "task" });
+    if (!tasks.ok) return tasks;
+    const staleness = new Map<string, boolean>();
+    for (const other of tasks.value) {
+      if (other.id === task.id) continue;
+      const held = extractHeldClaim(other);
+      if (held?.worktree === undefined || !isAbsolute(held.worktree) || real(held.worktree) !== wanted) continue;
+      const stale = await this.isClaimEffectivelyStale(held, nowIso, staleness);
+      if (!stale.ok) return stale;
+      if (!stale.value) return err(buildClaimConflictError(other.id, held, buildClaimHolder(held, false), nowIso));
     }
     return ok(undefined);
   }

@@ -410,7 +410,7 @@ describe("lore start inside a linked worktree adopts it (AC-DCF-4, BR-1550, issu
     const slug = await approvedTask(planMain, "code", `sh -c 'echo "$PWD" > ${marker}'`);
     const path = linkedWorktree("adopt-ok", "main");
     const countBefore = worktreeCount();
-    const out = await startFrom(path, slug, "start-dcf4-ok", ["--write-set", "src/"]);
+    const out = await startFrom(path, slug, "start-dcf4-ok", ["--write-set", "dcf4-only/"]);
     expect(out.exitCode, out.text).toBe(0);
     expect(worktreeCount()).toBe(countBefore);
     expect(existsSync(worktreePathOf(slug))).toBe(false);

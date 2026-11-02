@@ -40,6 +40,8 @@ export const START_REFUSALS = [
   "contract-drift",
   "worktree-exists",
   "worktree-path-not-ignored",
+  "worktree-dirty",
+  "base-behind",
   "install-failed",
   "start-git-failed",
 ] as const;
@@ -58,6 +60,7 @@ export interface TaskStartDeps {
   readonly workflow: {
     refuseClaimHeldByAnotherRun(task: DocRecord, party: { by: string; harnessRun?: RunId | null }, nowIso: string): Promise<Result<void, LoreError>>;
     claim(idOrSlug: string, opts: ClaimOpts, now?: () => string): Promise<Result<DocRecord, LoreError>>;
+    refuseWorktreeHeldByAnotherClaim(task: DocRecord, worktree: string, nowIso: string): Promise<Result<void, LoreError>>;
   };
   /** The contract recompile and the one write of a changed contract plus its drift entry (AC-DCS2-16). */
   readonly contracts: {
@@ -98,6 +101,11 @@ export interface StartInput {
   readonly source: string;
   /** The one reading of "now". */
   readonly nowIso: string;
+  /**
+   * The linked worktree the caller runs in (absolute path) and the branch checked out there, when `lore start` is to adopt it
+   * instead of creating a sibling worktree (BR-1550, issue #623). Absent from the shared checkout.
+   */
+  readonly adopt?: { readonly path: string; readonly branch: string };
 }
 
 /** What a successful `lore start` did. */
@@ -133,6 +141,11 @@ export class TaskStartService {
     // reason: BR-1040 — the lease is checked before anything else, so a task another run holds never gets a worktree.
     const lease = await this.deps.workflow.refuseClaimHeldByAnotherRun(task, { by: input.by, harnessRun: input.harnessRun }, input.nowIso);
     if (!lease.ok) return lease;
+    // reason: BR-1550 — a worktree another fresh claim holds is never adopted (exit 5, same as a held task).
+    if (input.adopt !== undefined) {
+      const held = await this.deps.workflow.refuseWorktreeHeldByAnotherClaim(task, input.adopt.path, input.nowIso);
+      if (!held.ok) return held;
+    }
 
     if (task.status !== "approved") {
       return err(refusal("not-approved", `${task.slug} is ${task.status}; only an approved task is started (\`lore approve ${task.slug}\`).`));
@@ -163,6 +176,8 @@ export class TaskStartService {
     const checked = await this.checkDrift(task, contract, repo, input.nowIso);
     if (!checked.ok) return checked;
     const drift = checked.value;
+
+    if (input.adopt !== undefined) return this.startInAdoptedWorktree(task, contract, input, input.adopt, drift);
 
     const branch = `task/${task.slug}`;
     const worktreePath = join(repoRoot, ".claude", "worktrees", task.slug);
@@ -229,6 +244,57 @@ export class TaskStartService {
     const after = doneContractSchema.safeParse(claimed.value.extra["done_contract"]);
     if (!after.success) return fail(refusal("contract-missing", `${task.slug} lost its done contract during the claim.`));
     return ok({ slug: task.slug, worktree: worktreePath, branch, task: claimed.value, contract: after.data, drift });
+  }
+
+  /**
+   * BR-1550: starts the task in the caller's own linked worktree. Requires a clean tree whose HEAD contains the tip of the contract
+   * base (else `worktree-dirty` / `base-behind`, naming `git merge --ff-only`), runs the install there and claims the task with that
+   * worktree and its branch. Nothing is created, so a failure removes nothing; the claim writes nothing when refused.
+   */
+  private async startInAdoptedWorktree(
+    task: DocRecord,
+    contract: DoneContract,
+    input: StartInput,
+    adopt: { readonly path: string; readonly branch: string },
+    drift: StartDrift,
+  ): Promise<Result<StartOutcome, LoreError>> {
+    const inTree = createGitRunner(adopt.path);
+    const status = inTree(["status", "--porcelain"]);
+    if (!status.ok) return err(refusal("start-git-failed", `${status.reason}; nothing was claimed.`));
+    if (status.stdout.trim() !== "") {
+      return err(refusal("worktree-dirty", `${adopt.path} has uncommitted changes; commit them (\`git commit\`) or move them aside, then start again. Nothing was claimed.`));
+    }
+    const baseTip = inTree(["rev-parse", "--verify", "--quiet", `refs/heads/${contract.base_branch}^{commit}`]);
+    if (!baseTip.ok) return err(refusal("start-git-failed", `${baseTip.reason}; nothing was claimed.`));
+    const contains = inTree(["merge-base", "--is-ancestor", baseTip.stdout.trim(), "HEAD"]);
+    if (!contains.ok) {
+      // reason: `git merge-base --is-ancestor` exits 1 for "not an ancestor"; any other failure is a git fault, never "behind".
+      if (!contains.reason.includes(" exited 1:")) return err(refusal("start-git-failed", `${contains.reason}; nothing was claimed.`));
+      return err(refusal("base-behind", `HEAD of ${adopt.path} does not contain the tip of ${contract.base_branch}; run \`git merge --ff-only ${contract.base_branch}\` there, then start again. Nothing was claimed.`));
+    }
+
+    if (contract.install !== undefined) {
+      const install = spawnSync("sh", ["-c", contract.install], { cwd: adopt.path, encoding: "utf8", timeout: INSTALL_TIMEOUT_MS });
+      if (install.error !== undefined || install.status !== 0) {
+        const output = `${install.stdout ?? ""}${install.stderr ?? ""}`.trim().slice(-INSTALL_OUTPUT_TAIL_CHARS);
+        const why = install.error !== undefined ? install.error.message : `exited ${install.status}`;
+        return err(refusal("install-failed", `\`${contract.install}\` ${why} in ${adopt.path}; nothing was claimed.\n${output}`));
+      }
+    }
+
+    const claimed = await this.deps.workflow.claim(task.slug, {
+      by: input.by,
+      harnessRun: input.harnessRun,
+      branch: adopt.branch,
+      machine: input.machine,
+      worktree: adopt.path,
+      ...(input.writeSet !== undefined ? { writeSet: input.writeSet } : {}),
+      source: input.source,
+    });
+    if (!claimed.ok) return claimed;
+    const after = doneContractSchema.safeParse(claimed.value.extra["done_contract"]);
+    if (!after.success) return err(refusal("contract-missing", `${task.slug} lost its done contract during the claim.`));
+    return ok({ slug: task.slug, worktree: adopt.path, branch: adopt.branch, task: claimed.value, contract: after.data, drift });
   }
 
   /**
