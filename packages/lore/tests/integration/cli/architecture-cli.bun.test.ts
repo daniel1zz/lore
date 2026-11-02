@@ -33,6 +33,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
 import { DECIDED_FLAGS } from "../../helpers/decision-flags.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 setDefaultTimeout(300_000);
 
@@ -74,7 +75,7 @@ let debtRegistry = "";
 let businessRoot = "";
 
 function archAdd(parent: string, node: string, label: string, title: string, extra: string[] = []): RunResult {
-  return runLore(["baseline", "add", parent, "--tree", "architecture", "--node", node, "--label", label, "--title", title, ...extra], dir);
+  return runLore(["baseline", "add", parent, "--tree", "architecture", "--node", node, "--label", label, "--title", title, ...templatedFieldsArgs("baseline", { kind: node }), ...extra], dir);
 }
 
 function git(args: string[]): void {
@@ -92,12 +93,12 @@ beforeAll(() => {
   git(["add", "."]);
   git(["commit", "-q", "-m", "init"]);
   mustRun(["init"], dir);
-  prd = slugOf(mustRun(["create", "prd", "--title", "Arch PRD", "--content", "root", "--no-ai"], dir).stdout);
-  businessRoot = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "biz", "--title", "Biz Root"], dir).stdout);
-  archRoot = slugOf(mustRun(["baseline", "add", prd, "--tree", "architecture", "--node", "root", "--label", "arch", "--title", "Arch Root"], dir).stdout);
-  archSection = slugOf(mustRun(["baseline", "add", archRoot, "--tree", "architecture", "--node", "section", "--label", "svc", "--title", "Service Layer"], dir).stdout);
-  standard = slugOf(mustRun(["baseline", "add", archSection, "--tree", "architecture", "--node", "standard", "--label", "std", "--title", "Result Standard"], dir).stdout);
-  debtRegistry = slugOf(mustRun(["baseline", "add", archSection, "--tree", "architecture", "--node", "debt-registry", "--label", "debt", "--title", "Debt Registry"], dir).stdout);
+  prd = slugOf(mustRun(["create", "prd", "--title", "Arch PRD", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"], dir).stdout);
+  businessRoot = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "biz", "--title", "Biz Root", ...templatedFieldsArgs("baseline", { kind: "root" })], dir).stdout);
+  archRoot = slugOf(mustRun(["baseline", "add", prd, "--tree", "architecture", "--node", "root", "--label", "arch", "--title", "Arch Root", ...templatedFieldsArgs("baseline", { kind: "root" })], dir).stdout);
+  archSection = slugOf(mustRun(["baseline", "add", archRoot, "--tree", "architecture", "--node", "section", "--label", "svc", "--title", "Service Layer", ...templatedFieldsArgs("baseline", { kind: "section" })], dir).stdout);
+  standard = slugOf(mustRun(["baseline", "add", archSection, "--tree", "architecture", "--node", "standard", "--label", "std", "--title", "Result Standard", ...templatedFieldsArgs("baseline", { kind: "standard" })], dir).stdout);
+  debtRegistry = slugOf(mustRun(["baseline", "add", archSection, "--tree", "architecture", "--node", "debt-registry", "--label", "debt", "--title", "Debt Registry", ...templatedFieldsArgs("baseline", { kind: "debt-registry" })], dir).stdout);
 });
 
 afterAll(() => {
@@ -132,12 +133,12 @@ describe("lore baseline add --tree architecture (spec-baseline-slice-3a-architec
   });
 
   it("refuses an unknown --tree value with a non-zero exit", () => {
-    const r = runLore(["baseline", "add", prd, "--tree", "bogus", "--node", "root", "--label", "x", "--title", "X"], dir);
+    const r = runLore(["baseline", "add", prd, "--tree", "bogus", "--node", "root", "--label", "x", "--title", "X", ...templatedFieldsArgs("baseline", { kind: "root" })], dir);
     expect(r.exitCode).not.toBe(0);
   });
 
   it("business add without --tree is unchanged", () => {
-    const r = runLore(["baseline", "add", businessRoot, "--node", "branch", "--label", "b", "--title", "Biz Branch", "--json"], dir);
+    const r = runLore(["baseline", "add", businessRoot, "--node", "branch", "--label", "b", "--title", "Biz Branch", ...templatedFieldsArgs("baseline", { kind: "branch" }), "--json"], dir);
     expect(r.exitCode).toBe(0);
     expect((JSON.parse(r.stdout) as { data: { tree: string } }).data.tree).toBe("business");
   });
@@ -191,7 +192,7 @@ describe("lore rule add on architecture nodes", () => {
   });
 
   it("business rule add is unchanged (no four-part flags)", () => {
-    const leaf = slugOf(mustRun(["baseline", "add", businessRoot, "--node", "leaf", "--label", "l", "--title", "Biz Leaf"], dir).stdout);
+    const leaf = slugOf(mustRun(["baseline", "add", businessRoot, "--node", "leaf", "--label", "l", "--title", "Biz Leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })], dir).stdout);
     const r = runLore(["rule", "add", leaf, "--statement", "Business rule", ...RULE], dir);
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain("Added BR-");

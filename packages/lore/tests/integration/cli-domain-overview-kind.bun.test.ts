@@ -37,6 +37,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -91,27 +92,12 @@ function parseSlug(stdout: string): string {
 
 function createPrd(dir: string): string {
   const result = runLore(
-    ["create", "prd", "--title", "Domain-Overview Kind RED PRD", "--content", "PRD body.", "--no-ai"],
+    ["create", "prd", "--title", "Domain-Overview Kind RED PRD", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"],
     dir,
   );
   expect(result.exitCode).toBe(0);
   return parseSlug(result.stdout);
 }
-
-const DOMAIN_OVERVIEW_CONTENT = [
-  "## Overview / Goal",
-  "",
-  "This domain covers the outline-contract migration.",
-  "",
-  "## Scope",
-  "",
-  "In scope: PRD outline entries, domain-overview specs.",
-  "",
-  "## Acceptance Criteria",
-  "",
-  "See the parent spec's declared AC list.",
-  "",
-].join("\n");
 
 // ─── Project-level state ──────────────────────────────────────────────────────
 
@@ -144,8 +130,7 @@ describe("HAPPY — lore create spec --kind domain-overview --parent <prd> (AC-0
         "domain-overview",
         "--title",
         "Domain Overview: Outline Contract",
-        "--content",
-        DOMAIN_OVERVIEW_CONTENT,
+        ...templatedFieldsArgs("spec", { kind: "domain-overview", refTarget: prdSlug }),
         "--no-ai",
       ],
       tmpDir,
@@ -177,8 +162,8 @@ describe("NEGATIVE — lore create spec --kind bogus --parent <prd> exits 4 (AC-
         "bogus",
         "--title",
         "Bogus Kind Spec",
-        "--content",
-        DOMAIN_OVERVIEW_CONTENT,
+        // reason: no template exists for the bogus kind, so the fields come from a real one; the refusal under test is the kind itself.
+        ...templatedFieldsArgs("spec", { kind: "feature", refTarget: prdSlug }),
         "--no-ai",
       ],
       tmpDir,
@@ -203,8 +188,7 @@ describe("BOUNDARY — lore create spec --kind design --parent <prd> still exits
         "design",
         "--title",
         "Design Kind Spec",
-        "--content",
-        DOMAIN_OVERVIEW_CONTENT,
+        ...templatedFieldsArgs("spec", { kind: "design", refTarget: prdSlug }),
         "--no-ai",
       ],
       tmpDir,

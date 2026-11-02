@@ -35,6 +35,7 @@ import { tmpdir } from "os";
 
 import { detachParentInDb } from "../helpers/detach-parent.js";
 import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface RunResult {
@@ -123,7 +124,7 @@ function writeBlueprintRequiringSpec(tmpDir: string): void {
 function createPrd(tmpDir: string, title: string): string {
   // reason: --no-ai bypasses AI generation (SPEC-017 default) so tree-check tests that
   // use create for setup are not affected by absence of the claude binary in CI.
-  const result = runLore(["create", "prd", "--title", title, "--no-ai"], tmpDir);
+  const result = runLore(["create", "prd", "--title", title, ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"], tmpDir);
   const match = result.stdout.match(/Slug:\s+(\S+)/);
   return match?.[1] ?? "";
 }
@@ -132,7 +133,7 @@ function createPrd(tmpDir: string, title: string): string {
  * Seed a spec document linked to a parent, return its slug.
  */
 function createSpec(tmpDir: string, title: string, parentSlug: string): string {
-  const result = runLore(["create", "spec", "--title", title,"--no-ai"], tmpDir);
+  const result = runLore(["create", "spec", "--title", title, ...templatedFieldsArgs("spec", { kind: "feature", refTarget: parentSlug }), "--no-ai"], tmpDir);
   const match = result.stdout.match(/Slug:\s+(\S+)/);
   return match?.[1] ?? "";
 }
@@ -146,7 +147,7 @@ function createOrphanAdr(tmpDir: string, title: string): string {
   // reason: a decision record can no longer be created without a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad
   // D6), so the orphan is made by detaching the parent of a filed one: the legacy-data shape the orphan check exists for.
   const result = runLore(
-    ["create", "adr", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", title, "--decision-status", "accepted", "--no-ai"],
+    ["create", "adr", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", title, "--decision-status", "accepted", ...templatedFieldsArgs("adr"), "--no-ai"],
     tmpDir,
   );
   const slug = result.stdout.match(/Slug:\s+(\S+)/)?.[1] ?? "";
@@ -417,7 +418,7 @@ describe("lore tree --orphans: orphans exist", () => {
     // reason: --no-ai bypasses AI generation (SPEC-017) so test setup is not blocked by claude binary.
     // reason: a plan can no longer be created without a parent (spec-documents-that-need-a-parent-are-refused-without-one-an-ad D6),
     // so the orphan is made by detaching the parent of a filed one.
-    const orphan = runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", "Orphaned Plan", "--no-ai"], tmpDir);
+    const orphan = runLore(["create", "plan", "--parent", ensureRequirementsDocSlug((a) => runLore(a, tmpDir)), "--title", "Orphaned Plan", ...templatedFieldsArgs("plan"), "--no-ai"], tmpDir);
     detachParentInDb(join(tmpDir, ".lore", "lore.db"), orphan.stdout.match(/Slug:\s+(\S+)/)?.[1] ?? "");
   });
 

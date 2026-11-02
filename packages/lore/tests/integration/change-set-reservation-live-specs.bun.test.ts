@@ -26,6 +26,7 @@ import { InMemoryStore } from "../../src/store/in-memory-store.js";
 import { CorpusWriteAuthority } from "../../src/service/foreign-corpus-write-guard.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { DECIDED_FLAGS } from "../helpers/decision-flags.js";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -35,6 +36,7 @@ interface RunResult {
 
 let dir = "";
 let liveRuleId = "";
+let prdSlug = "";
 
 async function lore(args: readonly string[]): Promise<RunResult> {
   return await runLoreInProcess(args, { cwd: dir, home: dir, env: { ...process.env, HOME: dir, EDITOR: "true" } });
@@ -49,7 +51,7 @@ async function loreOk(args: readonly string[]): Promise<string> {
 const text = (run: RunResult): string => `${run.stdout}\n${run.stderr}`;
 
 async function createSpec(title: string): Promise<string> {
-  const out = await loreOk(["create", "spec", "--title", title, "--kind", "feature", "--no-ai", "--content", "## Overview\n\nFixture body.", "--json"]);
+  const out = await loreOk(["create", "spec", "--title", title, "--kind", "feature", "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature", refTarget: prdSlug }), "--json"]);
   return (JSON.parse(out) as { data: { slug: string } }).data.slug;
 }
 
@@ -85,7 +87,7 @@ beforeAll(async () => {
     dir,
     ["workflow:", "  review:", "    judgment_required_types: []", "  gates:", "    spec-create:", "      enabled: false", "    spec-promote:", "      enabled: false", ""].join("\n"),
   );
-  const prd = (JSON.parse(await loreOk(["create", "prd", "--title", "Fixture PRD", "--no-ai", "--content", "## Overview\n\nFixture body.", "--json"])) as { data: { slug: string } }).data.slug;
+  const prd = prdSlug = (JSON.parse(await loreOk(["create", "prd", "--title", "Fixture PRD", "--no-ai", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--json"])) as { data: { slug: string } }).data.slug;
   liveRuleId = await ensureLiveRuleViaAsyncCli(
     asyncLoreRunnerFor(async (args, cwd) => await runLoreInProcess(args, { cwd, home: cwd, env: { ...process.env, HOME: cwd, EDITOR: "true" } }), dir),
     dir,

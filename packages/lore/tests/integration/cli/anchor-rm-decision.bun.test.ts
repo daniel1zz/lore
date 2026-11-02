@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { createPartyCorpus, type LoreRun, type Party, type PartyCorpus } from "../../helpers/known-party-corpus.js";
 
 import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
 const AGENT: Party = { kind: "run", run: "cc:dx1-agent" };
@@ -73,11 +74,11 @@ describe("AC-DX-1: an agent's anchor removal on a non-draft document carries a d
 
   beforeAll(() => {
     corpus = createPartyCorpus("dx1");
-    const makeSpec = (title: string): string => corpus.slugOf(corpus.setup(["create", "spec", "--title", title, "--no-ai", "--content", "## Goal\n\nbody"]));
+    const makeSpec = (title: string): string => corpus.slugOf(corpus.setup(["create", "spec", "--title", title, "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature" })]));
     spec = makeSpec("DX approved spec");
     draftSpec = makeSpec("DX draft spec");
     humanSpec = makeSpec("DX human spec");
-    knowledge = corpus.slugOf(corpus.setup(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => corpus.setup(a)), "--sub-type", "reference", "--title", "DX approved knowledge", "--no-ai", "--content", "a fact about things"]));
+    knowledge = corpus.slugOf(corpus.setup(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => corpus.setup(a)), "--sub-type", "reference", "--title", "DX approved knowledge", "--no-ai", ...templatedFieldsArgs("knowledge", { kind: "reference" })]));
     for (const slug of [spec, draftSpec, humanSpec, knowledge]) {
       corpus.setup(["anchor", "add", slug, "src/a.ts#Alpha", "src/b.ts#Beta"]);
     }

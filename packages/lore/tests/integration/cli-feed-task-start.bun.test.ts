@@ -58,6 +58,7 @@ import { citeSpecViaAsyncCli, asyncLoreRunnerFor } from "../helpers/cli-live-rul
 import { sessionActorFor, withSessionIdentity } from "../helpers/session-actor";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 
 import { ensureRequirementsDocSlugAsync } from "../helpers/parented-create.js";
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -143,7 +144,7 @@ async function createFullChain(dir: string): Promise<{
   taskSlug: string;
 }> {
   const prdResult = await runLore(
-    ["create", "prd", "--title", "T1 E2E PRD", "--content", "PRD body.", "--no-ai"],
+    ["create", "prd", "--title", "T1 E2E PRD", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"],
     dir,
   );
   expect(prdResult.exitCode).toBe(0);
@@ -155,8 +156,7 @@ async function createFullChain(dir: string): Promise<{
       "spec",
       "--title",
       "T1 E2E Spec",
-      "--content",
-      "## Overview\n\nSpec body for the task-start e2e.\n",
+      ...templatedFieldsArgs("spec", { kind: "feature", refTarget: prdSlug }),
       "--no-ai",
     ],
     dir,
@@ -198,7 +198,7 @@ async function createFullChain(dir: string): Promise<{
   expect(approveResult.exitCode).toBe(0);
 
   const planResult = await runLore(
-    ["create", "plan", "--title", "T1 E2E Plan", "--parent", specSlug, "--content", "Plan body.", "--no-ai"],
+    ["create", "plan", "--title", "T1 E2E Plan", "--parent", specSlug, ...planFieldsArgs(specSlug), "--no-ai"],
     dir,
   );
   expect(planResult.exitCode).toBe(0);
@@ -216,8 +216,7 @@ async function createFullChain(dir: string): Promise<{
       planSlug,
       "--plan-id",
       planSlug,
-      "--content",
-      "Estimate: M\nApproach: exercise the task-start pack.",
+      ...templatedFieldsArgs("task", { fields: { objective: "Estimate: M\nApproach: exercise the task-start pack." } }),
       "--anchor",
       "packages/lore/src/flows/task-feed-flow.ts",
       "--no-ai",
@@ -278,7 +277,7 @@ async function createFullChain(dir: string): Promise<{
  */
 async function createHandoffChain(dir: string): Promise<{ planSlug: string; handoffSlug: string }> {
   const planResult = await runLore(
-    ["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, dir,)), "--title", "T3 Resume Plan", "--content", "Plan body.", "--no-ai"],
+    ["create", "plan", "--parent", await ensureRequirementsDocSlugAsync((a) => runLore(a, dir,)), "--title", "T3 Resume Plan", ...templatedFieldsArgs("plan"), "--no-ai"],
     dir,
   );
   expect(planResult.exitCode).toBe(0);
@@ -321,7 +320,7 @@ async function createHandoffChain(dir: string): Promise<{ planSlug: string; hand
  */
 async function createPhaseChain(dir: string): Promise<{ planSlug: string; phaseSlug: string; taskTitle: string; planTitle: string }> {
   const prdResult = await runLore(
-    ["create", "prd", "--title", "AC-070-18 Phase PRD", "--content", "PRD body.", "--no-ai"],
+    ["create", "prd", "--title", "AC-070-18 Phase PRD", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"],
     dir,
   );
   expect(prdResult.exitCode).toBe(0);
@@ -329,7 +328,7 @@ async function createPhaseChain(dir: string): Promise<{ planSlug: string; phaseS
 
   const planTitle = "AC-070-18 Phase Plan";
   const planResult = await runLore(
-    ["create", "plan", "--title", planTitle, "--parent", prdSlug, "--content", "Plan body.", "--no-ai"],
+    ["create", "plan", "--title", planTitle, "--parent", prdSlug, ...planFieldsArgs(prdSlug), "--no-ai"],
     dir,
   );
   expect(planResult.exitCode).toBe(0);
@@ -348,8 +347,7 @@ async function createPhaseChain(dir: string): Promise<{ planSlug: string; phaseS
       planSlug,
       "--plan-id",
       planSlug,
-      "--content",
-      "Estimate: S\nApproach: migrate this task into a phase doc.",
+      ...templatedFieldsArgs("task", { fields: { objective: "Estimate: S\nApproach: migrate this task into a phase doc." } }),
       "--no-ai",
     ],
     dir,

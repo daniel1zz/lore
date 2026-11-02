@@ -34,6 +34,7 @@ import { extractEvidence, type DocRecord } from "@lore/core";
 import { createLiveApp } from "../../helpers/live-app.js";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process.js";
 import { seedTemplatesInApp } from "../../helpers/structured-docs.js";
+import { templatedExtra, templatedFieldsArgs } from "../../helpers/templated-create.js";
 import { actedStore, liveIo } from "../../live-invocation.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { startHttpServer } from "../../../src/adapters/http/index.js";
@@ -84,7 +85,7 @@ const scriptAc = (id: string, command: string) => ({
 
 async function createSpec(app: App, title: string, criteria: ReturnType<typeof scriptAc>[]): Promise<DocRecord> {
   const spec = await must(
-    app.corpusService.create({ type: "spec", title, content: "## Overview/Goal\n\nx\n\n## Scope\n\ny\n\n## Acceptance Criteria\n\nz" } as never),
+    app.corpusService.create({ type: "spec", title, extra: templatedExtra("spec", { kind: "feature" }) } as never),
     `spec ${title}`,
   );
   if (app.acService === undefined) throw new Error("acService not wired");
@@ -93,7 +94,7 @@ async function createSpec(app: App, title: string, criteria: ReturnType<typeof s
 }
 
 async function createAdhocViaCli(title: string, extraArgs: string[]) {
-  return await loreAsync(["create", "task", "--title", title, "--adhoc", "--kind", "check", "--no-ai", "--content", "body", "--json", ...extraArgs]);
+  return await loreAsync(["create", "task", "--title", title, "--adhoc", "--kind", "check", "--no-ai", ...templatedFieldsArgs("task"), "--json", ...extraArgs]);
 }
 
 function slugOf(stdout: string): string {
@@ -108,7 +109,7 @@ beforeAll(async () => {
   dbPath = join(dir, ".lore", "lore.db");
 
   await withApp(async (app) => {
-    prdSlug = (await must(app.corpusService.create({ type: "prd", title: "Governing PRD", content: "root" } as never), "prd")).slug;
+    prdSlug = (await must(app.corpusService.create({ type: "prd", title: "Governing PRD", extra: templatedExtra("prd", { refTarget: "problem" }) } as never), "prd")).slug;
     const first = await createSpec(app, "Spec First", [scriptAc("AC-X-1", "echo first-ran && echo 'AC-X-1 PASS'")]);
     const second = await createSpec(app, "Spec Second", [scriptAc("AC-X-1", "echo second-ran && echo 'AC-X-1 PASS'")]);
     const old = await createSpec(app, "Spec Old", [scriptAc("AC-Y-1", "echo y"), scriptAc("AC-Z-1", "echo z")]);
@@ -179,7 +180,7 @@ describe("create: the spec is required and checked on every route", () => {
   });
 
   it("NEGATIVE: --spec without --adhoc is a usage error (exit 2)", async () => {
-    const r = await loreAsync(["create", "task", "--title", "plan member?", "--kind", "code", "--no-ai", "--content", "b", "--spec", firstSpec]);
+    const r = await loreAsync(["create", "task", "--title", "plan member?", "--kind", "code", "--no-ai", ...templatedFieldsArgs("task"), "--spec", firstSpec]);
     expect(r.exitCode).toBe(2);
   });
 
@@ -202,7 +203,8 @@ describe("create over HTTP goes through the same service check", () => {
     httpDir = realpathSync(mkdtempSync(join(tmpdir(), "lore-adhoc-governing-spec-http-")));
     mkdirSync(join(httpDir, ".lore"), { recursive: true });
     app = createLiveApp(join(httpDir, ".lore", "lore.db"));
-    await must(app.corpusService.create({ type: "prd", title: "Http PRD", content: "root" } as never), "prd");
+    await seedTemplatesInApp(app);
+    await must(app.corpusService.create({ type: "prd", title: "Http PRD", extra: templatedExtra("prd", { refTarget: "problem" }) } as never), "prd");
     httpSpecSlug = (await createSpec(app, "Http Spec", [scriptAc("AC-X-1", "echo ok")])).slug;
     machineAuth = createMachineAuthStores({ baseDir: mkdtempSync(join(tmpdir(), "lore-adhoc-governing-spec-machine-")) });
     const boot = await machineAuth.apiKeyStore.create("dashboard-local", "admin");
@@ -225,7 +227,7 @@ describe("create over HTTP goes through the same service check", () => {
   });
 
   const post = (extra: Record<string, unknown>) =>
-    fetch(`${baseUrl}/api/docs`, { method: "POST", headers, body: JSON.stringify({ type: "task", title: "http adhoc", content: "b", extra: { kind: "check", ...extra } }) });
+    fetch(`${baseUrl}/api/docs`, { method: "POST", headers, body: JSON.stringify({ type: "task", title: "http adhoc", extra: { ...templatedExtra("task"), kind: "check", ...extra } }) });
 
   it("NEGATIVE: a scope with no spec is refused naming --spec", async () => {
     const res = await post({ adhoc: true, ac_scope: ["AC-X-1"] });
@@ -420,11 +422,11 @@ describe("lore assess refresh tasks record the criterion's spec and are reused b
   });
 
   it("STATE: the same id on two specs gets one refresh task per spec, each recording its own spec, each reused on a second run", async () => {
-    await must(app.corpusService.create({ type: "prd", title: "Refresh PRD", content: "root" } as never), "prd");
+    await must(app.corpusService.create({ type: "prd", title: "Refresh PRD", extra: templatedExtra("prd", { refTarget: "problem" }) } as never), "prd");
     const specA = await createSpec(app, "Refresh Spec A", [scriptAc("AC-RF-1", "echo a && echo 'AC-RF-1 PASS'")]);
     const specB = await createSpec(app, "Refresh Spec B", [scriptAc("AC-RF-1", "echo b && echo 'AC-RF-1 PASS'")]);
-    const planA = await must(app.corpusService.create({ type: "plan", title: "Plan A", parent_id: specA.id, content: "p" } as never), "plan a");
-    const planB = await must(app.corpusService.create({ type: "plan", title: "Plan B", parent_id: specB.id, content: "p" } as never), "plan b");
+    const planA = await must(app.corpusService.create({ type: "plan", title: "Plan A", parent_id: specA.id, extra: templatedExtra("plan") } as never), "plan a");
+    const planB = await must(app.corpusService.create({ type: "plan", title: "Plan B", parent_id: specB.id, extra: templatedExtra("plan") } as never), "plan b");
     const verify = app.verifyRunnerService;
     if (verify === undefined) throw new Error("verifyRunnerService is not wired");
     const refresher = () => createAppStaleRefresher(app, verify, { executionRoot: rdir, by: "agent:refresh-test", nowIso: () => new Date().toISOString() });

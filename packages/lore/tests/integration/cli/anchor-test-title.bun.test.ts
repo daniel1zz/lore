@@ -22,6 +22,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -87,7 +88,7 @@ writeFileSync(join(tmpDir, "src", "widget.ts"), "export function renderWidget() 
 
 const prdSlug = parseJsonSlug(
   runOrThrow(
-    ["create", "prd", "--title", "Title Anchor Root", "--no-ai", "--content", "## Overview\n\nBody.", "--json"],
+    ["create", "prd", "--title", "Title Anchor Root", "--no-ai", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--json"],
     tmpDir,
     "create prd",
   ).stdout,
@@ -96,7 +97,7 @@ const docSlug = parseJsonSlug(
   runOrThrow(
     [
       "create", "knowledge", "--title", "Widget Title Anchor Fixture", "--sub-type", "reference",
-      "--parent", prdSlug, "--no-ai", "--content", "## Fact\n\nBody.", "--json",
+      "--parent", prdSlug, "--no-ai", ...templatedFieldsArgs("knowledge", { kind: "reference" }), "--json",
     ],
     tmpDir,
     "create knowledge",

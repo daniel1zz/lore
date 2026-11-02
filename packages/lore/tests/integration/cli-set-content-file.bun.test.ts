@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -69,7 +70,7 @@ beforeEach(() => {
 
   // Create a prd to serve as test document target
   const prd = runLore(
-    ["create", "prd", "--title", "Test PRD", "--content", "initial body", "--no-ai"],
+    ["create", "prd", "--title", "Test PRD", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"],
     tmpDir,
   );
   if (prd.exitCode !== 0) {

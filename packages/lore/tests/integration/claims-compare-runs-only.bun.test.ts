@@ -37,6 +37,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { join } from "node:path";
 import { nameOfAgentRun, type RunId } from "@lore/core";
 import { createPartyCorpus, type LoreRun, type PartyCorpus } from "../helpers/known-party-corpus.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -89,7 +90,7 @@ describe("AC-HID-3: claims compare runs, never names", () => {
 
   function newTask(title: string, anchors: readonly string[] = []): string {
     const created = corpus.setup([
-      "create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai",
+      "create", "task", "--kind", "code", "--title", title, "--parent", plan, "--plan-id", plan, ...templatedFieldsArgs("task"), "--no-ai",
       ...anchors.flatMap((anchor) => ["--anchor", anchor]),
     ]);
     return corpus.slugOf(created);
@@ -97,8 +98,8 @@ describe("AC-HID-3: claims compare runs, never names", () => {
 
   beforeAll(() => {
     corpus = createPartyCorpus("hid3");
-    const prd = corpus.slugOf(corpus.setup(["create", "prd", "--title", "Claims PRD", "--content", "root", "--no-ai"]));
-    plan = corpus.slugOf(corpus.setup(["create", "plan", "--title", "Claims Plan", "--parent", prd, "--content", "x", "--no-ai"]));
+    const prd = corpus.slugOf(corpus.setup(["create", "prd", "--title", "Claims PRD", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"]));
+    plan = corpus.slugOf(corpus.setup(["create", "plan", "--title", "Claims Plan", "--parent", prd, ...planFieldsArgs(prd), "--no-ai"]));
     const started = corpus.lore(["session", "start", "--human", "dana"]);
     expect(started.exitCode).toBe(0);
     const match = started.stdout.match(/run (human:[0-9a-f]+)/);

@@ -91,6 +91,7 @@ import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 
 import { ensureRequirementsDocSlug } from "../helpers/parented-create.js";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 // ─── Path setup (mirrors tests/integration/claude-md-wiring.test.ts and
 // tests/integration/anchor-coverage-surface.test.ts) ────────────────────────
 
@@ -169,7 +170,7 @@ function writeEnforcedRoot(dir: string, body: string): void {
 /** Creates a `knowledge --sub-type reference` doc (no gate applies to knowledge creation) and returns its slug. */
 function createReferenceDoc(dir: string, title: string): string {
   const run = runLore(
-    ["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => runLore(a, dir)), "--sub-type", "reference", "--title", title, "--content", "## Overview", "--no-ai", "--json"],
+    ["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => runLore(a, dir)), "--sub-type", "reference", "--title", title, ...templatedFieldsArgs("knowledge", { kind: "reference" }), "--no-ai", "--json"],
     dir,
   );
   if (run.exitCode !== 0) {

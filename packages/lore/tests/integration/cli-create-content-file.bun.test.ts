@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -71,7 +72,7 @@ beforeEach(() => {
 
   // Create a PRD parent (required for spec children)
   const prdResult = runLore(
-    ["create", "prd", "--title", "Parent PRD", "--content", "PRD body", "--no-ai"],
+    ["create", "prd", "--title", "Parent PRD", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"],
     tmpDir,
   );
   if (prdResult.exitCode !== 0) {

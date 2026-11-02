@@ -24,6 +24,7 @@ import { join } from "node:path";
 import { docTypeSchema, getAllowedTransitions, isValidTransition } from "@lore/core";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../helpers/clean-tree-repo.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 import { archivePlanWithoutCascade } from "../helpers/archive-plan-legacy.js";
 import { runLoreInProcess } from "../helpers/run-lore-in-process.js";
 
@@ -108,7 +109,7 @@ async function versionsOf(slugs: string[]): Promise<number[]> {
 async function createTask(title: string): Promise<string> {
   counter += 1;
   const r = await runLore(
-    ["create", "task", "--kind", "code", "--title", `${title} ${counter}`, "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"],
+    ["create", "task", "--kind", "code", "--title", `${title} ${counter}`, "--parent", planSlug, "--plan-id", planSlug, ...templatedFieldsArgs("task"), "--no-ai"],
     tmpDir,
   );
   expect(r.exitCode, `${r.stdout}\n${r.stderr}`).toBe(0);
@@ -150,10 +151,10 @@ async function warmCommandModules(): Promise<void> {
   try {
     makeCleanTreeRepo(dir);
     await runLore(["init"], dir);
-    const prd = slugOf((await runLore(["create", "prd", "--title", "Warm PRD", "--content", "root", "--no-ai"], dir)).stdout);
-    const plan = slugOf((await runLore(["create", "plan", "--title", "Warm Plan", "--parent", prd, "--content", "x", "--no-ai"], dir)).stdout);
+    const prd = slugOf((await runLore(["create", "prd", "--title", "Warm PRD", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"], dir)).stdout);
+    const plan = slugOf((await runLore(["create", "plan", "--title", "Warm Plan", "--parent", prd, ...planFieldsArgs(prd), "--no-ai"], dir)).stdout);
     const task = slugOf(
-      (await runLore(["create", "task", "--kind", "code", "--title", "Warm Task", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"], dir)).stdout,
+      (await runLore(["create", "task", "--kind", "code", "--title", "Warm Task", "--parent", plan, "--plan-id", plan, ...templatedFieldsArgs("task"), "--no-ai"], dir)).stdout,
     );
     await runLore(["evidence", task, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"], dir);
     await runLore(["get", task, "--json"], dir);
@@ -183,10 +184,10 @@ beforeEach(async () => {
       "  done_contract:", '    install: "echo install-ok"', '    typecheck: "echo typecheck-ok"', '    test_file: "echo Ran 1 tests in {file}"', "",
     ].join("\n"),
   );
-  const prd = await runLore(["create", "prd", "--title", "Bulk PRD", "--content", "root", "--no-ai"], tmpDir);
+  const prd = await runLore(["create", "prd", "--title", "Bulk PRD", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"], tmpDir);
   expect(prd.exitCode).toBe(0);
   prdSlug = slugOf(prd.stdout);
-  const plan = await runLore(["create", "plan", "--title", "Bulk Plan", "--parent", prdSlug, "--content", "x", "--no-ai"], tmpDir);
+  const plan = await runLore(["create", "plan", "--title", "Bulk Plan", "--parent", prdSlug, ...planFieldsArgs(prdSlug), "--no-ai"], tmpDir);
   expect(plan.exitCode).toBe(0);
   planSlug = slugOf(plan.stdout);
 });
@@ -265,7 +266,7 @@ describe("bulk lifecycle: preview then apply", () => {
 
   it("preview then apply: close archives a plan with no open tasks and skips a task; open-tasks=0 selects only such plans", async () => {
     const busyTask = await createTask("Open work");
-    const emptyPlan = await runLore(["create", "plan", "--title", "Empty Plan", "--parent", prdSlug, "--content", "x", "--no-ai"], tmpDir);
+    const emptyPlan = await runLore(["create", "plan", "--title", "Empty Plan", "--parent", prdSlug, ...planFieldsArgs(prdSlug), "--no-ai"], tmpDir);
     const emptySlug = slugOf(emptyPlan.stdout);
     expect((await runLore(["set", emptySlug, "--status", "approved"], tmpDir)).exitCode).toBe(0);
     expect((await runLore(["set", planSlug, "--status", "approved"], tmpDir)).exitCode).toBe(0);
@@ -285,10 +286,10 @@ describe("bulk lifecycle: preview then apply", () => {
 
   it("preview then apply: --where plan=<slug|id> selects exactly that plan's tasks; an unknown plan exits 2 naming it", async () => {
     const own = [await createTask("Own one"), await createTask("Own two")];
-    const other = await runLore(["create", "plan", "--title", "Other Plan", "--parent", prdSlug, "--content", "x", "--no-ai"], tmpDir);
+    const other = await runLore(["create", "plan", "--title", "Other Plan", "--parent", prdSlug, ...planFieldsArgs(prdSlug), "--no-ai"], tmpDir);
     const otherSlug = slugOf(other.stdout);
     const foreign = await runLore(
-      ["create", "task", "--kind", "code", "--title", "Foreign", "--parent", otherSlug, "--plan-id", otherSlug, "--content", "x", "--no-ai"],
+      ["create", "task", "--kind", "code", "--title", "Foreign", "--parent", otherSlug, "--plan-id", otherSlug, ...templatedFieldsArgs("task"), "--no-ai"],
       tmpDir,
     );
     const foreignSlug = slugOf(foreign.stdout);
@@ -310,7 +311,7 @@ describe("bulk lifecycle: preview then apply", () => {
 
   it("preview then apply: an archived or deprecated document is never a candidate for any verb", async () => {
     const mk = async (title: string): Promise<string> =>
-      slugOf((await runLore(["create", "plan", "--title", title, "--parent", prdSlug, "--content", "x", "--no-ai"], tmpDir)).stdout);
+      slugOf((await runLore(["create", "plan", "--title", title, "--parent", prdSlug, ...planFieldsArgs(prdSlug), "--no-ai"], tmpDir)).stdout);
     const live = [await mk("Live A"), await mk("Live B")];
     const archived = [await mk("Gone A"), await mk("Gone B")];
     const deprecated = await mk("Dead C");
@@ -393,7 +394,7 @@ describe("bulk lifecycle: draft can be abandoned", () => {
   it("draft can be abandoned: bulk deprecate writes deprecated with the reason on a draft plan and a draft task", async () => {
     const task = await createTask("Abandon me");
     const plan = slugOf(
-      (await runLore(["create", "plan", "--title", "Abandoned Plan", "--parent", prdSlug, "--content", "x", "--no-ai"], tmpDir)).stdout,
+      (await runLore(["create", "plan", "--title", "Abandoned Plan", "--parent", prdSlug, ...planFieldsArgs(prdSlug), "--no-ai"], tmpDir)).stdout,
     );
     const applied = await bulkJson(["deprecate", plan, task, "--apply", "--reason", "no longer wanted"], tmpDir);
     expect(applied.exitCode).toBe(0);
