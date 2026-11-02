@@ -154,7 +154,7 @@ function createDoc(type: string, extraArgs: string[]): string {
   const kindFlag = type === "knowledge" ? "--sub-type" : type === "spec" ? "--kind" : undefined;
   const kind = kindFlag === undefined ? undefined : extraArgs[extraArgs.indexOf(kindFlag) + 1];
   const r = runLore(
-    ["create", type, "--title", `${type} fixture`, "--no-ai", ...templatedFieldsArgs(type, { kind }), ...(type === "task" ? ["--kind", "code"] : []), ...extraArgs],
+    ["create", type, "--title", `${type} fixture`, "--no-ai", ...templatedFieldsArgs(type, kind === undefined ? {} : { kind }), ...(type === "task" ? ["--kind", "code"] : []), ...extraArgs],
     tmpDir,
   );
   if (r.exitCode !== 0) throw new Error(`create ${type} failed: ${r.stderr}`);

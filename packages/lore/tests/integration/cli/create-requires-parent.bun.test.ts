@@ -257,7 +257,7 @@ describe("AC-PAR-1: the CLI exits exactly 4 and writes nothing", () => {
   for (const c of PARENTLESS_CASES) {
     it(`${c.label} without --parent: exit 4, stderr names --parent, the PRD and the spec, no row written`, () => {
       const before = corpus.counts();
-      const args = ["create", c.type, "--title", `CLI parentless ${c.label}`, "--no-ai", ...templatedFieldsArgs(c.type, { kind: c.subType })];
+      const args = ["create", c.type, "--title", `CLI parentless ${c.label}`, "--no-ai", ...templatedFieldsArgs(c.type, c.subType === undefined ? {} : { kind: c.subType })];
       if (c.subType !== undefined) args.push("--sub-type", c.subType);
       if (c.type === "adr") args.push("--decision-status", "proposed");
       const ran = corpus.lore(args, { kind: "run", run: "cc:create-requires-parent" });
@@ -275,7 +275,7 @@ describe("AC-PAR-1: the CLI exits exactly 4 and writes nothing", () => {
 
   it("knowledge, adr and plan WITH --parent exit 0", () => {
     for (const c of [PARENTLESS_CASES[0]!, PARENTLESS_CASES[PARENTLESS_CASES.length - 2]!, PARENTLESS_CASES[PARENTLESS_CASES.length - 1]!]) {
-      const args = ["create", c.type, "--title", `CLI parented ${c.label}`, "--no-ai", ...templatedFieldsArgs(c.type, { kind: c.subType }), "--parent", prdSlug];
+      const args = ["create", c.type, "--title", `CLI parented ${c.label}`, "--no-ai", ...templatedFieldsArgs(c.type, c.subType === undefined ? {} : { kind: c.subType }), "--parent", prdSlug];
       if (c.subType !== undefined) args.push("--sub-type", c.subType);
       if (c.type === "adr") args.push("--decision-status", "proposed");
       const ran = corpus.lore(args, { kind: "run", run: "cc:create-requires-parent" });
