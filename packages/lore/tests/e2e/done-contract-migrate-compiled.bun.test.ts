@@ -290,8 +290,8 @@ describe("AC-DCS1-23: the apply is all or nothing, one transaction, and converts
     fixtures.push(fixture);
     const plan = await fixture.createPlan("Per-task plan");
     const a =await seedLegacyTask(fixture, plan, { title: "A compilable", acScope: ["AC-FX-1"] });
-    const b = await seedLegacyTask(fixture, plan, { title: "B needs a red waiver", anchors: ["src/b.ts"], evidence: [evidenceRow("pass", false)] });
-    const c = await seedLegacyTask(fixture, plan, { title: "C anchors an absent test", anchors: ["tests/absent.test.ts"], evidence: [evidenceRow("expected-fail", true)] });
+    const b = await seedLegacyTask(fixture, plan, { title: "B needs a red waiver", kind: "code", anchors: ["src/b.ts"], evidence: [evidenceRow("pass", false)] });
+    const c = await seedLegacyTask(fixture, plan, { title: "C anchors an absent test", kind: "code", anchors: ["tests/absent.test.ts"], evidence: [evidenceRow("expected-fail", true)] });
     const all = [a, b, c];
     const before = await snapshotOf(fixture, all);
 
