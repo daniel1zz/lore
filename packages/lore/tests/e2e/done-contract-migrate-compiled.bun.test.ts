@@ -20,7 +20,9 @@
  */
 
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../../src/app";
 import { SQLiteStore } from "../../src/store/sqlite-store";
@@ -31,15 +33,17 @@ import { DoneContractService } from "../../src/service/done-contract-service";
 import { createRealDoneContractGit } from "../../src/adapters/real-done-contract-git";
 import { LIVE_TEST_RUN, actedStore, liveAmbient, liveWriteContext } from "../live-invocation";
 import { DONE_CONTRACT_CONFIG, makeDoneContractFixture, type DoneContractFixture } from "../helpers/done-contract-fixture";
-import { dropLoreConfigKey } from "../helpers/patch-lore-config";
+import { dropLoreConfigKey, patchLoreConfig } from "../helpers/patch-lore-config";
 import { templatedExtra } from "../helpers/templated-create";
 import { registerRunInDb } from "../helpers/test-run-identity";
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 240_000 });
 
 const fixtures: DoneContractFixture[] = [];
+const scratches: string[] = [];
 afterAll(() => {
   for (const fixture of fixtures) fixture.dispose();
+  for (const scratch of scratches) rmSync(scratch, { recursive: true, force: true });
 });
 
 const WAIVER = "7 steps -- with  spaces = and a dash";
@@ -53,6 +57,7 @@ interface Seed {
   readonly claim?: Record<string, unknown>;
   readonly claimAudit?: Record<string, unknown>;
   readonly evidence?: readonly Record<string, unknown>[];
+  readonly landing?: Record<string, unknown>;
 }
 
 /** One evidence row; `runner` marks it produced by a runner (a captured run), else it is a self-report. */
@@ -73,6 +78,7 @@ async function seedLegacyTask(fixture: DoneContractFixture, planSlug: string, se
       ...(seed.kind !== undefined ? { kind: seed.kind } : {}),
       ...(seed.claim !== undefined ? { claim: seed.claim } : {}),
       ...(seed.evidence !== undefined ? { verification_evidence: [...seed.evidence] } : {}),
+      ...(seed.landing !== undefined ? { landing: seed.landing } : {}),
     };
     const created = await app.corpusService.create({ type: "task", title: seed.title, parent_id: plan.value.doc.id, extra: { ...extra, ...templatedExtra("task", { fields: { objective: "Approved before the contract existed." } }) } });
     if (!created.ok) throw new Error(`seed: create failed: ${JSON.stringify(created.error)}`);
@@ -280,27 +286,59 @@ describe("AC-DCS1-22: the preview infers kinds, lists causes and corrections, an
 });
 
 describe("AC-DCS1-23: the apply is all or nothing, one transaction, and converts the old claims", () => {
-  it("AC-DCS1-23: with any gap it writes nothing, lists every gap per task with its command, and exits 4", async () => {
-    const legacy = await buildLegacy();
-    const { fixture, slugs } = legacy;
-    const all = Object.values(slugs);
+  it("AC-DCS1-23: with a gap the other tasks are still stored, every gapped task is listed with its command, the exit is 4, and claim and done of a gapped task refuse contract-missing", async () => {
+    const fixture = await makeDoneContractFixture();
+    fixtures.push(fixture);
+    const plan = await fixture.createPlan("Per-task plan");
+    const a =await seedLegacyTask(fixture, plan, { title: "A compilable", acScope: ["AC-FX-1"] });
+    const b = await seedLegacyTask(fixture, plan, { title: "B needs a red waiver", kind: "code", anchors: ["src/b.ts"], evidence: [evidenceRow("pass", false)] });
+    const c = await seedLegacyTask(fixture, plan, { title: "C anchors an absent test", kind: "code", anchors: ["tests/absent.test.ts"], evidence: [evidenceRow("expected-fail", true)] });
+    const all = [a, b, c];
     const before = await snapshotOf(fixture, all);
 
-    const refused = await fixture.run(["migrate", "done-contract", "--apply"]);
-    expect(refused.exitCode, refused.stdout).toBe(4);
-    // Every task with a gap is named, each with its remedy (one message, not the first gap only).
-    for (const slug of [slugs.needsWaiver, slugs.goneBranch, slugs.badCheck, slugs.liveBranch]) expect(refused.stderr, slug).toContain(slug);
-    expect(refused.stderr).toContain("done-contract-migration-gaps");
-    expect(refused.stderr).toContain(`--red-waiver ${slugs.needsWaiver}=`);
-    expect(refused.stderr).toContain(`--tip ${slugs.goneBranch}=`);
-    expect(refused.stderr).toContain(`lore approve ${slugs.badCheck}`);
-    expect(refused.stderr).toContain("live-branch-claim");
+    const first = await fixture.run(["migrate", "done-contract", "--apply"]);
+    expect(first.exitCode, first.stderr + first.stdout).toBe(4);
+    const text = `${first.stdout}\n${first.stderr}`;
+    expect(text).toContain(`--red-waiver ${b}=`);
+    expect(text).toContain("anchor-absent");
+    expect(text).toContain("tests/absent.test.ts");
+    expect(text).toContain(`lore anchor rm ${c} tests/absent.test.ts`);
+    expect(text).toContain("--creates");
 
-    // False green guarded: a partial apply passes a one-task fixture. Here compilable tasks sit beside the gaps: none is stored,
-    // the no-branch claim is still held, and every version is unchanged.
-    expect(await snapshotOf(fixture, all)).toEqual(before);
-    expect((await fixture.readTask(slugs.check)).extra["done_contract"]).toBeUndefined();
-    expect((await fixture.readTask(slugs.noBranch)).extra["claim"]).toBeDefined();
+    // False green guarded: the all-or-nothing apply stores nothing for A while B and C are gapped; A is claimable after the run.
+    expect((await fixture.readTask(a)).extra["done_contract"]).toBeDefined();
+    expect((await fixture.readTask(b)).extra["done_contract"]).toBeUndefined();
+    expect((await fixture.readTask(c)).extra["done_contract"]).toBeUndefined();
+    expect((await snapshotOf(fixture, [b, c]))[b]).toEqual(before[b]);
+    expect((await snapshotOf(fixture, [b, c]))[c]).toEqual(before[c]);
+    const afterA = await snapshotOf(fixture, [a]);
+    // A check task is never claimed (AC-DCS1-21), so "A is usable" is its stored contract and its unchanged status.
+    expect((await fixture.readTask(a)).status).toBe("approved");
+
+    for (const verb of [["claim", b], ["done", b], ["claim", c], ["done", c]]) {
+      const refused = await fixture.run(verb);
+      expect(refused.exitCode, `${verb.join(" ")}: ${refused.stderr}`).toBe(4);
+      expect(refused.stderr, verb.join(" ")).toContain("contract-missing");
+      expect(refused.stderr, verb.join(" ")).toContain("lore migrate done-contract");
+    }
+
+    // A decision for a task that does not list that gap is refused; nothing is written.
+    const notNeeded = await fixture.run(["migrate", "done-contract", "--apply", "--red-waiver", `${a}=not needed`]);
+    expect(notNeeded.exitCode, notNeeded.stderr).toBe(4);
+    expect(notNeeded.stderr).toContain("decision-not-needed");
+
+    // The waiver and the anchor removal fill both gaps: B and C are stored and A's contract version is unchanged.
+    await fixture.mustRun(["anchor", "rm", c, "tests/absent.test.ts"]);
+    const second = await fixture.run(["migrate", "done-contract", "--apply", "--red-waiver", `${b}=${WAIVER}`]);
+    expect(second.exitCode, second.stderr + second.stdout).toBe(0);
+    expect((await fixture.readTask(b)).extra["done_contract"]).toBeDefined();
+    expect((await fixture.readTask(c)).extra["done_contract"]).toBeDefined();
+    expect((await snapshotOf(fixture, [a]))[a]?.version).toBe(afterA[a]?.version);
+
+    const stored = await snapshotOf(fixture, all);
+    const third = await fixture.run(["migrate", "done-contract", "--apply"]);
+    expect(third.exitCode, third.stderr + third.stdout).toBe(0);
+    expect(await snapshotOf(fixture, all)).toEqual(stored);
   });
 
   it("AC-DCS1-23: a decision outside the three kinds, a blank reason or an unresolvable commit exits 2; a decision for a task that does not list that gap exits 4 decision-not-needed; nothing is written", async () => {
@@ -442,5 +480,177 @@ describe("AC-DCS1-23: the apply is all or nothing, one transaction, and converts
       honest.close();
     }
     for (const slug of slugs) expect((await fixture.readTask(slug)).extra["done_contract"], slug).toBeDefined();
+  });
+});
+
+// ───────────────────────────── AC-DCF-3: landed tasks migrate at their landing, one union run ─────────────────────────────
+
+interface LandedWorld {
+  readonly fixture: DoneContractFixture;
+  readonly log: string;
+  readonly a: string;
+  readonly b: string;
+  /** The landing commit L (the merge of the branch into main). */
+  readonly landing: string;
+  /** Main's tip after an unrelated commit followed L. */
+  readonly main: string;
+}
+
+const gitC = (dir: string, args: readonly string[]): string => execFileSync("git", ["-c", "user.email=f@example.invalid", "-c", "user.name=fixture", ...args], { cwd: dir, encoding: "utf8" }).trim();
+
+/** The oracle commands: each appends one line to a log OUTSIDE the repository; a test file named *fail* fails. */
+function logCommandsAt(log: string): { install: string; typecheck: string; test_file: string } {
+  return {
+    install: `sh -c 'echo install >> ${log}'`,
+    typecheck: `sh -c 'echo typecheck >> ${log}; echo typecheck-ok'`,
+    test_file: `sh -c 'echo "test $0" >> ${log}; case "$0" in *fail*) echo failing; exit 1;; esac; echo Ran 1 tests in "$0"' {file}`,
+  };
+}
+
+/**
+ * Two approved code tasks without a contract whose one branch landed on main at L, each holding pass rows recorded only on the
+ * pre-landing branch commit, then an unrelated commit on main (so main's tip is no longer L). Both anchor tests/shared.test.ts.
+ */
+async function buildLandedWorld(bTest = "tests/b.test.ts"): Promise<LandedWorld> {
+  const scratch = mkdtempSync(join(tmpdir(), "dcf3-"));
+  scratches.push(scratch);
+  const log = join(scratch, "runs.log");
+  writeFileSync(log, "");
+  const fixture = await makeDoneContractFixture();
+  fixtures.push(fixture);
+  fixture.setDoneContractConfig(logCommandsAt(log));
+  patchLoreConfig(fixture.dir, { workflow: { gates: { "plan-close": { enabled: false }, "plan-promote": { enabled: false } }, integrate: { floor_command: "true" } } });
+  const plan = await fixture.createPlan("Landed plan");
+  const base = fixture.git(["rev-parse", "HEAD"]);
+  gitC(fixture.dir, ["checkout", "-q", "-b", "feat-landed"]);
+  mkdirSync(join(fixture.dir, "tests"), { recursive: true });
+  for (const file of ["tests/shared.test.ts", "tests/a.test.ts", bTest]) writeFileSync(join(fixture.dir, file), `// ${file}\n`);
+  gitC(fixture.dir, ["add", "-A"]);
+  gitC(fixture.dir, ["commit", "-q", "-m", "work"]);
+  const branchHead = fixture.git(["rev-parse", "HEAD"]);
+  gitC(fixture.dir, ["checkout", "-q", "main"]);
+  gitC(fixture.dir, ["merge", "-q", "--no-ff", "-m", "merge(feat-landed)", "feat-landed"]);
+  const landing = fixture.git(["rev-parse", "HEAD"]);
+  writeFileSync(join(fixture.dir, "unrelated.txt"), "later work on main\n");
+  gitC(fixture.dir, ["add", "-A"]);
+  gitC(fixture.dir, ["commit", "-q", "-m", "unrelated commit after the landing"]);
+  const main = fixture.git(["rev-parse", "HEAD"]);
+
+  const landingRecord = { branch: "feat-landed", branch_head: branchHead, main_before: base, main_after: landing, landing_commit: landing, recorded_at: NOW, kind: "commits", start_head: base, tip: branchHead, integration_head: landing, measured_at: NOW };
+  const preLandingPass = (file: string): Record<string, unknown> => ({
+    oracle: "test",
+    command: logCommandsAt(log).test_file.replace("{file}", file),
+    result: "pass",
+    recorded_at: NOW,
+    recorded_by: "agent:legacy",
+    capture_source: "runner",
+    attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 5, timed_out: false, head_sha: branchHead },
+  });
+  const seed = (title: string, files: readonly string[]): Promise<string> =>
+    seedLegacyTask(fixture, plan, {
+      title,
+      anchors: files,
+      landing: landingRecord,
+      claimAudit: { branch: "feat-landed", worktree: "/nonexistent/landed-wt", base_sha: base },
+      evidence: [evidenceRow("expected-fail", true), ...files.map(preLandingPass)],
+    });
+  const a = await seed("Landed A", ["tests/shared.test.ts", "tests/a.test.ts"]);
+  const b = await seed("Landed B", ["tests/shared.test.ts", bTest]);
+  return { fixture, log, a, b, landing, main };
+}
+
+const runLines = (world: LandedWorld): string[] => readFileSync(world.log, "utf8").split("\n").filter((line) => line !== "");
+const countRuns = (world: LandedWorld, line: string): number => runLines(world).filter((candidate) => candidate === line).length;
+
+interface StoredContract {
+  readonly compiled_at_commit: string;
+  readonly oracles: readonly { id: string }[];
+}
+
+interface Evidence {
+  readonly command: string;
+  readonly result: string;
+  readonly recorded_by: string;
+  readonly attestation?: { head_sha?: string; recorded_at_landing?: string };
+}
+
+const evidenceOf = async (world: LandedWorld, slug: string): Promise<Evidence[]> => ((await world.fixture.readTask(slug)).extra["verification_evidence"] ?? []) as Evidence[];
+
+describe("AC-DCF-3: landed tasks migrate at their landing and are attested by one union run on main", () => {
+  it("AC-DCF-3: compiles both contracts at L, runs the union once on main's tip, records integrate rows of that landing on both tasks, and done archives each with no further run", async () => {
+    const world = await buildLandedWorld();
+    const { fixture, a, b, landing, main } = world;
+
+    // The preview writes nothing and runs no oracle.
+    const preview = await fixture.run(["migrate", "done-contract"]);
+    expect(preview.exitCode, preview.stderr + preview.stdout).toBe(0);
+    expect(runLines(world)).toEqual([]);
+
+    const applied = await fixture.run(["migrate", "done-contract", "--apply"]);
+    expect(applied.exitCode, applied.stderr + applied.stdout).toBe(0);
+
+    for (const slug of [a, b]) {
+      const task = await fixture.readTask(slug);
+      const contract = task.extra["done_contract"] as StoredContract;
+      // The #615 state: compiling at the migration commit leaves every earlier row stale; the contract is compiled at L instead.
+      expect(contract.compiled_at_commit, slug).toBe(landing);
+      expect(task.status, slug).toBe("approved");
+    }
+    // One run per distinct oracle, counted from the runner log: the shared test file ran once for two tasks, the install once.
+    expect(countRuns(world, "test tests/shared.test.ts")).toBe(1);
+    expect(countRuns(world, "test tests/a.test.ts")).toBe(1);
+    expect(countRuns(world, "test tests/b.test.ts")).toBe(1);
+    expect(countRuns(world, "typecheck")).toBe(1);
+    expect(countRuns(world, "install")).toBe(1);
+
+    // Rows: integrate rows of landing L, bound to the tree of main's newest commit (not L), on both tasks.
+    for (const slug of [a, b]) {
+      const fresh = (await evidenceOf(world, slug)).filter((row) => row.attestation?.recorded_at_landing === landing);
+      expect(fresh.length, slug).toBe(3);
+      expect(fresh.every((row) => row.result === "pass" && row.attestation?.head_sha === main), slug).toBe(true);
+    }
+
+    // done of each exits 0 and runs nothing more.
+    const runsBefore = runLines(world).length;
+    for (const slug of [a, b]) {
+      const done = await fixture.run(["done", slug]);
+      expect(done.exitCode, `${slug}: ${done.stderr}${done.stdout}`).toBe(0);
+      expect((await fixture.readTask(slug)).status).toBe("archived");
+    }
+    expect(runLines(world).length).toBe(runsBefore);
+  });
+
+  it("AC-DCF-3: two migrations started together run the union once; the other waits its turn, runs no oracle and exits 0", async () => {
+    const world = await buildLandedWorld();
+    const results = await Promise.all([world.fixture.run(["migrate", "done-contract", "--apply"]), world.fixture.run(["migrate", "done-contract", "--apply"])]);
+    for (const result of results) expect(result.exitCode, result.stderr + result.stdout).toBe(0);
+    expect(countRuns(world, "test tests/shared.test.ts")).toBe(1);
+    expect(countRuns(world, "typecheck")).toBe(1);
+    expect(countRuns(world, "install")).toBe(1);
+    for (const slug of [world.a, world.b]) expect((await evidenceOf(world, slug)).filter((row) => row.attestation?.recorded_at_landing === world.landing).length, slug).toBe(3);
+    // A later run finds nothing to attest.
+    const again = await world.fixture.run(["migrate", "done-contract", "--apply"]);
+    expect(again.exitCode, again.stderr + again.stdout).toBe(0);
+    expect(countRuns(world, "install")).toBe(1);
+  });
+
+  it("AC-DCF-3: a failing oracle leaves its task unarchived and the migration exits 4 naming the task and oracle; the other task is stored and doneable", async () => {
+    const world = await buildLandedWorld("tests/b-fail.test.ts");
+    const { fixture, a, b } = world;
+    const applied = await fixture.run(["migrate", "done-contract", "--apply"]);
+    expect(applied.exitCode, applied.stderr + applied.stdout).toBe(4);
+    const text = `${applied.stdout}\n${applied.stderr}`;
+    expect(text).toContain(b);
+    expect(text).toContain("test:tests/b-fail.test.ts");
+
+    expect((await fixture.readTask(a)).extra["done_contract"]).toBeDefined();
+    expect((await fixture.readTask(b)).extra["done_contract"]).toBeDefined();
+    expect((await evidenceOf(world, b)).filter((row) => row.attestation?.recorded_at_landing === world.landing)).toEqual([]);
+
+    const doneA = await fixture.run(["done", a]);
+    expect(doneA.exitCode, doneA.stderr + doneA.stdout).toBe(0);
+    const doneB = await fixture.run(["done", b]);
+    expect(doneB.exitCode, doneB.stderr).toBe(4);
+    expect((await fixture.readTask(b)).status).not.toBe("archived");
   });
 });
