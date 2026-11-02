@@ -1147,7 +1147,9 @@ export async function resolveEffectiveClaimStaleness(
     return ok(isClaimStale(claim, nowIso, ttlMinutes));
   }
   const recordedWorktree = claim.orphaned_dirty?.worktree ?? claim.worktree;
-  const cleanliness = measureWorktreeCleanliness(recordedWorktree);
+  const measuredWorktree = await resolveWorkingCopyOfRun(store, recordedWorktree, run);
+  if (!measuredWorktree.ok) return measuredWorktree;
+  const cleanliness = measureWorktreeCleanliness(measuredWorktree.value);
   const liveness: ClaimRunLiveness = {
     runEnded,
     // reason: only a MEASURED clean worktree counts as clean — not-measured is `null`, never `true` (BR-1057).
