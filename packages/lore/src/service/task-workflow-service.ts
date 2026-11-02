@@ -1082,6 +1082,31 @@ export function buildClaimConflictError(
 }
 
 /**
+ * The directory to measure for a claim whose recorded `worktree` may be a BRANCH NAME (`lore claim --worktree <branch>`, the
+ * form every harness worktree claim takes, #633). A relative name cannot be measured (there is no base to resolve it against),
+ * which left every such claim "not measured" and so protected until its lease aged out. The holder run's own recorded checkout
+ * directory (`runs.worktree`, set at registration) is where that branch is checked out, so it stands in for the name.
+ * An absolute path, or a claim with no run or a run that recorded no directory, is returned as recorded (still unmeasurable
+ * and so still protected: never read as clean).
+ *
+ * @param store - run lifecycle lookup source (`listRunLifecycles`).
+ * @param recorded - the claim's recorded worktree (path or branch name), or `undefined`.
+ * @param run - the claim's `harness_run`, or `null`.
+ * @returns ok(directory to measure); err when the run lookup fails.
+ */
+async function resolveWorkingCopyOfRun(
+  store: StoreInterface,
+  recorded: string | undefined,
+  run: string | null,
+): Promise<Result<string | undefined, LoreError>> {
+  if (recorded === undefined || isAbsolute(recorded) || run === null) return ok(recorded);
+  const lifecycles = await store.listRunLifecycles();
+  if (!lifecycles.ok) return lifecycles;
+  const holder = lifecycles.value.find((candidate) => candidate.id === run);
+  return ok(holder?.process.worktree ?? recorded);
+}
+
+/**
  * The claim's effective staleness: TTL age, the holder run's end, and an `orphaned_dirty` mark
  * (BR-1058), via core's pure {@link isClaimStaleForRun}. The git and run lookups happen only when the
  * claim could be affected by them (an `orphaned_dirty` mark, or a holder run that has ended).
@@ -1121,7 +1146,8 @@ export async function resolveEffectiveClaimStaleness(
   if (claim.orphaned_dirty === undefined && !runEnded) {
     return ok(isClaimStale(claim, nowIso, ttlMinutes));
   }
-  const cleanliness = measureWorktreeCleanliness(claim.orphaned_dirty?.worktree ?? claim.worktree);
+  const recordedWorktree = claim.orphaned_dirty?.worktree ?? claim.worktree;
+  const cleanliness = measureWorktreeCleanliness(recordedWorktree);
   const liveness: ClaimRunLiveness = {
     runEnded,
     // reason: only a MEASURED clean worktree counts as clean — not-measured is `null`, never `true` (BR-1057).
