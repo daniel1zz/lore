@@ -32,6 +32,7 @@ import { createRealDoneContractGit } from "../../src/adapters/real-done-contract
 import { LIVE_TEST_RUN, actedStore, liveAmbient, liveWriteContext } from "../live-invocation";
 import { DONE_CONTRACT_CONFIG, makeDoneContractFixture, type DoneContractFixture } from "../helpers/done-contract-fixture";
 import { dropLoreConfigKey } from "../helpers/patch-lore-config";
+import { templatedExtra } from "../helpers/templated-create";
 import { registerRunInDb } from "../helpers/test-run-identity";
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 240_000 });
@@ -73,7 +74,7 @@ async function seedLegacyTask(fixture: DoneContractFixture, planSlug: string, se
       ...(seed.claim !== undefined ? { claim: seed.claim } : {}),
       ...(seed.evidence !== undefined ? { verification_evidence: [...seed.evidence] } : {}),
     };
-    const created = await app.corpusService.create({ type: "task", title: seed.title, content: "## Task\n\nApproved before the contract existed.\n", parent_id: plan.value.doc.id, extra });
+    const created = await app.corpusService.create({ type: "task", title: seed.title, parent_id: plan.value.doc.id, extra: { ...extra, ...templatedExtra("task", { fields: { objective: "Approved before the contract existed." } }) } });
     if (!created.ok) throw new Error(`seed: create failed: ${JSON.stringify(created.error)}`);
     const moved = await app.corpusService.writeDoc({ doc: created.value, patch: { status: "approved" }, action: "update", auditAction: "update", lock: "none" });
     if (!moved.ok) throw new Error(`seed: approve-write failed: ${JSON.stringify(moved.error)}`);

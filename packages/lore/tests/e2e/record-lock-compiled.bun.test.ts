@@ -69,7 +69,7 @@ function parseSlug(stdout: string): string {
 /** A spec with one cited criterion, approved — the state the record-edit gate locks. */
 function createApprovedSpec(title: string, acId: string): string {
   const slug = parseSlug(
-    mustLore(["create", "spec", "--title", title, "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", fields: { architecture: "Original body." } }), "--no-ai"]),
+    mustLore(["create", "spec", "--title", title, "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: prdSlug, fields: { architecture: "Original body." } }), "--no-ai"]),
   );
   mustLore([
     "ac", "add", slug, acId, "--statement", `${title} behaves as stated.`,
@@ -85,6 +85,7 @@ function docIdOf(slug: string): string {
   return payload.data.doc.id;
 }
 
+let prdSlug = "";
 let lockedSpec = "";
 let newerSpec = "";
 let reopenCliSpec = "";
@@ -95,14 +96,14 @@ describe("record-edit gate and read surfaces, compiled binary (AC-DR-5)", () => 
     assertFreshBinary(LORE_BIN, [join(PROJECT_ROOT, "packages", "lore", "src"), join(PROJECT_ROOT, "packages", "core", "src")]);
     dir = mkdtempSync(join(tmpdir(), "lore-record-lock-e2e-"));
     mustLore(["init"]);
-    mustLore(["create", "prd", "--title", "Record Lock PRD", ...templatedFieldsArgs("prd"), "--no-ai"]);
+    prdSlug = parseSlug(mustLore(["create", "prd", "--title", "Record Lock PRD", ...templatedFieldsArgs("prd"), "--no-ai"]));
     // SPEC-103 M2's review-judgment checkpoint defaults spec/adr into `judgment_required_types`; disabled so the
     // approvals below are fixture steps, not the behaviour under test.
     patchLoreConfig(dir, { workflow: { review: { judgment_required_types: [] } } });
 
     lockedSpec = createApprovedSpec("Locked Spec", "AC-LK-1");
     newerSpec = parseSlug(
-      mustLore(["create", "spec", "--title", "Newer Spec", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", fields: { architecture: "Newer." } }), "--no-ai"]),
+      mustLore(["create", "spec", "--title", "Newer Spec", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: prdSlug, fields: { architecture: "Newer." } }), "--no-ai"]),
     );
     mustLore(["link", newerSpec, lockedSpec, "--type", "relates-to"]);
     reopenCliSpec = createApprovedSpec("Reopen Cli Spec", "AC-RC-1");
@@ -113,7 +114,7 @@ describe("record-edit gate and read surfaces, compiled binary (AC-DR-5)", () => 
   });
 
   it("lore set (fields) on an approved spec exits exactly 4 naming 'locked record' and 'lore reopen'", () => {
-    const r = runLore(["set", lockedSpec, ...templatedFieldsArgs("spec", { kind: "tech", fields: { architecture: "Rewritten." } })]);
+    const r = runLore(["set", lockedSpec, ...templatedFieldsArgs("spec", { kind: "tech", refTarget: prdSlug, fields: { architecture: "Rewritten." } })]);
     expect(r.exitCode).toBe(4);
     expect(r.stderr).toContain("locked record");
     expect(r.stderr).toContain("lore reopen");
@@ -139,7 +140,7 @@ describe("record-edit gate and read surfaces, compiled binary (AC-DR-5)", () => 
   });
 
   it("lore set --correction exits 0, then get shows Standing: record, locked (approved) and Corrections: 1", () => {
-    const set = runLore(["set", lockedSpec, ...templatedFieldsArgs("spec", { kind: "tech", fields: { architecture: "Original body, typo fixed." } }), "--correction", "typo", ...DECIDED_FLAGS]);
+    const set = runLore(["set", lockedSpec, ...templatedFieldsArgs("spec", { kind: "tech", refTarget: prdSlug, fields: { architecture: "Original body, typo fixed." } }), "--correction", "typo", ...DECIDED_FLAGS]);
     expect(set.exitCode, set.stderr).toBe(0);
     const out = mustLore(["get", lockedSpec]);
     expect(out).toContain("Standing: record");

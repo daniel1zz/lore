@@ -256,7 +256,7 @@ async function createPrd(dir: string, title: string): Promise<string> {
  *  so it resolves NO domain doc (historically §D6; irrelevant since BR-984). */
 async function createSpec(dir: string, prdSlug: string, title: string): Promise<string> {
   const r = await runLore(
-    ["create", "spec", "--title", title, ...templatedFieldsArgs("spec", { kind: "tech" }), "--no-ai"],
+    ["create", "spec", "--title", title, ...templatedFieldsArgs("spec", { kind: "feature", refTarget: prdSlug }), "--no-ai"],
     dir,
   );
   if (r.exitCode !== 0) throw new Error(`create spec failed: ${r.stderr}`);
@@ -306,8 +306,7 @@ async function createTask(dir: string, planSlug: string, title: string, kind: "c
       planSlug,
       "--ac-scope",
       acId,
-      "--content",
-      "## Task\n\nbody",
+      ...templatedFieldsArgs("task"),
       "--no-ai",
     ],
     dir,

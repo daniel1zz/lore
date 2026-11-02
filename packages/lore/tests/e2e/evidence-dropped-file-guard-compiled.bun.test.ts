@@ -191,7 +191,7 @@ beforeAll(async () => {
       "--title", "Dropped File Guard Task",
       "--kind", "code",
       "--plan-id", parseSlug(plan.stdout),
-      "--content", "## Task\n\nbody",
+      ...templatedFieldsArgs("task"),
       "--no-ai",
     ],
     dir,

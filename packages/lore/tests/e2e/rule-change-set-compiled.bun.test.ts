@@ -96,9 +96,9 @@ class World {
   async init(): Promise<this> {
     await this.must(["init"]);
     const prd = await this.slug(["create", "prd", "--title", "Change set PRD", ...templatedFieldsArgs("prd"), "--no-ai"]);
-    const root = await this.slug(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "CS Root"]);
-    this.branch = await this.slug(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "CS Branch"]);
-    this.leaf = await this.slug(["baseline", "add", this.branch, "--node", "leaf", "--label", "Leaf", "--title", "CS Leaf"]);
+    const root = await this.slug(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "CS Root", ...templatedFieldsArgs("baseline", { kind: "root" })]);
+    this.branch = await this.slug(["baseline", "add", root, "--node", "branch", "--label", "Branch", "--title", "CS Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })]);
+    this.leaf = await this.slug(["baseline", "add", this.branch, "--node", "leaf", "--label", "Leaf", "--title", "CS Leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })]);
     await this.must(["rule", "add", this.leaf, "--statement", "A live rule that already describes the product", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "e1"]);
     patchLoreConfig(this.dir, {
       workflow: {
@@ -116,7 +116,7 @@ class World {
   }
 
   async spec(title: string): Promise<string> {
-    return await this.slug(["create", "spec", "--title", title, "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech" }), "--no-ai"]);
+    return await this.slug(["create", "spec", "--title", title, "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: this.leaf }), "--no-ai"]);
   }
 
   /** `lore rule propose <spec> add ...` -> the reserved id. */
@@ -133,7 +133,7 @@ class World {
 
   async plan(spec: string, acId: string): Promise<{ plan: string; task: string }> {
     const plan = await this.slug(["create", "plan", "--title", `Plan of ${spec}`, "--parent", spec, ...planFieldsArgs(spec), "--no-ai"]);
-    const task = await this.slug(["create", "task", "--title", `Task of ${spec}`, "--kind", "code", "--plan-id", plan, "--ac-scope", acId, "--content", "## Task\n\nbody", "--no-ai"]);
+    const task = await this.slug(["create", "task", "--title", `Task of ${spec}`, "--kind", "code", "--plan-id", plan, "--ac-scope", acId, ...templatedFieldsArgs("task"), "--no-ai"]);
     return { plan, task };
   }
 
