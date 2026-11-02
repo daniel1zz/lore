@@ -17,12 +17,11 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { endHumanSession, knownPartyEnv, startHumanSession } from "../e2e/known-party.js";
-import { templatedFieldsArgs } from "../../../lore/tests/helpers/templated-create.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 const ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
@@ -37,10 +36,28 @@ function lore(args: string[], cwd: string, env: NodeJS.ProcessEnv): { status: nu
   return { status: proc.status, stderr: proc.stderr };
 }
 
-const CREATE = ["create", "prd", "--title", "Known party probe", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--json"];
+// The filled prd template (fields + dimension answers). Inlined, not imported from packages/lore/tests: this project's
+// tsconfig must not pull packages/lore sources (they need bun types and fall outside its rootDir).
+const dimension = (id: string, refs: string[] = []) => ({ id, status: "handled", answer: `Answered for the ${id} dimension in a test fixture.`, refs });
+const PRD_FIELDS = {
+  fields: {
+    problem: { statement: "sample", evidence: [{ claim: "sample", source: "sample" }] },
+    users: [{ role: "sample", need: "sample" }],
+    goals: { statement: "sample", measure: "sample" },
+    requirements: [{ id: "sample", text: "sample" }],
+    non_goals: [],
+    risks: [],
+  },
+  dimensions: [dimension("need-evidence"), dimension("measurable-success"), dimension("out-of-scope"), dimension("users-and-adoption"), dimension("dependencies", ["problem"])],
+};
+const FIELDS_DIR = mkdtempSync(join(tmpdir(), "lore-e2e-kp-fields-"));
+const FIELDS_FILE = join(FIELDS_DIR, "prd-fields.json");
+writeFileSync(FIELDS_FILE, JSON.stringify(PRD_FIELDS));
+
+const CREATE = ["create", "prd", "--title", "Known party probe", "--fields-file", FIELDS_FILE, "--json"];
 
 describe("e2e known-party helper", () => {
-  const dirs: string[] = [];
+  const dirs: string[] = [FIELDS_DIR];
   let stateHome: string;
   let corpus: string;
 
