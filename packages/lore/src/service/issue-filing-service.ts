@@ -86,9 +86,14 @@ function bodyOf(cause: RootCause, findings: readonly FailedFinding[]): string {
     `Dimension: ${cause.dimension}`,
     `Cause: ${cause.label}`,
     `Plans: ${[...new Set(findings.map((f) => f.plan))].sort().join(", ")}`,
-    "",
-    "Findings:",
   ];
+  // reason: BR-1552 S6 — the units the cause is keyed by, with their input hashes, so a reader can tell WHICH code the cause is about.
+  if (cause.units !== undefined) {
+    lines.push("Failing units (input sha256):");
+    for (const u of cause.units) lines.push(`- ${u.id} (${u.input_sha256})`);
+  }
+  if (cause.cited_files !== undefined && cause.cited_files.length > 0) lines.push(`Cited files: ${cause.cited_files.join(", ")}`);
+  lines.push("", "Findings:");
   for (const f of findings) {
     lines.push(`- ${f.plan} (${f.reviewSlug}): ${f.reason}${f.reference.length > 0 ? ` [${f.reference}]` : ""}`);
   }
