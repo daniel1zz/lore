@@ -132,7 +132,18 @@ export type RunAncestryRefusalCause =
   | "process-table-unreadable";
 
 /** Outcome of {@link verifyRunAncestry}: accepted, or refused with a stable `cause` and the human `error` text. */
-export type RunAncestryVerdict = { readonly ok: true } | { readonly ok: false; readonly cause: RunAncestryRefusalCause; readonly error: string };
+export type RunAncestryVerdict =
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly cause: RunAncestryRefusalCause;
+      readonly error: string;
+      /**
+       * Only on `run-ended`: the recorded end reason (`null` = none recorded). The one caller that turns a verdict into
+       * an identity reopens a run ended by the SubagentStop hook (`subagent-stop`) when the harness check passes (#594).
+       */
+      readonly endReason?: string | null;
+    };
 
 /** The part of a registry row (`RunLifecycle`) the ancestry check reads. */
 export interface RunAncestryRecord {
@@ -177,7 +188,12 @@ export async function verifyRunAncestry(input: {
   const { run, record, table, selfPid } = input;
   if (record === null) return refuseAncestry("unknown-run", `unknown run ${run}`);
   if (record.endedAt !== null) {
-    return refuseAncestry("run-ended", `run ${run} ended at ${record.endedAt} (${record.endReason ?? "no reason recorded"})`);
+    return {
+      ok: false,
+      cause: "run-ended",
+      error: `run ${run} ended at ${record.endedAt} (${record.endReason ?? "no reason recorded"})`,
+      endReason: record.endReason,
+    };
   }
   const harnessPid = record.process.pid;
   const registeredStart = record.process.startTime;

@@ -4887,6 +4887,37 @@ export class TursoStore implements StoreInterface {
     }
   }
 
+  async reopenRunIfEndedFor(id: RunId, expectedEndReason: string, audit: AuditEntry): Promise<Result<boolean, LoreError>> {
+    try {
+      await this.ensureReady();
+      const tx = await this.client.transaction("write");
+      try {
+        const updated = await tx.execute({
+          sql: "UPDATE runs SET ended_at = NULL, end_reason = NULL WHERE id = ? AND ended_at IS NOT NULL AND end_reason = ? RETURNING id",
+          args: [id, expectedEndReason],
+        });
+        if (updated.rows.length === 0) {
+          await tx.rollback();
+          return ok(false);
+        }
+        await this.appendAuditEntryTx(tx, audit);
+        await tx.commit();
+        return ok(true);
+      } catch (e) {
+        try {
+          await tx.rollback();
+        } catch {
+          // reason: rollback throws only when the transaction is already closed; `e` is what the caller needs.
+        }
+        throw e;
+      } finally {
+        tx.close();
+      }
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   async getRunEnd(id: RunId): Promise<Result<RunEndState | null, LoreError>> {
     try {
       await this.ensureReady();

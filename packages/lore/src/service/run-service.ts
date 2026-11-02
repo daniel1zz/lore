@@ -56,6 +56,31 @@ export type RunStore = Pick<
   | "findByIds"
 >;
 
+/** End reason the SubagentStop hook records (assets/hooks/run-end.mjs); the only end a verified call may reopen (#594). */
+export const SUBAGENT_STOP_END_REASON = "subagent-stop";
+
+/**
+ * Reopen a helper run that the SubagentStop hook ended, as ONE audited conditional store write (#594, AC-RV-3).
+ * The hook cannot tell an interim stop (the helper waits on its own background command) from a final one, so it ends
+ * the run at both; the helper's next call from its own verified harness tree reopens it. The CALLER has already
+ * verified the ancestry (same harness process and start time). Claims the end released are NOT restored.
+ *
+ * @returns ok(true) when this call reopened the run; ok(false) when it was not (still) ended by subagent-stop.
+ */
+export async function reopenSubagentStoppedRun(
+  store: Pick<StoreInterface, "reopenRunIfEndedFor">,
+  input: { readonly run: string; readonly actor: string; readonly sessionId: string; readonly endedAt: string; readonly now: Date },
+): Promise<Result<boolean, LoreError>> {
+  return store.reopenRunIfEndedFor(input.run as RunId, SUBAGENT_STOP_END_REASON, {
+    timestamp: input.now.toISOString(),
+    actor: input.actor,
+    session_id: input.sessionId,
+    action: "run-reopen",
+    details: { run: input.run, reason: "subagent-resumed", ended_at: input.endedAt, end_reason: SUBAGENT_STOP_END_REASON },
+    harness_run: input.run,
+  });
+}
+
 /** Claude Code names a subagent worktree `agent-<agentId>` (spec-worktree-removal D1). */
 const AGENT_WORKTREE_BASENAME = /^agent-([A-Za-z0-9]+)$/;
 
@@ -347,7 +372,8 @@ export class RunService {
   }
 
   /**
-   * End a run: stamp `ended_at` / `end_reason` (first end wins), then release its clean claims and mark the
+   * End a run: stamp `ended_at` / `end_reason` (first end wins; a `subagent-stop` end can be reopened once per
+   * resume by the helper's next verified call, see {@link reopenSubagentStoppedRun}), then release its clean claims and mark the
    * ones with uncommitted changes `orphaned_dirty` (BR-1057).
    *
    * @returns ok(`unknown-run`) for an unregistered id (nothing written); ok(`ended`/`already-ended` + the

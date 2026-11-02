@@ -1635,6 +1635,13 @@ export interface StoreInterface {
   /** @lore-site BR-1029 */
   reopenRun(id: RunId): Promise<Result<boolean, LoreError>>;
 
+  /**
+   * Reopen a run ended with exactly `expectedEndReason` and append `audit`, in ONE transaction (#594). Conditional:
+   * `ok(true)` iff the run was ended with that reason (then ended_at/end_reason are cleared and the audit row is
+   * written); `ok(false)` writes nothing (run open, unknown, or ended for another reason, e.g. by a concurrent reopen).
+   */
+  reopenRunIfEndedFor(id: RunId, expectedEndReason: string, audit: AuditEntry): Promise<Result<boolean, LoreError>>;
+
   /** The run's end state, or `ok(null)` for an unregistered id. */
   getRunEnd(id: RunId): Promise<Result<RunEndState | null, LoreError>>;
 
