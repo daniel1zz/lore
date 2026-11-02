@@ -703,6 +703,36 @@ export default defineLoreCommand({
       }
       const moveToLatestTemplate = args["template-version"] === "latest";
 
+      // BR-1548: `--correction` alone on a task that holds a done contract is the contract amendment (the editor never opens).
+      if (correctionOpt !== undefined && Object.keys(patch).length === 0 && fieldsPatch === undefined && !moveToLatestTemplate && app.doneContractService !== undefined) {
+        const resolvedTask = await app.corpusService.resolve(args.id);
+        if (!resolvedTask.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, resolvedTask.error) + "\n");
+          return exitCode(resolvedTask.error);
+        }
+        const gotTask = await app.corpusService.get(resolvedTask.value);
+        if (!gotTask.ok) {
+          inv.io.stderr.write(formatErrorFor(inv, gotTask.error) + "\n");
+          return exitCode(gotTask.error);
+        }
+        const taskDoc = gotTask.value.doc;
+        if (taskDoc.type === "task" && taskDoc.extra["done_contract"] !== undefined) {
+          const amended = await app.doneContractService.amend(taskDoc, correctionOpt.reason, new Date().toISOString());
+          if (!amended.ok) {
+            inv.io.stderr.write(formatErrorFor(inv, amended.error) + "\n");
+            return exitCode(amended.error);
+          }
+          if (args.json) {
+            printLine(inv.io.stdout, JSON.stringify({ ok: true, data: { slug: taskDoc.slug, amended: amended.value.amended, status: amended.value.status } }, null, 2));
+          } else if (amended.value.amended) {
+            printLine(inv.io.stdout, `Amended the done contract of ${taskDoc.slug} (${amended.value.status}); correction recorded: ${correctionOpt.reason}`);
+          } else {
+            printLine(inv.io.stdout, `The done contract of ${taskDoc.slug} already matches a fresh compile: no changes`);
+          }
+          return 0;
+        }
+      }
+
       if (Object.keys(patch).length === 0 && fieldsPatch === undefined && !moveToLatestTemplate) {
         // No flags provided — open editor pre-populated with current content (AC-SET-1)
         const resolvedId = await app.corpusService.resolve(args.id);
