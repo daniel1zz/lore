@@ -112,6 +112,23 @@ describe("AC-RV-3: verifyRunAncestry over a fake process table", () => {
     }
   });
 
+  it("REFUSED: the run-ended verdict carries the recorded end reason (#594: the caller reopens only a subagent-stop end)", async () => {
+    const verify = await loadVerify();
+    const verdict = await verify({ run: "cc:S", record: row({ endedAt: T1, endReason: "subagent-stop" }), table: chain(), selfPid: 500 });
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) {
+      expect(verdict.cause).toBe("run-ended");
+      expect((verdict as { endReason?: string | null }).endReason).toBe("subagent-stop");
+    }
+  });
+
+  it("REFUSED: a run-ended verdict with no recorded reason carries endReason null, never a guess", async () => {
+    const verify = await loadVerify();
+    const verdict = await verify({ run: "cc:S", record: row({ endedAt: T1, endReason: null }), table: chain(), selfPid: 500 });
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) expect((verdict as { endReason?: string | null }).endReason).toBeNull();
+  });
+
   it("REFUSED: a legacy run with no harness pid names re-registration", async () => {
     const verify = await loadVerify();
     const verdict = await verify({ run: "cc:S", record: row({ process: { pid: null, startTime: null, worktree: null } }), table: chain(), selfPid: 500 });
