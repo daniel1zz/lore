@@ -1,5 +1,7 @@
 // @reads assets/project/lore-config-template.yaml
 // @reads assets/project/reference-transaction
+// @reads assets/context
+// @reads assets/context/*.md
 // @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * done-contract-land-compiled.bun.test.ts — `lore land` folds a finished task into the plan integration branch, or integrates,
@@ -766,5 +768,77 @@ describe("AC-DCS1-18: a finished claim stops counting in overlap once its commit
     const claimed = await loreIn(fixture.dir, ["claim", sibling, "--worktree", siblingTree.branch], "dcs2-land-other");
     expect(claimed.exitCode, claimed.text).toBe(0);
     expect(existsSync(siblingTree.path)).toBe(true);
+  });
+});
+
+// ───────────────────────────── AC-DCS1-18 (same-session takeover of a finished claim, issue #645) ─────────────────────────────
+
+describe("AC-DCS1-18: a finished claim of an ended run is taken over by a run of the holder's own session", () => {
+  const agentRun = (session: string, agent: string): string => `cc:${session}:${agent}`;
+
+  /** A code task claimed and finished by the helper run `cc:<session>:<agent>` (registered first), on its own worktree. */
+  async function finishedByHelper(label: string, session: string, agent: string): Promise<Finished> {
+    const registered = await loreIn(fixture.dir, ["run", "register", "--harness", "claude-code", "--session", session, "--agent-id", agent, "--agent-type", "implementer"], session);
+    expect(registered.exitCode, registered.text).toBe(0);
+    const env = { LORE_HARNESS_RUN: agentRun(session, agent) };
+    const plan = await fixture.createPlan(`Takeover ${label} plan`);
+    const slug = await fixture.createTask({ plan, kind: "code", title: `Takeover ${label}`, anchors: [`tests/${label}.test.ts`], acScope: ["AC-FX-1"] });
+    await fixture.mustRun(["approve", slug, "--red-waiver", "the red run is not the subject of this test"]);
+    const tree = addWorktree(label);
+    const claimed = await loreIn(fixture.dir, ["claim", slug, "--worktree", tree.branch], session, env);
+    expect(claimed.exitCode, claimed.text).toBe(0);
+    const tip = commitIn(tree, { [`tests/${label}.test.ts`]: `// ${label}\n`, [`src/${label}.ts`]: `export const ${label} = 1;\n` });
+    const finished = await loreIn(tree.path, ["finish", slug], session, env);
+    expect(finished.exitCode, finished.text).toBe(0);
+    return { slug, tree, tip };
+  }
+
+  const claimBy = (task: Finished, session: string): Promise<Out> => loreIn(fixture.dir, ["claim", task.slug, "--worktree", task.tree.branch], session);
+
+  async function claimRows(slug: string): Promise<number> {
+    const out = await fixture.mustRun(["audit", slug, "--action", "claim", "--json"]);
+    const parsed = JSON.parse(out) as { data: unknown };
+    const rows = Array.isArray(parsed.data) ? parsed.data : ((parsed.data as { entries?: unknown[] }).entries ?? []);
+    return rows.length;
+  }
+
+  const claimOf = async (slug: string): Promise<{ finished_commit?: string; harness_run?: string } | undefined> =>
+    (await fixture.readTask(slug)).extra["claim"] as { finished_commit?: string; harness_run?: string } | undefined;
+
+  it("AC-DCS1-18: while the holder run is live, a run of its own session is refused with exit 5 and nothing is written", async () => {
+    const task = await finishedByHelper("tk-live", "tk-live-s", "impl");
+    const rowsBefore = await claimRows(task.slug);
+    const refused = await claimBy(task, "tk-live-s");
+    expect(refused.exitCode, refused.text).toBe(5);
+    expect(await claimRows(task.slug)).toBe(rowsBefore);
+    expect((await claimOf(task.slug))?.harness_run).toBe(agentRun("tk-live-s", "impl"));
+  });
+
+  it("AC-DCS1-18: once the holder run ended, a run of ANOTHER session is still refused with exit 5", async () => {
+    const task = await finishedByHelper("tk-other", "tk-other-s", "impl");
+    const ended = await loreIn(fixture.dir, ["run", "end", agentRun("tk-other-s", "impl"), "--reason", "helper stopped"], "tk-other-s");
+    expect(ended.exitCode, ended.text).toBe(0);
+    const rowsBefore = await claimRows(task.slug);
+    const refused = await claimBy(task, "tk-other-stranger");
+    expect(refused.exitCode, refused.text).toBe(5);
+    expect(await claimRows(task.slug)).toBe(rowsBefore);
+    expect((await claimOf(task.slug))?.harness_run).toBe(agentRun("tk-other-s", "impl"));
+  });
+
+  it("AC-DCS1-18: once the holder run ended, a run of the same session takes the claim (exit 0, one audit row, finished_commit kept)", async () => {
+    const task = await finishedByHelper("tk-same", "tk-same-s", "impl");
+    const ended = await loreIn(fixture.dir, ["run", "end", agentRun("tk-same-s", "impl"), "--reason", "helper stopped"], "tk-same-s");
+    expect(ended.exitCode, ended.text).toBe(0);
+    const rowsBefore = await claimRows(task.slug);
+    const taken = await claimBy(task, "tk-same-s");
+    expect(taken.exitCode, taken.text).toBe(0);
+    expect(taken.text).toContain(agentRun("tk-same-s", "impl"));
+    expect(await claimRows(task.slug)).toBe(rowsBefore + 1);
+    const claim = await claimOf(task.slug);
+    expect(claim?.harness_run).toBe("cc:tk-same-s");
+    expect(claim?.finished_commit, "the finished mark is kept: an unchanged tip still counts as finished").toBe(task.tip);
+    // the new holder is live, so a stranger is refused by the live holder
+    const stranger = await claimBy(task, "tk-same-stranger");
+    expect(stranger.exitCode, stranger.text).toBe(5);
   });
 });
