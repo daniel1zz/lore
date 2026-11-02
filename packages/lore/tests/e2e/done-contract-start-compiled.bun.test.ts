@@ -395,3 +395,85 @@ describe("lore start creates the worktree on the contract base, installs, claims
     expect(await claimOf(bad)).toBeUndefined();
   });
 });
+
+describe("lore start inside a linked worktree adopts it (AC-DCF-4, BR-1550, issue #623)", () => {
+  /** A linked worktree on its own branch cut at `from`, outside the repository (the shape a harness gives an isolated subagent). */
+  const linkedWorktree = (name: string, from: string): string => {
+    const path = join(scratch, name);
+    fixture.git(["worktree", "add", "-q", "-b", `dcf4-${name}`, path, from]);
+    return path;
+  };
+  const worktreeCount = (): number => worktreeList().split("\n").filter((line) => line.startsWith("worktree ")).length;
+
+  it("AC-DCF-4: a clean linked worktree holding the base tip is adopted: exit 0, no new worktree, install run there, claim names it, contract printed", async () => {
+    const marker = join(scratch, "install-marker-adopt");
+    const slug = await approvedTask(planMain, "code", `sh -c 'echo "$PWD" > ${marker}'`);
+    const path = linkedWorktree("adopt-ok", "main");
+    const countBefore = worktreeCount();
+    const out = await startFrom(path, slug, "start-dcf4-ok", ["--write-set", "src/"]);
+    expect(out.exitCode, out.text).toBe(0);
+    expect(worktreeCount()).toBe(countBefore);
+    expect(existsSync(worktreePathOf(slug))).toBe(false);
+    expect(branchList()).not.toContain(`task/${slug}`);
+    expect(realpathSync(readFileSync(marker, "utf8").trim())).toBe(realpathSync(path));
+    const claim = await claimOf(slug);
+    expect(claim?.branch).toBe("dcf4-adopt-ok");
+    expect(realpathSync(claim?.worktree ?? "/nonexistent")).toBe(realpathSync(path));
+    expect(out.stdout).toContain("ac:AC-FX-1");
+    expect(out.stdout).toContain("typecheck");
+    expect(out.stdout).toContain(path);
+  });
+
+  it("AC-DCF-4: a dirty linked worktree exits 4 worktree-dirty, writing no claim and creating nothing", async () => {
+    const slug = await approvedTask(planMain, "code");
+    const path = linkedWorktree("adopt-dirty", "main");
+    writeFileSync(join(path, "stray.txt"), "uncommitted\n");
+    const countBefore = worktreeCount();
+    const out = await startFrom(path, slug, "start-dcf4-dirty");
+    expect(out.exitCode, out.text).toBe(4);
+    expect(out.text).toContain("worktree-dirty");
+    expect(worktreeCount()).toBe(countBefore);
+    expect(await claimOf(slug)).toBeUndefined();
+  });
+
+  it("AC-DCF-4: a linked worktree whose HEAD lacks the base tip exits 4 base-behind naming git merge --ff-only, writing no claim", async () => {
+    const slug = await approvedTask(planInteg, "code");
+    const path = linkedWorktree("adopt-behind", "main");
+    const countBefore = worktreeCount();
+    const out = await startFrom(path, slug, "start-dcf4-behind");
+    expect(out.exitCode, out.text).toBe(4);
+    expect(out.text).toContain("base-behind");
+    expect(out.text).toContain("git merge --ff-only");
+    expect(worktreeCount()).toBe(countBefore);
+    expect(await claimOf(slug)).toBeUndefined();
+    // After the fast-forward the same start adopts it.
+    execFileSync("git", ["merge", "--ff-only", "-q", INTEG], { cwd: path });
+    const again = await startFrom(path, slug, "start-dcf4-behind");
+    expect(again.exitCode, again.text).toBe(0);
+    expect(worktreeCount()).toBe(countBefore);
+  });
+
+  it("AC-DCF-4: a linked worktree another fresh claim holds exits 5 CLAIM_CONFLICT naming the holder, writing no claim", async () => {
+    const holderTask = await approvedTask(planMain, "code");
+    const path = linkedWorktree("adopt-held", "main");
+    const held = await startFrom(path, holderTask, "start-dcf4-holder");
+    expect(held.exitCode, held.text).toBe(0);
+    const other = await approvedTask(planMain, "code");
+    const countBefore = worktreeCount();
+    const out = await startFrom(path, other, "start-dcf4-intruder");
+    expect(out.exitCode, out.text).toBe(5);
+    expect(out.text).toContain("is claimed by");
+    expect(worktreeCount()).toBe(countBefore);
+    expect(await claimOf(other)).toBeUndefined();
+  });
+
+  it("AC-DCF-4: run from the shared checkout, start still creates the task worktree under .claude/worktrees", async () => {
+    const slug = await approvedTask(planMain, "code");
+    const countBefore = worktreeCount();
+    const out = await startFrom(fixture.dir, slug, "start-dcf4-shared");
+    expect(out.exitCode, out.text).toBe(0);
+    expect(worktreeCount()).toBe(countBefore + 1);
+    expect(existsSync(worktreePathOf(slug))).toBe(true);
+    expect((await claimOf(slug))?.branch).toBe(`task/${slug}`);
+  });
+});
