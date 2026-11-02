@@ -593,7 +593,7 @@ async function closablePlan(title: string, label: string): Promise<string> {
   const open = await fixture.createTask({ plan, kind: "corpus", title: `${label} open corpus task` });
   const landed = await landTask(code.slug);
   expect(landed.exitCode, landed.text).toBe(0);
-  const deprecated = await inProcess(fixture.dir, ["set", open, "--status", "deprecated"], OWNER);
+  const deprecated = await inProcess(fixture.dir, ["set", open, "--status", "deprecated", "--reason", "fixture: a deprecated task is not open"], OWNER);
   expect(deprecated.exitCode, deprecated.text).toBe(0);
   return plan;
 }
