@@ -3471,6 +3471,7 @@ export class TaskWorkflowService {
     let carryForward = false;
     let inheritedDirtyWorktree: string | undefined;
     let endedHolderRun: string | undefined;
+    let finishedTakeover: TaskClaim | undefined;
 
     if (existingClaim !== undefined) {
       // reason: BR-1058 — staleness reads the holder run's end and an `orphaned_dirty` mark, measured lazily
@@ -3483,7 +3484,16 @@ export class TaskWorkflowService {
       const holder = buildClaimHolder(existingClaim, stale);
       const decision = hasClaimConflict(holder, claimant);
       if (decision.kind === "conflict" && opts.steal !== true) {
-        return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso, this.finishedCommitInForce(existingClaim)));
+        // reason: BR-1040 / AC-DCS1-18 (issue #645) — a finished claim whose holder run ENDED is taken over by a run of the
+        // holder's own session (the follow-up change after a helper finished); every other run, and any run while the holder
+        // lives, keeps the refusal.
+        const ownTakeover = await this.findOwnSessionFinishedTakeover(existingClaim, claimant.harnessRun);
+        if (!ownTakeover.ok) return ownTakeover;
+        if (ownTakeover.value === undefined) {
+          return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso, this.finishedCommitInForce(existingClaim)));
+        }
+        endedHolderRun = ownTakeover.value;
+        finishedTakeover = existingClaim;
       }
       // reason: SPEC-042 D2 — carry-forward applies ONLY to a same-holder FRESH
       // refresh. A stale takeover (even by the SAME `by`) or a different holder
@@ -3497,7 +3507,7 @@ export class TaskWorkflowService {
         endedHolderRun = endedRun.value ?? undefined;
       }
       // reason: D4 — a `--steal` of an orphaned_dirty claim inherits uncommitted work; the output must name it.
-      if (decision.kind === "conflict") inheritedDirtyWorktree = existingClaim.orphaned_dirty?.worktree;
+      if (decision.kind === "conflict" && finishedTakeover === undefined) inheritedDirtyWorktree = existingClaim.orphaned_dirty?.worktree;
     }
 
     // reason: AC-OWN-2 auto-capture (spec-multi-session-concurrency-queryable-
@@ -3575,6 +3585,15 @@ export class TaskWorkflowService {
       ...builtClaim,
       ...(inheritedDirtyWorktree !== undefined ? { inherited_dirty_worktree: inheritedDirtyWorktree } : {}),
       ...(endedHolderRun !== undefined ? { took_over_ended_run: endedHolderRun } : {}),
+      // reason: AC-DCS1-18 — an own-session takeover keeps the finished mark (an unchanged tip still counts as finished); a new
+      // commit makes it an ordinary claim through `isFinishedInForce`, as for a same-holder refresh.
+      ...(finishedTakeover?.finished_commit !== undefined && finishedTakeover.finished_at !== undefined
+        ? {
+            finished_at: finishedTakeover.finished_at,
+            finished_commit: finishedTakeover.finished_commit,
+            ...(finishedTakeover.end_tip !== undefined ? { end_tip: finishedTakeover.end_tip } : {}),
+          }
+        : {}),
     };
     const newExtra: Record<string, unknown> = { ...task.extra, claim: newClaim };
 
@@ -3612,6 +3631,10 @@ export class TaskWorkflowService {
       ...(previousHolderRun !== undefined ? { previous_run: previousHolderRun } : {}),
       harness_run: claimant.harnessRun,
       ...(inheritedDirtyWorktree !== undefined ? { inherited_dirty_worktree: inheritedDirtyWorktree } : {}),
+      // reason: AC-DCS1-18 — the audit row of an own-session takeover names the ended holder run and the kept finished commit.
+      ...(finishedTakeover?.finished_commit !== undefined
+        ? { took_over_finished_commit: finishedTakeover.finished_commit, took_over_ended_run: endedHolderRun ?? null }
+        : {}),
       ...(opts.worktree !== undefined ? { worktree: opts.worktree } : {}),
       // reason: the landing record (recordLanding) matches a landed branch to the tasks whose claim recorded it; the
       // audit row survives `lore release`, so a claim by worktree PATH still names its branch here.
@@ -3700,6 +3723,10 @@ export class TaskWorkflowService {
     if (!stale.ok) return stale;
     const holder = buildClaimHolder(existingClaim, stale.value);
     if (hasClaimConflict(holder, buildClaimParty(party)).kind === "conflict") {
+      // reason: AC-DCS1-18 — `lore start` agrees with `claim()`: an own-session run may take a finished claim of an ended run.
+      const ownTakeover = await this.findOwnSessionFinishedTakeover(existingClaim, party.harnessRun ?? null);
+      if (!ownTakeover.ok) return ownTakeover;
+      if (ownTakeover.value !== undefined) return ok(undefined);
       return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso, this.finishedCommitInForce(existingClaim)));
     }
     return ok(undefined);
@@ -4056,6 +4083,25 @@ export class TaskWorkflowService {
     endedRuns: Map<string, boolean>,
   ): Promise<Result<boolean, LoreError>> {
     return resolveEffectiveClaimStaleness(this.store, claim, nowIso, this.claimTtlMinutes, endedRuns, (held) => this.measureClaimTip(held));
+  }
+
+  /**
+   * The ended holder run when a run of the holder's OWN session may take over a finished claim (BR-1040, AC-DCS1-18, issue #645):
+   * the finish is in force, the holder run has ended, and the claimant run's `session_ref` equals the holder run's. The session
+   * is compared by the run rows, never by actor names. `undefined` when any condition fails (the conflict then stands).
+   */
+  private async findOwnSessionFinishedTakeover(claim: TaskClaim, claimantRun: RunId | null): Promise<Result<string | undefined, LoreError>> {
+    const holderRun = claim.harness_run ?? null;
+    if (holderRun === null || claimantRun === null || this.finishedCommitInForce(claim) === undefined) return ok(undefined);
+    const endState = await this.store.getRunEnd(holderRun as RunId);
+    if (!endState.ok) return endState;
+    if (endState.value === null || endState.value.endedAt === null) return ok(undefined);
+    const holderRow = await this.store.getRun(holderRun as RunId);
+    if (!holderRow.ok) return holderRow;
+    const claimantRow = await this.store.getRun(claimantRun);
+    if (!claimantRow.ok) return claimantRow;
+    if (holderRow.value === null || claimantRow.value === null) return ok(undefined);
+    return ok(holderRow.value.sessionRef === claimantRow.value.sessionRef ? holderRun : undefined);
   }
 
   /** The commit of `claim` when its finish is still in force (the branch tip equals it), else `undefined` (AC-DCS1-18). */
