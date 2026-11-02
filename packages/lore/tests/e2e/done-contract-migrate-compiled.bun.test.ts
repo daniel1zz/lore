@@ -1,5 +1,6 @@
 // @reads assets/project/lore-config-template.yaml
 // @reads .lore/config.yaml
+// @spawns-external git builds the throwaway landing repository
 /**
  * done-contract-migrate-compiled.bun.test.ts — `lore migrate done-contract` observed through the `lore` command tree on a
  * throwaway repository and corpus (spec-done-contract-compiled-at-approve-task-kinds-write-sets, AC-DCS1-22, AC-DCS1-23).
