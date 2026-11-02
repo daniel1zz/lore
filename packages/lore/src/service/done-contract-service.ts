@@ -10,7 +10,8 @@
  *     the task to approved, so a refusal writes nothing (I3).
  *   - the compile itself is the pure `compileDoneContract`; this class only gathers (plan, specs, config, the tip of the base
  *     branch, the falsifier files at that commit) through the store and the git port.
- *   - a task that already holds a contract is refused (`done-contract-already-stored`), never recompiled.
+ *   - a task that already holds a contract is refused at approve (`done-contract-already-stored`); a stored contract changes only
+ *     through the amendment (`recordAmendment`, BR-1548), called by `amend` (`lore set --correction`) and `applyRecompile` (`lore start`).
  * Side-effect class: store reads + git reads through the port.
  *
  * Source: spec-done-contract-compiled-at-approve-task-kinds-write-sets (AC-DCS1-1, AC-DCS1-2, AC-DCS1-5).
