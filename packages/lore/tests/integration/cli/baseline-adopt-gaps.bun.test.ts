@@ -18,6 +18,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 setDefaultTimeout(300_000);
 
@@ -93,9 +94,9 @@ let branchA = "";
 
 beforeAll(() => {
   withBaseline = makeRepo();
-  const prd = slugOf(mustRun(["create", "prd", "--title", "BAG PRD", "--content", "root", "--no-ai"], withBaseline).stdout);
-  const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "BAG Root"], withBaseline).stdout);
-  branchA = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "ba", "--title", "BAG Branch A"], withBaseline).stdout);
+  const prd = slugOf(mustRun(["create", "prd", "--title", "BAG PRD", ...templatedFieldsArgs("prd"), "--no-ai"], withBaseline).stdout);
+  const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "BAG Root", ...templatedFieldsArgs("baseline", { kind: "root" })], withBaseline).stdout);
+  branchA = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "ba", "--title", "BAG Branch A", ...templatedFieldsArgs("baseline", { kind: "branch" })], withBaseline).stdout);
 });
 
 afterAll(() => {

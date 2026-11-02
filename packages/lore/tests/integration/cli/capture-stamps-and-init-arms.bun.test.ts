@@ -27,6 +27,7 @@ import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { actedStore } from "../../live-invocation.js";
 import { landTask, recordContractPasses, type TaskWorld } from "../support/land-task.js";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -96,11 +97,11 @@ const DONE_CONTRACT_LINES = ["  done_contract:", '    install: "echo install-ok"
 
 /** prd -> spec -> plan -> task (a draft code task); returns the task slug. Tracked files stay clean (db is gitignored). */
 function makeDraftTask(dir: string): string {
-  mustLore(["create", "prd", "--title", "CT3b PRD", "--no-ai", "--content", "## Overview\nbody"], dir);
-  const spec = slugOf(mustLore(["create", "spec", "--title", "CT3b Spec", "--no-ai", "--content", "## Overview\nbody", "--json"], dir));
-  const plan = slugOf(mustLore(["create", "plan", "--title", "CT3b Plan", "--parent", spec, "--no-ai", "--content", "body", "--json"], dir));
+  mustLore(["create", "prd", "--title", "CT3b PRD", "--no-ai", ...templatedFieldsArgs("prd")], dir);
+  const spec = slugOf(mustLore(["create", "spec", "--title", "CT3b Spec", "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature" }), "--json"], dir));
+  const plan = slugOf(mustLore(["create", "plan", "--title", "CT3b Plan", "--parent", spec, "--no-ai", ...templatedFieldsArgs("plan"), "--json"], dir));
   return slugOf(
-    mustLore(["create", "task", "--kind", "code", "--title", "CT3b Task", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body", "--json"], dir),
+    mustLore(["create", "task", "--kind", "code", "--title", "CT3b Task", "--parent", plan, "--plan-id", plan, "--no-ai", ...templatedFieldsArgs("task"), "--json"], dir),
   );
 }
 

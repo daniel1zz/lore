@@ -41,6 +41,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import yaml from "yaml";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 
 setDefaultTimeout(300_000);
@@ -136,11 +137,11 @@ beforeAll(() => {
   git(repo, ["commit", "-q", "-m", "init"]);
   mustRun(["init"], repo);
 
-  const prd = slugOf(mustRun(["create", "prd", "--title", "BLA PRD", "--content", "root", "--no-ai"], repo).stdout);
-  const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "BLA Root"], repo).stdout);
-  branchA = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "ba", "--title", "BLA Branch A"], repo).stdout);
-  branchB = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "bb", "--title", "BLA Branch B"], repo).stdout);
-  leafSlug = slugOf(mustRun(["baseline", "add", branchA, "--node", "leaf", "--label", "lf", "--title", "BLA Leaf"], repo).stdout);
+  const prd = slugOf(mustRun(["create", "prd", "--title", "BLA PRD", ...templatedFieldsArgs("prd"), "--no-ai"], repo).stdout);
+  const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "BLA Root", ...templatedFieldsArgs("baseline", { kind: "root" })], repo).stdout);
+  branchA = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "ba", "--title", "BLA Branch A", ...templatedFieldsArgs("baseline", { kind: "branch" })], repo).stdout);
+  branchB = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "bb", "--title", "BLA Branch B", ...templatedFieldsArgs("baseline", { kind: "branch" })], repo).stdout);
+  leafSlug = slugOf(mustRun(["baseline", "add", branchA, "--node", "leaf", "--label", "lf", "--title", "BLA Leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })], repo).stdout);
 
   // Unrelated config the adopt writer must carry through untouched.
   handEdit(repo, (cfg) => {

@@ -40,6 +40,7 @@ import { actedStore } from "../../live-invocation.js";
 import { inLoopAuditVerifyRunner } from "../../support/audit-verify-runner-stub.js";
 import { createPartyCorpus } from "../../helpers/known-party-corpus.js";
 import type { PartyCorpus } from "../../helpers/known-party-corpus.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 /** The knowledge sub-types `lore create` may write (handoff, uat, milestone-review have their own writers). */
 const CREATABLE_SUB_TYPES = ["ideation", "retro", "research", "reference", "prompt", "skill"] as const;
@@ -242,7 +243,7 @@ describe("AC-PAR-1: the CLI exits exactly 4 and writes nothing", () => {
 
   beforeAll(async () => {
     corpus = createPartyCorpus("create-requires-parent");
-    prdSlug = corpus.slugOf(corpus.setup(["create", "prd", "--title", "CLI Requirements", "--no-ai", "--content", "root"]));
+    prdSlug = corpus.slugOf(corpus.setup(["create", "prd", "--title", "CLI Requirements", "--no-ai", ...templatedFieldsArgs("prd")]));
     const store = new SQLiteStore(join(corpus.dir, ".lore", "lore.db"));
     try {
       specSlug = (await insertSpec(store)).slug;
@@ -256,7 +257,7 @@ describe("AC-PAR-1: the CLI exits exactly 4 and writes nothing", () => {
   for (const c of PARENTLESS_CASES) {
     it(`${c.label} without --parent: exit 4, stderr names --parent, the PRD and the spec, no row written`, () => {
       const before = corpus.counts();
-      const args = ["create", c.type, "--title", `CLI parentless ${c.label}`, "--no-ai", "--content", "body"];
+      const args = ["create", c.type, "--title", `CLI parentless ${c.label}`, "--no-ai", ...templatedFieldsArgs(c.type, { kind: c.subType })];
       if (c.subType !== undefined) args.push("--sub-type", c.subType);
       if (c.type === "adr") args.push("--decision-status", "proposed");
       const ran = corpus.lore(args, { kind: "run", run: "cc:create-requires-parent" });
@@ -274,7 +275,7 @@ describe("AC-PAR-1: the CLI exits exactly 4 and writes nothing", () => {
 
   it("knowledge, adr and plan WITH --parent exit 0", () => {
     for (const c of [PARENTLESS_CASES[0]!, PARENTLESS_CASES[PARENTLESS_CASES.length - 2]!, PARENTLESS_CASES[PARENTLESS_CASES.length - 1]!]) {
-      const args = ["create", c.type, "--title", `CLI parented ${c.label}`, "--no-ai", "--content", "body", "--parent", prdSlug];
+      const args = ["create", c.type, "--title", `CLI parented ${c.label}`, "--no-ai", ...templatedFieldsArgs(c.type, { kind: c.subType }), "--parent", prdSlug];
       if (c.subType !== undefined) args.push("--sub-type", c.subType);
       if (c.type === "adr") args.push("--decision-status", "proposed");
       const ran = corpus.lore(args, { kind: "run", run: "cc:create-requires-parent" });
@@ -292,7 +293,7 @@ describe("AC-PAR-1: the CLI exits exactly 4 and writes nothing", () => {
   it("a corpus with no PRD and no spec: exit 4 and says to create the requirements document first", () => {
     const bare = createPartyCorpus("create-requires-parent-bare");
     try {
-      const ran = bare.lore(["create", "knowledge", "--title", "K", "--sub-type", "reference", "--no-ai", "--content", "b"], {
+      const ran = bare.lore(["create", "knowledge", "--title", "K", "--sub-type", "reference", "--no-ai", ...templatedFieldsArgs("knowledge", { kind: "reference" })], {
         kind: "run",
         run: "cc:create-requires-parent",
       });

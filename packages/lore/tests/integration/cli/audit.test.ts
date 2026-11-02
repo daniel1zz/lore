@@ -28,6 +28,7 @@ import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 // ─── Path setup ───────────────────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ const TEST_ACTOR = sessionActorFor("test-actor");
 
 function createPrd(title: string): string {
   const r = runLore(
-    ["create", "prd", "--title", title, "--no-ai", "--content", "body"],
+    ["create", "prd", "--title", title, "--no-ai", ...templatedFieldsArgs("prd")],
     tmpDir,
   );
   if (r.exitCode !== 0) throw new Error(`create prd failed: ${r.stderr}`);

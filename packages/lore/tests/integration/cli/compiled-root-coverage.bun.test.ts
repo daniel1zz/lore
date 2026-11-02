@@ -25,6 +25,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { assertFreshBinary } from "../helpers/assert-fresh-binary";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 600_000 });
 
@@ -96,10 +97,10 @@ function buildFixture(registry: string): Fixture {
   git(["add", "."]);
   git(["commit", "-q", "-m", "init"]);
   mustRun(["init"], dir);
-  const prd = slugOf(mustRun(["create", "prd", "--title", "BCR PRD", "--content", "root", "--no-ai"], dir));
-  const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "BCR Root"], dir));
-  const branch = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "br", "--title", "BCR Branch"], dir));
-  const leaf = slugOf(mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "la", "--title", "BCR Leaf"], dir));
+  const prd = slugOf(mustRun(["create", "prd", "--title", "BCR PRD", ...templatedFieldsArgs("prd"), "--no-ai"], dir));
+  const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "BCR Root", ...templatedFieldsArgs("baseline", { kind: "root" })], dir));
+  const branch = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "br", "--title", "BCR Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })], dir));
+  const leaf = slugOf(mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "la", "--title", "BCR Leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })], dir));
   const ruleOut = mustRun(["rule", "add", leaf, "--statement", "alpha refusal holds", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "e"], dir);
   const ruleId = (ruleOut.match(/BR-\d+/) ?? [])[0];
   if (ruleId === undefined) throw new Error(`no rule id in: ${ruleOut}`);

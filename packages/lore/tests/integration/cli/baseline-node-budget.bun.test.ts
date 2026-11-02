@@ -25,6 +25,7 @@ import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { Database } from "bun:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 setDefaultTimeout(600_000);
 
@@ -114,18 +115,18 @@ beforeAll(() => {
   git(["commit", "-q", "-m", "init"]);
   mustRun(["init"]);
 
-  prd = slugOf(mustRun(["create", "prd", "--title", "NB PRD", "--content", "root", "--no-ai"]).stdout);
-  const bizRoot = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "biz", "--title", "Biz Root"]).stdout);
-  branch = slugOf(mustRun(["baseline", "add", bizRoot, "--node", "branch", "--label", "br", "--title", "Biz Branch"]).stdout);
-  leaf = slugOf(mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "l1", "--title", "Leaf One"]).stdout);
+  prd = slugOf(mustRun(["create", "prd", "--title", "NB PRD", ...templatedFieldsArgs("prd"), "--no-ai"]).stdout);
+  const bizRoot = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "biz", "--title", "Biz Root", ...templatedFieldsArgs("baseline", { kind: "root" })]).stdout);
+  branch = slugOf(mustRun(["baseline", "add", bizRoot, "--node", "branch", "--label", "br", "--title", "Biz Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })]).stdout);
+  leaf = slugOf(mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "l1", "--title", "Leaf One", ...templatedFieldsArgs("baseline", { kind: "leaf" })]).stdout);
   const archRoot = slugOf(
-    mustRun(["baseline", "add", prd, "--tree", "architecture", "--node", "root", "--label", "arch", "--title", "Arch Root"]).stdout,
+    mustRun(["baseline", "add", prd, "--tree", "architecture", "--node", "root", "--label", "arch", "--title", "Arch Root", ...templatedFieldsArgs("baseline", { kind: "root" })]).stdout,
   );
   const section = slugOf(
-    mustRun(["baseline", "add", archRoot, "--tree", "architecture", "--node", "section", "--label", "svc", "--title", "Svc"]).stdout,
+    mustRun(["baseline", "add", archRoot, "--tree", "architecture", "--node", "section", "--label", "svc", "--title", "Svc", ...templatedFieldsArgs("baseline", { kind: "section" })]).stdout,
   );
   standard = slugOf(
-    mustRun(["baseline", "add", section, "--tree", "architecture", "--node", "standard", "--label", "std", "--title", "Std"]).stdout,
+    mustRun(["baseline", "add", section, "--tree", "architecture", "--node", "standard", "--label", "std", "--title", "Std", ...templatedFieldsArgs("baseline", { kind: "standard" })]).stdout,
   );
 });
 

@@ -27,6 +27,7 @@ import { join } from "node:path";
 import type { App } from "../../../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
 import { sessionIdOfActor } from "../../../helpers/session-actor";
+import { templatedFieldsArgs } from "../../../helpers/templated-create.js";
 import { createLiveApp } from "../../../helpers/live-app";
 import { DEFAULT_TEST_RUN, registerTestRun } from "../../../helpers/test-run-identity";
 import { FIXTURE_HOME_OUTSIDE_REPO, makeCleanTreeRepo } from "../../../helpers/clean-tree-repo";
@@ -160,9 +161,9 @@ export async function createCorpus(opts: { claimGates?: "enabled" | "disabled"; 
     );
   }
 
-  const prd = slugOf(mustRun(["create", "prd", "--title", "RID PRD", "--content", "root", "--no-ai"], dir).stdout);
+  const prd = slugOf(mustRun(["create", "prd", "--title", "RID PRD", ...templatedFieldsArgs("prd"), "--no-ai"], dir).stdout);
   const plan = slugOf(
-    mustRun(["create", "plan", "--title", "RID Plan", "--parent", prd, "--content", "x", "--no-ai"], dir).stdout,
+    mustRun(["create", "plan", "--title", "RID Plan", "--parent", prd, ...templatedFieldsArgs("plan"), "--no-ai"], dir).stdout,
   );
   let counter = 0;
 
@@ -182,7 +183,7 @@ export async function createCorpus(opts: { claimGates?: "enabled" | "disabled"; 
       if (kind === "task") {
         return slugOf(
           mustRun(
-            ["create", "task", "--kind", "code", "--title", `RID Task ${counter}`, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", ...anchors.flatMap((a) => ["--anchor", a])],
+            ["create", "task", "--kind", "code", "--title", `RID Task ${counter}`, "--parent", plan, "--plan-id", plan, ...templatedFieldsArgs("task"), "--no-ai", ...anchors.flatMap((a) => ["--anchor", a])],
             dir,
           ).stdout,
         );
