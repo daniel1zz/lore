@@ -53,6 +53,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs"
 import { join } from "path";
 import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 
 // ─── Path setup ───────────────────────────────────────────────────────────────
 
@@ -180,7 +181,7 @@ afterEach(() => {
 
 function createPrd(title: string): string {
   const r = runLore(
-    ["create", "prd", "--title", title, "--no-ai", "--content", "body"],
+    ["create", "prd", "--title", title, "--no-ai", ...templatedFieldsArgs("prd")],
     tmpDir,
   );
   if (r.exitCode !== 0) throw new Error(`create prd failed: ${r.stderr}`);

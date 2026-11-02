@@ -62,6 +62,7 @@ import { patchLoreConfig } from "../helpers/patch-lore-config.js";
 import { archivePlanWithoutCascade } from "../helpers/archive-plan-legacy.js";
 import { execFileSync } from "child_process";
 import { landTask, type TaskWorld } from "./support/land-task.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 
 interface RunResult {
   readonly stdout: string;
@@ -164,12 +165,12 @@ describe("lore archive — HAPPY/STATE (sweep -> apply -> re-sweep)", () => {
   it("AC-097-3: sweep reports a done_plan_straggler with a literal repair, apply archives it, re-sweep is clean", async () => {
     disablePlanCloseGate(tmpDir);
 
-    const prdResult = runLore(["create", "prd", "--title", "Archive Sweep PRD", "--content", "root", "--no-ai"], tmpDir);
+    const prdResult = runLore(["create", "prd", "--title", "Archive Sweep PRD", "--no-ai", ...templatedFieldsArgs("prd")], tmpDir);
     expect(prdResult.exitCode).toBe(0);
     const prdSlug = parseSlug(prdResult.stdout);
 
     const planResult = runLore(
-      ["create", "plan", "--title", "Sweep Test Plan", "--parent", prdSlug, "--content", "x", "--no-ai"],
+      ["create", "plan", "--title", "Sweep Test Plan", "--parent", prdSlug, "--no-ai", ...planFieldsArgs(prdSlug)],
       tmpDir,
     );
     expect(planResult.exitCode).toBe(0);
@@ -192,9 +193,8 @@ describe("lore archive — HAPPY/STATE (sweep -> apply -> re-sweep)", () => {
         planSlug,
         "--plan-id",
         planSlug,
-        "--content",
-        "x",
         "--no-ai",
+        ...templatedFieldsArgs("task"),
       ],
       tmpDir,
     );
@@ -243,11 +243,11 @@ describe("lore archive — NEGATIVE/STATE (a floor-refused straggler stays open;
   it("an evidence-less straggler is skipped with its floor, stays open, --json carries floor, --sweep still lists it (exit 3), and a handoff still archives", async () => {
     disablePlanCloseGate(tmpDir);
     const prdSlug = parseSlug(
-      runLore(["create", "prd", "--title", "Floor Sweep PRD", "--content", "root", "--no-ai"], tmpDir).stdout,
+      runLore(["create", "prd", "--title", "Floor Sweep PRD", "--no-ai", ...templatedFieldsArgs("prd")], tmpDir).stdout,
     );
     const planSlug = parseSlug(
       runLore(
-        ["create", "plan", "--title", "Floor Sweep Plan", "--parent", prdSlug, "--content", "x", "--no-ai"],
+        ["create", "plan", "--title", "Floor Sweep Plan", "--parent", prdSlug, "--no-ai", ...planFieldsArgs(prdSlug)],
         tmpDir,
       ).stdout,
     );
@@ -256,7 +256,7 @@ describe("lore archive — NEGATIVE/STATE (a floor-refused straggler stays open;
     // Straggler with NO evidence: `lore done` would refuse it with floor `attested-pass`.
     const taskSlug = parseSlug(
       runLore(
-        ["create", "task", "--kind", "code", "--title", "Bare Straggler", "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"],
+        ["create", "task", "--kind", "code", "--title", "Bare Straggler", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", ...templatedFieldsArgs("task")],
         tmpDir,
       ).stdout,
     );
@@ -340,7 +340,7 @@ describe("lore archive — REGRESSION (empty corpus)", () => {
 /** Creates a PRD -> `--requires-uat` plan (approved), with no linked UAT verdict. */
 function createRequiresUatPlan(dir: string): { planSlug: string } {
   const prdResult = runLore(
-    ["create", "prd", "--title", "Gate Disable Control PRD", "--content", "root", "--no-ai"],
+    ["create", "prd", "--title", "Gate Disable Control PRD", "--no-ai", ...templatedFieldsArgs("prd")],
     dir,
   );
   expect(prdResult.exitCode).toBe(0);
@@ -354,9 +354,8 @@ function createRequiresUatPlan(dir: string): { planSlug: string } {
       "Gate Disable Control Plan",
       "--parent",
       prdSlug,
-      "--content",
-      "x",
       "--no-ai",
+      ...planFieldsArgs(prdSlug),
       "--requires-uat",
     ],
     dir,

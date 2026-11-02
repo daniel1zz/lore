@@ -20,6 +20,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const LORE_BIN = join(REPO_ROOT, "dist", "lore");
@@ -91,13 +92,13 @@ describe("AC-SI-12: real session-start hook -> compiled dist/lore -> seat claims
     git(["commit", "-q", "-m", "init"], mainRepo);
 
     mustRun(["init"], mainRepo, scratch);
-    const prd = parseSlug(mustRun(["create", "prd", "--title", "Seat PRD", "--content", "r", "--no-ai"], mainRepo, scratch));
+    const prd = parseSlug(mustRun(["create", "prd", "--title", "Seat PRD", "--no-ai", ...templatedFieldsArgs("prd")], mainRepo, scratch));
     const plan = parseSlug(
-      mustRun(["create", "plan", "--title", "Seat Plan", "--parent", prd, "--content", "x", "--no-ai"], mainRepo, scratch),
+      mustRun(["create", "plan", "--title", "Seat Plan", "--parent", prd, "--no-ai", ...planFieldsArgs(prd)], mainRepo, scratch),
     );
     taskSlug = parseSlug(
       mustRun(
-        ["create", "task", "--title", "Seat hook task", "--kind", "code", "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"],
+        ["create", "task", "--title", "Seat hook task", "--kind", "code", "--parent", plan, "--plan-id", plan, "--no-ai", ...templatedFieldsArgs("task")],
         mainRepo,
         scratch,
       ),

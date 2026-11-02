@@ -36,6 +36,7 @@ import type { AuditEntry } from "@lore/core";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import { actedStore } from "../live-invocation.js";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 
 setDefaultTimeout(180_000);
 
@@ -115,7 +116,7 @@ function preToolPayload(task: string, agentId?: string): Record<string, unknown>
 }
 
 function newTask(title: string): string {
-  const r = mustLore(["create", "task", "--adhoc", "--kind", "corpus", "--title", title,"--ac-scope", "", "--json"]);
+  const r = mustLore(["create", "task", "--adhoc", "--kind", "corpus", "--title", title,"--ac-scope", "", ...templatedFieldsArgs("task"), "--json"]);
   const data = JSON.parse(r.stdout).data as { slug: string; id: string };
   docIds.set(data.slug, data.id);
   return data.slug;
@@ -167,7 +168,7 @@ beforeAll(() => {
   git(["commit", "-q", "-m", "init"]);
 
   mustLore(["init"]);
-  mustLore(["create", "prd", "--title", "E2E Root", "--content", "root", "--no-ai"]);
+  mustLore(["create", "prd", "--title", "E2E Root", "--no-ai", ...templatedFieldsArgs("prd")]);
   tasks.main = newTask("e2e main evidence target");
   tasks.a1 = newTask("e2e agent one evidence target");
   tasks.a2 = newTask("e2e agent two evidence target");

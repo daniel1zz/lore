@@ -98,6 +98,7 @@ import { z } from "zod";
 import { bootstrapReportSchema } from "@lore/core";
 import { sessionActorFor, withSessionIdentity } from "../helpers/session-actor";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { templatedFieldsArgs } from "../helpers/templated-create.js";
 
 // tests/integration/ → tests/ → packages/lore/ (2 levels up).
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -185,7 +186,7 @@ function parseCreatedSlug(stdout: string): string {
 
 function createDoc(cwd: string, type: string, title: string, extraArgs: readonly string[]): string {
   const result = runLoreOk(
-    ["create", type, "--title", title, "--content", `${title} body.`, "--no-ai", ...(type === "task" ? ["--kind", "code"] : []), ...extraArgs],
+    ["create", type, "--title", title, ...templatedFieldsArgs(type), "--no-ai", ...(type === "task" ? ["--kind", "code"] : []), ...extraArgs],
     cwd,
   );
   return parseCreatedSlug(result.stdout);

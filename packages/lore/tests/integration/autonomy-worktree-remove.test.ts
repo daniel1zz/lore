@@ -27,6 +27,7 @@ import { Database } from "bun:sqlite";
 import { evaluateRecordedWorktree, type WorktreeGitProbe } from "../../src/service/worktree-cleanup.js";
 import type { WorktreeRemovalFacts } from "../../src/service/worktree-removal-test.js";
 import { patchLoreConfig } from "../helpers/patch-lore-config.js";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create.js";
 
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
@@ -394,16 +395,16 @@ function falsifyFixture(command: string): { plan: string; task: string; acId: st
     ["workflow:", "  gates:", "    spec-create:", "      enabled: false", "    spec-promote:", "      enabled: false", "    plan-promote:", "      enabled: false", "    task-claim:", "      enabled: false", '    "task-create":', "      enabled: false", ""].join("\n"),
   );
   const acId = "AC-AU11-FALSIFY";
-  must(lore(["create", "prd", "--title", "AU11 Falsify PRD", "--no-ai", "--content", "body"]), "create prd");
-  const spec = slugOf(must(lore(["create", "spec", "--title", "AU11 Falsify Spec", "--no-ai", "--content", "body"]), "create spec").stdout);
+  must(lore(["create", "prd", "--title", "AU11 Falsify PRD", "--no-ai", ...templatedFieldsArgs("prd")]), "create prd");
+  const spec = slugOf(must(lore(["create", "spec", "--title", "AU11 Falsify Spec", "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature" })]), "create spec").stdout);
   must(
     lore(["ac", "add", spec, acId, "--statement", "falsify cleanup oracle", "--mode", "script", "--oracle", "other", "--command", command,
       "--falsifier-path", "dependency.txt", "--falsifier-find", "hello", "--falsifier-replace", "goodbye", "--falsifier-exit-code", "1"]),
     "ac add",
   );
-  const plan = slugOf(must(lore(["create", "plan", "--title", "AU11 Falsify Plan", "--parent", spec, "--no-ai", "--content", "body"]), "create plan").stdout);
+  const plan = slugOf(must(lore(["create", "plan", "--title", "AU11 Falsify Plan", "--parent", spec, "--no-ai", ...planFieldsArgs(spec)]), "create plan").stdout);
   const task = slugOf(
-    must(lore(["create", "task", "--kind", "code", "--title", "AU11 Falsify Task", "--parent", plan, "--plan-id", plan, "--no-ai", "--content", "body", "--ac-scope", acId]), "create task").stdout,
+    must(lore(["create", "task", "--kind", "code", "--title", "AU11 Falsify Task", "--parent", plan, "--plan-id", plan, "--no-ai", ...templatedFieldsArgs("task"), "--ac-scope", acId]), "create task").stdout,
   );
   return { plan, task, acId };
 }
