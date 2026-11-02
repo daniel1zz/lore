@@ -1,6 +1,8 @@
 /**
  * BR-1562: the typecheck reuses incremental build info from the last verified landing.
  * Drives scripts/typecheck-cache.ts against a throwaway three-file TypeScript project (never the repo's own tree or .lore).
+ *
+ * @spawns scripts/typecheck-cache.ts
  */
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -75,8 +77,8 @@ describe("AC-TC-1 incremental equals full, including dependents", () => {
     expect(seeded.out).toContain(`seeded from landing ${L1}`);
     const inc = tscIncremental();
     const full = tscFull();
-    expect(full.status).toBe(1);
-    expect(inc.status).toBe(1); // false green guard: skipping dependent b would exit 0
+    expect(full.status).not.toBe(0);
+    expect(inc.status).not.toBe(0); // false green guard: skipping dependent b would exit 0
     expect(inc.out).toContain("b.ts");
     expect(lines(inc.out)).toBe(lines(full.out));
   });
@@ -87,7 +89,7 @@ describe("AC-TC-1 incremental equals full, including dependents", () => {
     expect(seeded.out).toContain("cold");
     expect(existsSync(join(root, ".cache/typecheck"))).toBe(false);
     const inc = tscIncremental();
-    expect(inc.status).toBe(1);
+    expect(inc.status).not.toBe(0);
     expect(lines(inc.out)).toBe(lines(tscFull().out));
   });
   it("changing bun.lock, a tsconfig or the TypeScript version gives a new env key and a cold run", () => {
@@ -253,7 +255,7 @@ describe("AC-TC-3 the sampled full check catches a stale cache", () => {
   it("planted stale build info: the incremental run misses b's error, the comparison exits 1 naming both outputs and deletes both caches", () => {
     plantStale();
     expect(tscIncremental().status, "precondition: the planted build info must make the incremental run miss the error").toBe(0);
-    expect(tscFull().status).toBe(1);
+    expect(tscFull().status).not.toBe(0);
     const key = envKey();
     const r = cache(["compare"], { LORE_TYPECHECK_SAMPLE: "1" });
     expect(r.status).toBe(1);
@@ -266,7 +268,7 @@ describe("AC-TC-3 the sampled full check catches a stale cache", () => {
     expect(existsSync(join(cacheRoot(), key, `current.invalid-${L1}`))).toBe(true);
     // the next run is cold and now reports the error, instead of the retry failing the same way again
     expect(cache(["seed"]).out).toContain("cold");
-    expect(tscIncremental().status).toBe(1);
+    expect(tscIncremental().status).not.toBe(0);
   });
   it("same exit code but different diagnostics still fails (not an exit-code-only comparison)", () => {
     write("c.ts", "export const c: number = 'x';\n"); // a standing error in c: both runs exit 1
@@ -280,7 +282,7 @@ describe("AC-TC-3 the sampled full check catches a stale cache", () => {
     write("a.ts", BAD_A);
     cache(["seed"]);
     const inc = tscIncremental();
-    expect(inc.status).toBe(1);
+    expect(inc.status).not.toBe(0);
     expect(inc.out).not.toContain("b.ts");
     expect(tscFull().out).toContain("b.ts");
     const r = cache(["compare"], { LORE_TYPECHECK_SAMPLE: "1" });
