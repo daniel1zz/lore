@@ -59,6 +59,10 @@ export const doneContractOracleSchema = z
     id: z.string().min(1),
     // reason: `corpus:files-unchanged` is proved by `lore finish` itself and has no command of its own.
     command: z.string().min(1).optional(),
+    // reason: BR-1547 — a test file the task declared with `--creates`; `lore finish` reports it absent as `test-file-absent`,
+    // never inconclusive. Optional because contracts stored before the marker have none: read it only through
+    // {@link oracleCreatedByTask}, which treats a missing marker as false.
+    created_by_task: z.boolean().optional(),
   })
   .strict();
 
@@ -94,3 +98,15 @@ export type DoneContract = z.infer<typeof doneContractSchema>;
 
 /** One oracle of a contract, derived from {@link doneContractOracleSchema}. */
 export type DoneContractOracle = z.infer<typeof doneContractOracleSchema>;
+
+/**
+ * Whether the task declared the oracle's test file with `--creates` (BR-1547). A stored contract written before the marker existed
+ * has no `created_by_task` key; that is read as `false`, explicitly, never as "unknown".
+ *
+ * @param oracle - an oracle of a stored contract
+ * @example
+ * oracleCreatedByTask({ id: "test:a.test.ts" }) // => false
+ */
+export function oracleCreatedByTask(oracle: DoneContractOracle): boolean {
+  return oracle.created_by_task === true;
+}

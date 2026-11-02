@@ -26,10 +26,12 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as yaml from "yaml";
+import { oracleCreatedByTask } from "@lore/core";
 import { createApp, type App } from "../../src/app";
 import { handleApiRoute } from "../../src/adapters/http/routes";
 import { handleDashboardRoute } from "../../src/adapters/http/dashboard-routes";
@@ -481,6 +483,13 @@ describe("the done contract compiled at approve", () => {
 
   beforeAll(async () => {
     cf = await makeDoneContractFixture();
+    // The anchored test files exist at main's tip: approve refuses an absent undeclared test anchor (AC-DCF-1).
+    for (const file of [TEST_FILE, "packages/demo/src/demo.ts"]) {
+      mkdirSync(join(cf.dir, file, ".."), { recursive: true });
+      writeFileSync(join(cf.dir, file), "// seed\n");
+    }
+    cf.git(["add", "-A"]);
+    cf.git(["commit", "-q", "-m", "seed anchored files"]);
     // A second spec whose criterion supersedes one of the first spec's (a superseded criterion gives no oracle).
     await cf.mustRun(["ac", "add", cf.spec, "AC-FX-SUP", "--statement", "Soon superseded.", "--mode", "script", "--oracle", "test", "--command", "echo sup"]);
     const spec2Out = await cf.mustRun(["create", "spec", "--title", "Fixture Spec Two", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"]);
@@ -811,5 +820,143 @@ describe("the done contract compiled at approve", () => {
         expect(after.version).toBe(before.version);
       }
     });
+  });
+});
+
+describe("AC-DCF-1: approve refuses an absent undeclared test anchor; --creates declares a new one", () => {
+  let df: DoneContractFixture;
+  let dfPlan = "";
+  let scratchDir = "";
+  const EXISTING = "tests/exists.test.ts";
+  const MISSING = "tests/missing.test.ts";
+  const NEW_FILE = "tests/new.test.ts";
+  const FINISH_CONFIG = { install: "echo install-ok", typecheck: "echo typecheck-ok", test_file: "echo Ran 1 tests in {file}" };
+
+  beforeAll(async () => {
+    df = await makeDoneContractFixture();
+    df.setDoneContractConfig(FINISH_CONFIG);
+    patchLoreConfig(df.dir, { workflow: { gates: { "plan-close": { enabled: false }, "plan-promote": { enabled: false }, "task-claim": { enabled: false } }, integrate: { floor_command: "true" } } });
+    mkdirSync(join(df.dir, "tests"), { recursive: true });
+    writeFileSync(join(df.dir, EXISTING), "// seed\n");
+    df.git(["add", "-A"]);
+    df.git(["commit", "-q", "-m", "seed an existing test file"]);
+    df.git(["checkout", "-q", "--detach", "main"]);
+    dfPlan = await df.createPlan("Absent anchor plan");
+    scratchDir = mkdtempSync(join(tmpdir(), "dcf1-"));
+  });
+
+  afterAll(() => {
+    df.dispose();
+    rmSync(scratchDir, { recursive: true, force: true });
+  });
+
+  type StoredOracle = { id: string; command?: string; created_by_task?: boolean };
+  const contractOfTask = async (slug: string): Promise<{ oracles: StoredOracle[] }> =>
+    (await df.readTask(slug)).extra["done_contract"] as { oracles: StoredOracle[] };
+
+  it("AC-DCF-1: approve of a code task anchored to an absent undeclared test file exits 4 done-contract-uncompilable with anchor-absent naming the path, anchor rm and --creates, and writes nothing", async () => {
+    const slug = await df.createTask({ plan: dfPlan, kind: "code", title: "Absent anchor", anchors: [MISSING], plainAnchors: true, acScope: [] });
+    const before = await df.readTask(slug);
+    const refused = await df.run(["approve", slug]);
+    expect(refused.exitCode, refused.stderr).toBe(4);
+    expect(refused.stderr).toContain("done-contract-uncompilable");
+    expect(refused.stderr).toContain("anchor-absent");
+    expect(refused.stderr).toContain(MISSING);
+    expect(refused.stderr).toContain("lore anchor rm");
+    expect(refused.stderr).toContain("--creates");
+    const after = await df.readTask(slug);
+    expect(after.status).toBe("draft");
+    expect(after.version).toBe(before.version);
+    expect(Object.keys(after.extra)).not.toContain("done_contract");
+  });
+
+  it("AC-DCF-1: lore anchor add --creates declares the absent file; approve exits 0 and the contract marks that oracle created_by_task", async () => {
+    const slug = await df.createTask({ plan: dfPlan, kind: "code", title: "Creates a test", anchors: [EXISTING], acScope: [] });
+    const added = await df.run(["anchor", "add", slug, NEW_FILE, "--creates"]);
+    expect(added.exitCode, added.stderr).toBe(0);
+    const approved = await df.run(["approve", slug]);
+    expect(approved.exitCode, approved.stderr).toBe(0);
+    const oracles = (await contractOfTask(slug)).oracles;
+    expect(oracles.find((o) => o.id === `test:${NEW_FILE}`)?.created_by_task).toBe(true);
+    // The anchor that exists is a plain oracle: the marker is absent, not false.
+    const plain = oracles.find((o) => o.id === `test:${EXISTING}`);
+    expect(plain).toBeDefined();
+    expect(Object.keys(plain ?? {})).not.toContain("created_by_task");
+  });
+
+  it("AC-DCF-1: lore create task --creates declares it at creation; a task anchored to an existing file approves unchanged (control)", async () => {
+    const out = await df.run(["create", "task", "--title", "Creates at create", "--plan-id", dfPlan, "--kind", "code", "--content", "x", "--no-ai", "--ac-scope", "", "--creates", "tests/born.test.ts"]);
+    expect(out.exitCode, out.stderr).toBe(0);
+    const slug = out.stdout.match(/Slug:\s+(\S+)/)?.[1] ?? "";
+    expect((await df.run(["approve", slug])).exitCode).toBe(0);
+    expect((await contractOfTask(slug)).oracles.find((o) => o.id === "test:tests/born.test.ts")?.created_by_task).toBe(true);
+
+    const control = await df.createTask({ plan: dfPlan, kind: "code", title: "Existing anchor", anchors: [EXISTING], acScope: [] });
+    expect((await df.run(["approve", control])).exitCode).toBe(0);
+    expect((await contractOfTask(control)).oracles.every((o) => o.created_by_task === undefined)).toBe(true);
+  });
+
+  it("AC-DCF-1: --creates on a task holding a landing record exits 4 creates-after-landing and writes nothing", async () => {
+    const slug = await df.createTask({ plan: dfPlan, kind: "code", title: "Already landed", anchors: [EXISTING], acScope: [] });
+    const app = createApp(join(df.dir, ".lore", "lore.db"), undefined, liveAmbient(), liveWriteContext());
+    try {
+      const found = await app.corpusService.get(slug);
+      if (!found.ok) throw new Error("seed: task not found");
+      const sha = df.git(["rev-parse", "main"]);
+      const landing = { branch: "b", branch_head: sha, main_before: sha, main_after: sha, landing_commit: sha, recorded_at: new Date().toISOString(), kind: "no-change" };
+      const written = await app.corpusService.writeDoc({
+        doc: found.value.doc, patch: { extra: { ...found.value.doc.extra, landing } }, action: "update", changeSummary: "fixture: landing record",
+        auditAction: "update", auditDetails: { operation: "fixture-landing" }, lock: "none", by: "fixture", now: new Date().toISOString(),
+      });
+      if (!written.ok) throw new Error(`seed failed: ${JSON.stringify(written.error)}`);
+    } finally {
+      app.close();
+    }
+    const before = await df.readTask(slug);
+    const refused = await df.run(["anchor", "add", slug, "tests/late.test.ts", "--creates"]);
+    expect(refused.exitCode, refused.stderr).toBe(4);
+    expect(refused.stderr).toContain("creates-after-landing");
+    const after = await df.readTask(slug);
+    expect(after.version).toBe(before.version);
+    expect(after.extra["file_anchors"]).toEqual(before.extra["file_anchors"]);
+  });
+
+  it("AC-DCF-1: a stored oracle with no created_by_task marker reads as false (contracts written before the marker)", () => {
+    expect(oracleCreatedByTask({ id: "test:tests/old.test.ts", command: "echo old" })).toBe(false);
+    expect(oracleCreatedByTask({ id: "test:tests/new.test.ts", command: "echo new", created_by_task: true })).toBe(true);
+    expect(oracleCreatedByTask({ id: "test:tests/x.test.ts", command: "echo x", created_by_task: false })).toBe(false);
+  });
+
+  it("AC-DCF-1: lore finish while the created file is absent exits 4 with test-file-absent naming it (never inconclusive); once the file exists and passes it finishes", async () => {
+    const slug = await df.createTask({ plan: dfPlan, kind: "code", title: "Finish creates", anchors: [EXISTING], acScope: [] });
+    expect((await df.run(["anchor", "add", slug, NEW_FILE, "--creates"])).exitCode).toBe(0);
+    expect((await df.run(["approve", slug, "--red-waiver", "the created file is the point of this check"])).exitCode).toBe(0);
+    const branch = "dcf1-finish-branch";
+    const tree = join(scratchDir, "finish-tree");
+    df.git(["worktree", "add", "-q", "-b", branch, tree, "main"]);
+    const env: Record<string, string> = { CLAUDE_CODE_SESSION_ID: "dcf1-finish", HOME: FIXTURE_HOME_OUTSIDE_REPO };
+    for (const [key, value] of Object.entries(process.env)) if (typeof value === "string" && !(key in env)) env[key] = value;
+    const loreIn = (cwd: string, args: string[]) => runLoreInProcess(args, { cwd, home: FIXTURE_HOME_OUTSIDE_REPO, env });
+    const claimed = await loreIn(df.dir, ["claim", slug, "--worktree", branch]);
+    expect(claimed.exitCode, claimed.stderr).toBe(0);
+    const gitIn = (args: string[]) => execFileSync("git", args, { cwd: tree, encoding: "utf8" });
+    gitIn(["config", "user.email", "fixture@example.invalid"]);
+    gitIn(["config", "user.name", "fixture"]);
+    writeFileSync(join(tree, "work.txt"), "work\n");
+    gitIn(["add", "-A"]);
+    gitIn(["commit", "-q", "-m", "work without the test file"]);
+
+    const refused = await loreIn(tree, ["finish", slug]);
+    const text = `${refused.stdout}\n${refused.stderr}`;
+    expect(refused.exitCode, text).toBe(4);
+    expect(text).toContain("test-file-absent");
+    expect(text).toContain(NEW_FILE);
+    expect(text).not.toContain("inconclusive");
+
+    writeFileSync(join(tree, NEW_FILE), "// the created test\n");
+    gitIn(["add", "-A"]);
+    gitIn(["commit", "-q", "-m", "add the created test"]);
+    const finished = await loreIn(tree, ["finish", slug]);
+    expect(finished.exitCode, `${finished.stdout}\n${finished.stderr}`).toBe(0);
   });
 });

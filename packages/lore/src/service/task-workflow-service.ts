@@ -294,6 +294,7 @@ import {
   normalizeFileAnchors,
   normalizeWriteSet,
   effectiveWriteSet,
+  extractCreatesAnchors,
   extractFileAnchors,
   fileAnchorPath,
   anchorsOverlap,
@@ -931,6 +932,8 @@ export interface AnchorMutationOpts {
   by: string;
   /** See {@link ClaimOpts.source}. */
   source?: string;
+  /** `addAnchors` only (BR-1547): the added entries are test files this task will create (`lore anchor add --creates`). */
+  creates?: boolean;
 }
 
 /**
@@ -5739,7 +5742,7 @@ export class TaskWorkflowService {
     now: () => string = defaultNow,
   ): Promise<Result<DocRecord, LoreError>> {
     const startMs = Date.now();
-    const result = await this._addAnchorsImpl(idOrSlug, anchors, opts.by, now);
+    const result = await this._addAnchorsImpl(idOrSlug, anchors, opts.by, now, opts.creates === true);
     this.recordEvent("task.anchors_updated", startMs, result, opts.source, { count: anchors.length });
     return result;
   }
@@ -5749,6 +5752,7 @@ export class TaskWorkflowService {
     anchors: string[],
     by: string,
     now: () => string,
+    creates: boolean,
   ): Promise<Result<DocRecord, LoreError>> {
     const taskResult = await this.resolveTask(idOrSlug);
     if (!taskResult.ok) return taskResult;
@@ -5757,8 +5761,29 @@ export class TaskWorkflowService {
     const existing = extractFileAnchors(task);
     const normalizedResult = normalizeFileAnchors([...existing, ...anchors]);
     if (!normalizedResult.ok) return normalizedResult;
+    if (!creates) return this.commitAnchors(task, normalizedResult.value, by, now);
 
-    return this.commitAnchors(task, normalizedResult.value, by, now);
+    // reason: BR-1547 — a landed task's work is on main already; declaring a file it "will create" afterwards would re-arm
+    // `test-file-absent` for work that is done. `landing_history` covers a task whose landing was re-opened.
+    if (readTaskLanding(task.extra) !== undefined || Array.isArray(task.extra["landing_history"])) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "creates",
+        message: `creates-after-landing: task "${task.slug}" holds a landing record, so it cannot declare a file it will create; nothing was written.`,
+        value: "creates-after-landing",
+      });
+    }
+    const notTests = anchors.filter((anchor) => !isTestFileAnchor(anchor));
+    if (notTests.length > 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "creates",
+        message: `--creates declares test files the task will create; ${notTests.join(", ")} ${notTests.length === 1 ? "is" : "are"} not a test file path. Nothing was written.`,
+        value: notTests,
+      });
+    }
+    const addedPaths = anchors.map((anchor) => fileAnchorPath(anchor));
+    return this.commitAnchors(task, normalizedResult.value, by, now, [...new Set([...extractCreatesAnchors(task), ...addedPaths])]);
   }
 
   /**
@@ -5868,6 +5893,7 @@ export class TaskWorkflowService {
     newAnchors: string[],
     by: string,
     now: () => string,
+    declaredCreates?: readonly string[],
   ): Promise<Result<DocRecord, LoreError>> {
     // reason: BR-1468 is decided at claim time, so an anchor added under an open NO-BRANCH claim would let the task close as
     // no-change from a pass at main's head while its file changes were never measured. Refused (not "release the claim"):
@@ -5889,6 +5915,12 @@ export class TaskWorkflowService {
     }
     const nowIso = now();
     const newExtra: Record<string, unknown> = { ...task.extra, file_anchors: newAnchors };
+    // reason: `creates_anchors` is a subset of `file_anchors` (BR-1547): removing an anchor drops its declaration too, and the key
+    // is absent rather than `[]` when nothing is declared.
+    const anchorPaths = new Set(newAnchors.map((anchor) => fileAnchorPath(anchor)));
+    const creates = (declaredCreates ?? extractCreatesAnchors(task)).filter((path) => anchorPaths.has(path));
+    if (creates.length > 0) newExtra["creates_anchors"] = creates;
+    else delete newExtra["creates_anchors"];
     return this.writeTaskExtra(
       task,
       newExtra,
