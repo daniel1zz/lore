@@ -1,6 +1,6 @@
 {
   "doc_type": "plan",
-  "version": 1,
+  "version": 2,
   "fields": {
     "type": "object",
     "required": ["goal", "spec_ref", "phases", "task_criteria_map", "close_condition"],
@@ -96,6 +96,10 @@
     {
       "id": "cost",
       "question": "What does the plan cost in tasks, agent runs and verification, and what is the cheapest cut that still meets the goal?"
+    },
+    {
+      "id": "repetition",
+      "question": "Does this change repeat one pattern across many sites? If so, which script does it and which sites need hand work? If not, say why (an na answer states the reason)."
     }
   ],
   "checks": ["refs-resolve", "goal-has-measure"],
