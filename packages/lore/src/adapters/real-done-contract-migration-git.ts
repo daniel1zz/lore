@@ -29,5 +29,16 @@ export function createRealMigrationGit(repoRoot: string): MigrationGitPort {
   return {
     resolveCommit: (ref) => (ref.startsWith("-") ? undefined : resolve(repoRoot, `${ref}^{commit}`)),
     branchTip: (name) => (name.startsWith("-") ? undefined : resolve(repoRoot, `refs/heads/${name}^{commit}`)),
+    isAncestor: (ancestor, descendant) => {
+      try {
+        execFileSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] });
+        return true;
+      } catch (cause) {
+        const failure = cause as { status?: number | null };
+        // reason: exit 1 = not an ancestor; exit 128 = a commit git cannot read, which is also "main does not contain it".
+        if (failure.status === 1 || failure.status === 128) return false;
+        throw cause;
+      }
+    },
   };
 }

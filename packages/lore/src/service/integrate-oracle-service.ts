@@ -131,6 +131,11 @@ export interface OracleRunInput {
   readonly log: (line: string) => void;
   readonly clock: () => number;
   readonly nowIso: string;
+  /**
+   * `true`: a failed oracle is returned as an outcome with `passed: false` instead of failing the whole proof (BR-1549: the migration
+   * attests the landed tasks whose oracles all passed and names the others). Absent for a landing, where one failure stops main moving.
+   */
+  readonly keepFailures?: boolean;
 }
 
 /** Everything `record` needs. */
@@ -355,7 +360,7 @@ export class IntegrateOracleService implements LandingOracles {
 
     const failed = outcomes.filter((outcome) => !outcome.passed);
     const oracleFailure = (list: readonly OracleOutcome[]): LoreError => this.describeFailure(list, runnable, input);
-    if (failed.length > 0) return err(oracleFailure(failed));
+    if (failed.length > 0 && input.keepFailures !== true) return err(oracleFailure(failed));
     return ok({ tasks: runnable, excluded, outcomes });
   }
 
