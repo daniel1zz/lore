@@ -1,3 +1,5 @@
+// @reads assets/project/lore-config-template.yaml
+// @spawns packages/lore/tests/helpers/approve-nodes-cli.ts
 /**
  * AC-AT-3 — approving a plan, and approving a task in a plan, prints an advisory when three open tasks have bodies that
  * differ only in counts, paths or ids; two such tasks or three dissimilar ones print none; the approval never fails
@@ -9,16 +11,23 @@
  * @spec_ref spec-helpers-may-change-files-by-any-means-territory-is AC-AT-3
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
+import { asyncLoreRunnerFor, citeSpecViaAsyncCli } from "../../helpers/cli-live-rule.js";
 import { planFieldsArgs, templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 vi.setConfig({ testTimeout: 240_000, hookTimeout: 240_000 });
 
 let dir: string;
 let counter = 0;
+
+async function runLoreIn(args: string[], cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const r = await runLoreInProcess(args, { cwd, home: cwd, env: { ...process.env, HOME: cwd, EDITOR: "true", LORE_ACTOR: "agent:similar-tasks-test" } });
+  return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode };
+}
 
 async function runLore(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const r = await runLoreInProcess(args, { cwd: dir, home: dir, env: { ...process.env, HOME: dir, EDITOR: "true", LORE_ACTOR: "agent:similar-tasks-test" } });
@@ -39,7 +48,7 @@ async function makePlan(objectives: string[]): Promise<{ plan: string; tasks: st
   const tasks: string[] = [];
   for (const [i, objective] of objectives.entries()) {
     const letter = String.fromCharCode(97 + i);
-    await mustRun(["create", "task", "--kind", "code", "--title", `Sim Task ${n} ${letter}`, "--parent", plan, "--plan-id", plan, "--no-ai", ...templatedFieldsArgs("task", { fields: { objective } })]);
+    await mustRun(["create", "task", "--kind", "code", "--title", `Sim Task ${n} ${letter}`, "--parent", plan, "--plan-id", plan, "--ac-scope", "AC-SIM-1", "--no-ai", ...templatedFieldsArgs("task", { fields: { objective } })]);
     tasks.push(`task-sim-task-${n}-${letter}`);
   }
   return { plan, tasks };
@@ -49,11 +58,16 @@ const similar = (k: number): string => `Rename the helper wireUp in packages/pkg
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lore-similar-tasks-"));
+  // A code task's done contract needs its base branch to exist: a throwaway repository on `main` with one commit.
+  const git = (...args: string[]): void => void execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+  git("init", "-q", "-b", "main");
+  git("-c", "user.email=f@example.invalid", "-c", "user.name=fixture", "commit", "-q", "--allow-empty", "-m", "init");
   await mustRun(["init"]);
   await mustRun(["create", "prd", "--title", "Sim PRD", "--no-ai", ...templatedFieldsArgs("prd", { refTarget: "problem" })]);
   await mustRun(["create", "spec", "--title", "Sim Spec", "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature", refTarget: "prd-sim-prd" })]);
-  await mustRun(["approve", "prd-sim-prd"]);
-  await mustRun(["approve", "spec-sim-spec"]);
+  await mustRun(["ac", "add", "spec-sim-spec", "AC-SIM-1", "--statement", "The fixture criterion holds.", "--mode", "script", "--oracle", "test", "--command", "bun test"]);
+  await citeSpecViaAsyncCli(asyncLoreRunnerFor(runLoreIn, dir), dir, "prd-sim-prd", "spec-sim-spec", "AC-SIM-1");
+  await mustRun(["approve", "spec-sim-spec", "--override-no-judgment"]);
 }, 240_000);
 
 afterAll(() => {
