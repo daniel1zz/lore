@@ -93,9 +93,9 @@ describe("AC-LG-6: judge only spec and adr", () => {
   }, TIMEOUT_MS);
 
   it("judge only spec and adr: a spec and an ADR are refused with exit 4 naming review-judgment", async () => {
-    const spec = slugOf(await must(["create", "spec", "--title", "Judge scope spec", ...templatedFieldsArgs("spec", { kind: "feature" }), "--no-ai"]));
+    const spec = slugOf(await must(["create", "spec", "--title", "Judge scope spec", ...templatedFieldsArgs("spec", { kind: "feature", refTarget: prd }), "--no-ai"]));
     const adr = slugOf(
-      await must(["create", "adr", "--title", "Judge scope adr", "--parent", prd, ...templatedFieldsArgs("adr"), "--decision-status", "proposed", "--no-ai"]),
+      await must(["create", "adr", "--title", "Judge scope adr", "--parent", prd, ...templatedFieldsArgs("adr", { refTarget: prd }), "--decision-status", "proposed", "--no-ai"]),
     );
     for (const slug of [spec, adr]) {
       const r = await lore(["approve", slug]);

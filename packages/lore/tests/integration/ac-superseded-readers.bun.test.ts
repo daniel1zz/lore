@@ -130,8 +130,8 @@ beforeAll(async () => {
   } finally {
     side.close();
   }
-  specS =slugOf(await must(["create", "spec", "--title", "SR Spec S", "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature" })]));
-  specS2 = slugOf(await must(["create", "spec", "--title", "SR Spec S2", "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature" })]));
+  specS =slugOf(await must(["create", "spec", "--title", "SR Spec S", "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature", refTarget: prd })]));
+  specS2 = slugOf(await must(["create", "spec", "--title", "SR Spec S2", "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature", refTarget: prd })]));
   await addScriptAc(specS, "AC-1");
   await addScriptAc(specS, "AC-2");
   await addScriptAc(specS, "AC-3");
