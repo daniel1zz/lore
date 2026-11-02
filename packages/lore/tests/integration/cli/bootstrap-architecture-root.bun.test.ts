@@ -22,6 +22,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
@@ -70,12 +71,12 @@ function makeCorpus(opts: { business: boolean; architecture: boolean }): Fixture
   execFileSync("git", ["add", "."], { cwd: dir });
   execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: dir });
   mustRun(["init"], dir);
-  const prd = slugOf(mustRun(["create", "prd", "--title", "Fixture PRD", "--content", "root", "--no-ai"], dir));
+  const prd = slugOf(mustRun(["create", "prd", "--title", "Fixture PRD", ...templatedFieldsArgs("prd"), "--no-ai"], dir));
   const businessRoot = opts.business
-    ? slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "biz", "--title", "Biz Root"], dir))
+    ? slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "biz", "--title", "Biz Root", ...templatedFieldsArgs("baseline", { kind: "root" })], dir))
     : undefined;
   const architectureRoot = opts.architecture
-    ? slugOf(mustRun(["baseline", "add", prd, "--tree", "architecture", "--node", "root", "--label", "arch", "--title", "Arch Root"], dir))
+    ? slugOf(mustRun(["baseline", "add", prd, "--tree", "architecture", "--node", "root", "--label", "arch", "--title", "Arch Root", ...templatedFieldsArgs("baseline", { kind: "root" })], dir))
     : undefined;
   return { dir, businessRoot, architectureRoot };
 }

@@ -43,6 +43,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { App } from "../../../src/app.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 import { loadLoreApp } from "../../../src/adapters/cli/loader.js";
 import { handleApiRoute } from "../../../src/adapters/http/routes.js";
 import type { ActorContext } from "../../../src/adapters/http/auth.js";
@@ -108,16 +109,16 @@ function makeCorpus(prdTitles: string[], opts: { baselineUnder?: number; baselin
   mustRun(["init"], dir);
   const prds: string[] = [];
   for (const title of prdTitles) {
-    prds.push(slugOf(mustRun(["create", "prd", "--title", title, "--content", "root", "--no-ai"], dir).stdout));
+    prds.push(slugOf(mustRun(["create", "prd", "--title", title, ...templatedFieldsArgs("prd"), "--no-ai"], dir).stdout));
   }
   let baselineRoot: string | undefined;
   if (opts.baselineUnder !== undefined) {
     const parent = prds[opts.baselineUnder];
     if (parent === undefined) throw new Error("baselineUnder index out of range");
     baselineRoot = slugOf(
-      mustRun(["baseline", "add", parent, "--node", "root", "--label", "root", "--title", opts.baselineTitle ?? "BL Root"], dir).stdout,
+      mustRun(["baseline", "add", parent, "--node", "root", "--label", "root", "--title", opts.baselineTitle ?? "BL Root", ...templatedFieldsArgs("baseline", { kind: "root" })], dir).stdout,
     );
-    mustRun(["baseline", "add", baselineRoot, "--node", "branch", "--label", "br", "--title", "BL Branch"], dir);
+    mustRun(["baseline", "add", baselineRoot, "--node", "branch", "--label", "br", "--title", "BL Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })], dir);
   }
   return { dir, prds, baselineRoot };
 }
@@ -203,8 +204,8 @@ beforeAll(() => {
 
   diffCorpus = makeCorpus(["Diff PRD"]);
   diffBefore = normaliseBootstrap(bootstrapText(diffCorpus));
-  const root = slugOf(mustRun(["baseline", "add", diffCorpus.prds[0] as string, "--node", "root", "--label", "root", "--title", "Diff BL Root"], diffCorpus.dir).stdout);
-  mustRun(["baseline", "add", root, "--node", "branch", "--label", "br", "--title", "Diff Branch"], diffCorpus.dir);
+  const root = slugOf(mustRun(["baseline", "add", diffCorpus.prds[0] as string, "--node", "root", "--label", "root", "--title", "Diff BL Root", ...templatedFieldsArgs("baseline", { kind: "root" })], diffCorpus.dir).stdout);
+  mustRun(["baseline", "add", root, "--node", "branch", "--label", "br", "--title", "Diff Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })], diffCorpus.dir);
   diffAfter = normaliseBootstrap(bootstrapText(diffCorpus));
 });
 
@@ -407,8 +408,8 @@ describe("baseline root navigation ignores an architecture root (#122, BR-981)",
   it("an architecture root created BEFORE the business root changes neither bootstrap Root: nor the lore tree default", () => {
     const c = makeCorpus(["Arch PRD"]);
     const prd = c.prds[0] as string;
-    mustRun(["baseline", "add", prd, "--tree", "architecture", "--node", "root", "--label", "arch-root", "--title", "Arch Root"], c.dir);
-    const biz = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "Biz Root"], c.dir).stdout);
+    mustRun(["baseline", "add", prd, "--tree", "architecture", "--node", "root", "--label", "arch-root", "--title", "Arch Root", ...templatedFieldsArgs("baseline", { kind: "root" })], c.dir);
+    const biz = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "Biz Root", ...templatedFieldsArgs("baseline", { kind: "root" })], c.dir).stdout);
     expect(bootstrapText(c).split("\n")).toContain(`Root: ${biz} "Biz Root"`);
     expect(treeJson(c).doc.slug).toBe(biz);
     expect(treeText(c).split("\n")[0]).toContain("Biz Root");

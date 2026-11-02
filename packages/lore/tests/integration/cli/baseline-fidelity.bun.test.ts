@@ -20,6 +20,7 @@ const setDefaultTimeout = (ms: number): void => { vi.setConfig({ testTimeout: ms
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -100,13 +101,13 @@ beforeAll(() => {
       "",
     ].join("\n"),
   );
-  const prd = slugOf(mustRun(["create", "prd", "--title", "Fid PRD", "--content", "root", "--no-ai"]).stdout);
-  const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "Fid Root"]).stdout);
-  const branch = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "br", "--title", "Fid Branch"]).stdout);
-  const leaf = slugOf(mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "lf", "--title", "Fid Leaf"]).stdout);
+  const prd = slugOf(mustRun(["create", "prd", "--title", "Fid PRD", ...templatedFieldsArgs("prd"), "--no-ai"]).stdout);
+  const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "Fid Root", ...templatedFieldsArgs("baseline", { kind: "root" })]).stdout);
+  const branch = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "br", "--title", "Fid Branch", ...templatedFieldsArgs("baseline", { kind: "branch" })]).stdout);
+  const leaf = slugOf(mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "lf", "--title", "Fid Leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })]).stdout);
   mustRun(["rule", "add", leaf, "--statement", "an AC id is unique within its spec", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "duplicate id refused"]);
   approveFixtureNodes(corpus, [leaf]); // a direct add is a pending add: the fidelity pool counts live (approved) rules
-  const spec = slugOf(mustRun(["create", "spec", "--title", "Fid Spec", "--content", "## Overview/Goal\nx\n\n## Scope\nx\n\n## Acceptance Criteria\nx", "--no-ai"]).stdout);
+  const spec = slugOf(mustRun(["create", "spec", "--title", "Fid Spec", ...templatedFieldsArgs("spec", { kind: "feature" }), "--no-ai"]).stdout);
   specSlug = spec;
   mustRun(["ac", "add", spec, "AC-FID-1", "--statement", "a duplicate criterion id is refused", "--mode", "human", "--cite", "BR-1"]);
 });

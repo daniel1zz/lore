@@ -21,6 +21,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 import { DECIDED_FLAGS } from "../../helpers/decision-flags.js";
 
 setDefaultTimeout(300_000);
@@ -56,7 +57,7 @@ function slugOf(stdout: string): string {
 }
 
 function archAdd(parent: string, node: string, label: string, title: string): string {
-  return slugOf(mustRun(["baseline", "add", parent, "--tree", "architecture", "--node", node, "--label", label, "--title", title]).stdout);
+  return slugOf(mustRun(["baseline", "add", parent, "--tree", "architecture", "--node", node, "--label", label, "--title", title, ...templatedFieldsArgs("baseline", { kind: node })]).stdout);
 }
 
 /** The single text row of `lore baseline tree` that names `slug`. */
@@ -86,9 +87,9 @@ beforeAll(() => {
   git(["add", "."]);
   git(["commit", "-q", "-m", "init"]);
   mustRun(["init"]);
-  const prd = slugOf(mustRun(["create", "prd", "--title", "Counts PRD", "--content", "root", "--no-ai"]).stdout);
-  businessRoot = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "biz", "--title", "Biz Root"]).stdout);
-  businessLeaf = slugOf(mustRun(["baseline", "add", businessRoot, "--node", "leaf", "--label", "l", "--title", "Biz Leaf"]).stdout);
+  const prd = slugOf(mustRun(["create", "prd", "--title", "Counts PRD", ...templatedFieldsArgs("prd"), "--no-ai"]).stdout);
+  businessRoot = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "biz", "--title", "Biz Root", ...templatedFieldsArgs("baseline", { kind: "root" })]).stdout);
+  businessLeaf = slugOf(mustRun(["baseline", "add", businessRoot, "--node", "leaf", "--label", "l", "--title", "Biz Leaf", ...templatedFieldsArgs("baseline", { kind: "leaf" })]).stdout);
   archRoot = archAdd(prd, "root", "arch", "Arch Root");
   section = archAdd(archRoot, "section", "svc", "Service Layer");
   moduleCard = archAdd(section, "module-card", "mod", "Module Card");

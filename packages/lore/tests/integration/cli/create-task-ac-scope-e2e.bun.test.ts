@@ -46,6 +46,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { runLoreInProcess } from "../../helpers/run-lore-in-process";
 import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 // reason: each test spawns ~6-7 compiled-binary processes; bun's 5s default
 // hook timeout is comfortably exceeded on a loaded machine (mirrors
@@ -128,9 +129,9 @@ describe("lore verify — ac_scope ABSENT + explicit --ac (AC-ACS-6, back-catalo
       ["workflow:", "  gates:", '    "task-create":', "      enabled: false", ""].join("\n"),
     );
 
-    await mustRun(["create", "prd", "--title", "Regression PRD", "--no-ai", "--content", "## Overview\nbody"], tmpDir);
+    await mustRun(["create", "prd", "--title", "Regression PRD", "--no-ai", ...templatedFieldsArgs("prd")], tmpDir);
     await mustRun(
-      ["create", "spec", "--title", "Regression Spec","--no-ai", "--content", "## Overview\nbody"],
+      ["create", "spec", "--title", "Regression Spec", "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature" })],
       tmpDir,
     );
     await mustRun(
@@ -150,7 +151,7 @@ describe("lore verify — ac_scope ABSENT + explicit --ac (AC-ACS-6, back-catalo
       ],
       tmpDir,
     );
-    await mustRun(["create", "plan", "--title", "Regression Plan", "--parent", "spec-regression-spec", "--no-ai", "--content", "body"], tmpDir);
+    await mustRun(["create", "plan", "--title", "Regression Plan", "--parent", "spec-regression-spec", "--no-ai", ...templatedFieldsArgs("plan")], tmpDir);
     const createResult = await mustRun(
       [
         "create",
@@ -164,8 +165,7 @@ describe("lore verify — ac_scope ABSENT + explicit --ac (AC-ACS-6, back-catalo
         "--plan-id",
         "plan-regression-plan",
         "--no-ai",
-        "--content",
-        "body",
+        ...templatedFieldsArgs("task"),
       ],
       tmpDir,
     );
@@ -202,9 +202,9 @@ describe("lore verify — a task created under this rule is attested end-to-end 
     tmpDir = mkdtempSync(join(tmpdir(), "lore-acscope-e2e-happy-"));
     await mustRun(["init"], tmpDir);
 
-    await mustRun(["create", "prd", "--title", "E2E PRD", "--no-ai", "--content", "## Overview\nbody"], tmpDir);
+    await mustRun(["create", "prd", "--title", "E2E PRD", "--no-ai", ...templatedFieldsArgs("prd")], tmpDir);
     await mustRun(
-      ["create", "spec", "--title", "E2E Spec","--no-ai", "--content", "## Overview\nbody"],
+      ["create", "spec", "--title", "E2E Spec", "--no-ai", ...templatedFieldsArgs("spec", { kind: "feature" })],
       tmpDir,
     );
     await mustRun(
@@ -224,7 +224,7 @@ describe("lore verify — a task created under this rule is attested end-to-end 
       ],
       tmpDir,
     );
-    await mustRun(["create", "plan", "--title", "E2E Plan", "--parent", "spec-e2e-spec", "--no-ai", "--content", "body"], tmpDir);
+    await mustRun(["create", "plan", "--title", "E2E Plan", "--parent", "spec-e2e-spec", "--no-ai", ...templatedFieldsArgs("plan")], tmpDir);
 
     // Declares --ac-scope AT CREATION TIME — this is the admission rule's
     // whole point: the create path REQUIRES this, unlike the regression
@@ -243,8 +243,7 @@ describe("lore verify — a task created under this rule is attested end-to-end 
         "--plan-id",
         "plan-e2e-plan",
         "--no-ai",
-        "--content",
-        "body",
+        ...templatedFieldsArgs("task"),
         "--ac-scope",
         "AC-E2E-1",
       ],

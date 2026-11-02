@@ -25,6 +25,7 @@ import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertFreshBinary } from "../helpers/assert-fresh-binary";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 setDefaultTimeout(300_000);
 
@@ -91,12 +92,12 @@ beforeAll(() => {
   symlinkSync(join(REPO_ROOT, "node_modules"), join(repo, "node_modules"));
   mustRun(["init"], repo);
 
-  const prd = slugOf(mustRun(["create", "prd", "--title", "BLC PRD", "--content", "root", "--no-ai"], repo).stdout);
-  const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "BLC Root"], repo).stdout);
+  const prd = slugOf(mustRun(["create", "prd", "--title", "BLC PRD", ...templatedFieldsArgs("prd"), "--no-ai"], repo).stdout);
+  const root = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "BLC Root", ...templatedFieldsArgs("baseline", { kind: "root" })], repo).stdout);
   const branch = slugOf(
-    mustRun(["baseline", "add", root, "--node", "branch", "--label", "spec", "--title", "Specification and acceptance"], repo).stdout,
+    mustRun(["baseline", "add", root, "--node", "branch", "--label", "spec", "--title", "Specification and acceptance", ...templatedFieldsArgs("baseline", { kind: "branch" })], repo).stdout,
   );
-  leaf = slugOf(mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "lf", "--title", "Declare an acceptance criterion"], repo).stdout);
+  leaf = slugOf(mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "lf", "--title", "Declare an acceptance criterion", ...templatedFieldsArgs("baseline", { kind: "leaf" })], repo).stdout);
   mustRun(
     ["rule", "add", leaf, "--statement", "an AC id is unique within its spec", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "duplicate id refused"],
     repo,

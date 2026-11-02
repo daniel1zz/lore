@@ -36,6 +36,7 @@ import { makeCleanTreeRepo } from "../../helpers/clean-tree-repo.js";
 import { join } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 // ─── Path setup ───────────────────────────────────────────────────────────────
 
@@ -149,8 +150,11 @@ function armBlueprint(): void {
 }
 
 function createDoc(type: string, extraArgs: string[]): string {
+  // The template kind rides on the flag that selects it: spec `--kind`, knowledge `--sub-type`.
+  const kindFlag = type === "knowledge" ? "--sub-type" : type === "spec" ? "--kind" : undefined;
+  const kind = kindFlag === undefined ? undefined : extraArgs[extraArgs.indexOf(kindFlag) + 1];
   const r = runLore(
-    ["create", type, "--title", `${type} fixture`, "--no-ai", "--content", "body", ...(type === "task" ? ["--kind", "code"] : []), ...extraArgs],
+    ["create", type, "--title", `${type} fixture`, "--no-ai", ...templatedFieldsArgs(type, kind === undefined ? {} : { kind }), ...(type === "task" ? ["--kind", "code"] : []), ...extraArgs],
     tmpDir,
   );
   if (r.exitCode !== 0) throw new Error(`create ${type} failed: ${r.stderr}`);
@@ -288,7 +292,7 @@ function buildPlanTerminalityDriftCorpus(): { plan: string; task: string } {
   // can never hold a state-bound attested pass. `deprecated` is the other terminal status (same plan-terminality
   // reading) and is not floor-gated, so the fixture reaches "every child task terminal" through it.
   for (const status of ["approved", "deprecated"]) {
-    const stepResult = runLore(["set", task, "--status", status], tmpDir);
+    const stepResult = runLore(["set", task, "--status", status, ...(status === "deprecated" ? ["--reason", "fixture: terminal without the done floors"] : [])], tmpDir);
     if (stepResult.exitCode !== 0) {
       throw new Error(`making fixture task terminal failed at ${status}: ${stepResult.stderr}`);
     }

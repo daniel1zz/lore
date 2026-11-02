@@ -39,6 +39,7 @@ import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
 
 import { ensureRequirementsDocSlug } from "../../helpers/parented-create.js";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 setDefaultTimeout(180_000);
 
 // tests/integration/cli/ -> repo root is 5 levels up.
@@ -154,38 +155,38 @@ function buildFixture(): Fixture {
     ].join("\n"),
   );
 
-  const prd = slugOf(mustRun(["create", "prd", "--title", "CSL PRD", "--content", "root", "--no-ai"], repo).stdout);
+  const prd = slugOf(mustRun(["create", "prd", "--title", "CSL PRD", ...templatedFieldsArgs("prd"), "--no-ai"], repo).stdout);
   const root = slugOf(
-    mustRun(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "CSL Root"], repo).stdout,
+    mustRun(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "CSL Root", ...templatedFieldsArgs("baseline", { kind: "root" })], repo).stdout,
   );
   const branchX = slugOf(
-    mustRun(["baseline", "add", root, "--node", "branch", "--label", "bx", "--title", "CSL Branch X"], repo).stdout,
+    mustRun(["baseline", "add", root, "--node", "branch", "--label", "bx", "--title", "CSL Branch X", ...templatedFieldsArgs("baseline", { kind: "branch" })], repo).stdout,
   );
   const branchY = slugOf(
-    mustRun(["baseline", "add", root, "--node", "branch", "--label", "by", "--title", "CSL Branch Y"], repo).stdout,
+    mustRun(["baseline", "add", root, "--node", "branch", "--label", "by", "--title", "CSL Branch Y", ...templatedFieldsArgs("baseline", { kind: "branch" })], repo).stdout,
   );
   const leafX1 = slugOf(
-    mustRun(["baseline", "add", branchX, "--node", "leaf", "--label", "lx1", "--title", "CSL Leaf X1"], repo).stdout,
+    mustRun(["baseline", "add", branchX, "--node", "leaf", "--label", "lx1", "--title", "CSL Leaf X1", ...templatedFieldsArgs("baseline", { kind: "leaf" })], repo).stdout,
   );
   const leafX2 = slugOf(
-    mustRun(["baseline", "add", branchX, "--node", "leaf", "--label", "lx2", "--title", "CSL Leaf X2"], repo).stdout,
+    mustRun(["baseline", "add", branchX, "--node", "leaf", "--label", "lx2", "--title", "CSL Leaf X2", ...templatedFieldsArgs("baseline", { kind: "leaf" })], repo).stdout,
   );
   const leafY = slugOf(
-    mustRun(["baseline", "add", branchY, "--node", "leaf", "--label", "ly", "--title", "CSL Leaf Y"], repo).stdout,
+    mustRun(["baseline", "add", branchY, "--node", "leaf", "--label", "ly", "--title", "CSL Leaf Y", ...templatedFieldsArgs("baseline", { kind: "leaf" })], repo).stdout,
   );
 
   const plan = slugOf(
-    mustRun(["create", "plan", "--title", "CSL Plan", "--parent", prd, "--content", "x", "--no-ai"], repo).stdout,
+    mustRun(["create", "plan", "--title", "CSL Plan", "--parent", prd, ...templatedFieldsArgs("plan"), "--no-ai"], repo).stdout,
   );
   const spec = slugOf(
-    mustRun(["create", "spec", "--title", "CSL Spec","--content", "x", "--no-ai"], repo).stdout,
+    mustRun(["create", "spec", "--title", "CSL Spec", ...templatedFieldsArgs("spec", { kind: "feature" }), "--no-ai"], repo).stdout,
   );
   mustRun(
     ["ac", "add", spec, "AC-CSL-1", "--statement", "something holds", "--mode", "human"],
     repo,
   );
   const knowledge = slugOf(
-    mustRun(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => mustRun(a, repo)), "--title", "CSL Knowledge", "--sub-type", "reference", "--content", "k", "--no-ai"], repo).stdout,
+    mustRun(["create", "knowledge", "--parent", ensureRequirementsDocSlug((a) => mustRun(a, repo)), "--title", "CSL Knowledge", "--sub-type", "reference", ...templatedFieldsArgs("knowledge", { kind: "reference" }), "--no-ai"], repo).stdout,
   );
 
   const tasks: string[] = [];
@@ -204,8 +205,7 @@ function buildFixture(): Fixture {
             plan,
             "--plan-id",
             plan,
-            "--content",
-            "x",
+            ...templatedFieldsArgs("task"),
             "--no-ai",
           ],
           repo,
@@ -286,7 +286,7 @@ describe("claim-scoped corpus authoring from a worktree (AC-BLS2-8)", () => {
   it("NEGATIVE: scoped session writing a non-baseline doc is refused with the foreign-corpus-write token", () => {
     const actor = "agent:csl-writer-nb";
     const wt = join(fx.worktrees, "scoped-y");
-    const set = runLore(["set", fx.knowledge, "--content", "tampered from scoped worktree"], wt, actor);
+    const set = runLore(["set", fx.knowledge, ...templatedFieldsArgs("knowledge", { kind: "reference", fields: { summary: "tampered from scoped worktree" } })], wt, actor);
     expect(set.exitCode).not.toBe(0);
     expect(set.stderr + set.stdout).toContain(FOREIGN_TOKEN);
   });
@@ -295,7 +295,7 @@ describe("claim-scoped corpus authoring from a worktree (AC-BLS2-8)", () => {
     const actor = "agent:csl-unscoped";
     const taskSlug = slugOf(
       mustRun(
-        ["create", "task", "--kind", "code", "--title", "CSL Task unscoped", "--parent", fx.plan, "--plan-id", fx.plan, "--content", "x", "--no-ai"],
+        ["create", "task", "--kind", "code", "--title", "CSL Task unscoped", "--parent", fx.plan, "--plan-id", fx.plan, ...templatedFieldsArgs("task"), "--no-ai"],
         fx.repo,
       ).stdout,
     );
@@ -310,7 +310,7 @@ describe("claim-scoped corpus authoring from a worktree (AC-BLS2-8)", () => {
     const mk = (n: string) =>
       slugOf(
         mustRun(
-          ["create", "task", "--kind", "code", "--title", `CSL Task par ${n}`, "--parent", fx.plan, "--plan-id", fx.plan, "--content", "x", "--no-ai"],
+          ["create", "task", "--kind", "code", "--title", `CSL Task par ${n}`, "--parent", fx.plan, "--plan-id", fx.plan, ...templatedFieldsArgs("task"), "--no-ai"],
           fx.repo,
         ).stdout,
       );

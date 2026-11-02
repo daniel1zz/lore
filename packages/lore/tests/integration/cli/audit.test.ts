@@ -28,6 +28,7 @@ import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor.js";
+import { templatedFieldsArgs, templatedFill } from "../../helpers/templated-create.js";
 
 // ─── Path setup ───────────────────────────────────────────────────────────────
 
@@ -90,9 +91,15 @@ afterEach(() => {
 // SPEC-079, every create's audit entry hardcoded the literal "system"; now it carries the resolved actor.
 const TEST_ACTOR = sessionActorFor("test-actor");
 
+/**
+ * A PRD that can be APPROVED in an empty corpus: the dimensions that need refs cite a field of the PRD itself (`problem`),
+ * since no other document exists to cite (a ref to a missing document would fail the template's refs-resolve check at approve).
+ */
+const APPROVABLE_PRD_DIMENSIONS = templatedFill("prd", { refTarget: "problem" }).dimensions;
+
 function createPrd(title: string): string {
   const r = runLore(
-    ["create", "prd", "--title", title, "--no-ai", "--content", "body"],
+    ["create", "prd", "--title", title, "--no-ai", ...templatedFieldsArgs("prd", { dimensions: APPROVABLE_PRD_DIMENSIONS })],
     tmpDir,
   );
   if (r.exitCode !== 0) throw new Error(`create prd failed: ${r.stderr}`);

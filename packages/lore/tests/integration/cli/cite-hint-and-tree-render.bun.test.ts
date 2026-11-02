@@ -25,6 +25,7 @@ import { patchLoreConfig } from "../../helpers/patch-lore-config.js";
 import { approveFixtureNodes } from "../../helpers/cli-live-rule.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { templatedFieldsArgs } from "../../helpers/templated-create.js";
 
 setDefaultTimeout(300_000);
 
@@ -77,13 +78,13 @@ beforeAll(() => {
   scratch.push(dir);
   if (dir.startsWith(REPO_ROOT)) throw new Error("fixture must live outside the repo");
   mustRun(["init"], dir);
-  prd = slugOf(mustRun(["create", "prd", "--title", "Hint PRD", "--content", "root", "--no-ai"], dir).stdout);
-  baselineRoot = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "Hint Root"], dir).stdout);
-  const branchA = slugOf(mustRun(["baseline", "add", baselineRoot, "--node", "branch", "--label", "A", "--title", "Branch A"], dir).stdout);
-  const branchB = slugOf(mustRun(["baseline", "add", baselineRoot, "--node", "branch", "--label", "B", "--title", "Branch B"], dir).stdout);
-  slugOf(mustRun(["baseline", "add", branchB, "--node", "leaf", "--label", "L3", "--title", "Leaf Three"], dir).stdout);
-  const leafA1 = slugOf(mustRun(["baseline", "add", branchA, "--node", "leaf", "--label", "L1", "--title", "Leaf One"], dir).stdout);
-  slugOf(mustRun(["baseline", "add", branchA, "--node", "leaf", "--label", "L2", "--title", "Leaf Two"], dir).stdout);
+  prd = slugOf(mustRun(["create", "prd", "--title", "Hint PRD", ...templatedFieldsArgs("prd"), "--no-ai"], dir).stdout);
+  baselineRoot = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "Root", "--title", "Hint Root", ...templatedFieldsArgs("baseline", { kind: "root" })], dir).stdout);
+  const branchA = slugOf(mustRun(["baseline", "add", baselineRoot, "--node", "branch", "--label", "A", "--title", "Branch A", ...templatedFieldsArgs("baseline", { kind: "branch" })], dir).stdout);
+  const branchB = slugOf(mustRun(["baseline", "add", baselineRoot, "--node", "branch", "--label", "B", "--title", "Branch B", ...templatedFieldsArgs("baseline", { kind: "branch" })], dir).stdout);
+  slugOf(mustRun(["baseline", "add", branchB, "--node", "leaf", "--label", "L3", "--title", "Leaf Three", ...templatedFieldsArgs("baseline", { kind: "leaf" })], dir).stdout);
+  const leafA1 = slugOf(mustRun(["baseline", "add", branchA, "--node", "leaf", "--label", "L1", "--title", "Leaf One", ...templatedFieldsArgs("baseline", { kind: "leaf" })], dir).stdout);
+  slugOf(mustRun(["baseline", "add", branchA, "--node", "leaf", "--label", "L2", "--title", "Leaf Two", ...templatedFieldsArgs("baseline", { kind: "leaf" })], dir).stdout);
   const ruleOut = mustRun(
     ["rule", "add", leafA1, "--statement", "Users see the first thing", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one"],
     dir,
@@ -92,7 +93,7 @@ beforeAll(() => {
   if (id === undefined) throw new Error(`no rule id in: ${ruleOut.stdout}`);
   ruleId = id;
   approveFixtureNodes(dir, [leafA1]); // a direct add is a pending add: the rule is citable (live) only once its leaf is approved
-  specSlug = slugOf(mustRun(["create", "spec", "--title", "Hint Spec", "--content", "## Spec\n\nbody", "--no-ai"], dir).stdout);
+  specSlug = slugOf(mustRun(["create", "spec", "--title", "Hint Spec", ...templatedFieldsArgs("spec", { kind: "feature" }), "--no-ai"], dir).stdout);
   // AC-H-1 cites a rule under branch A, which places the spec there (the gate arms per branch); AC-H-0 is an
   // uncited criterion that predates the gate, so a later `ac set` of it is a refused write of an EXISTING criterion.
   mustRun(["ac", "add", specSlug, "AC-H-1", "--statement", "placing human criterion", "--mode", "human", "--cite", ruleId], dir);
