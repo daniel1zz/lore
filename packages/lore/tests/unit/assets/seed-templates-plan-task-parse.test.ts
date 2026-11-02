@@ -32,9 +32,9 @@ describe("seed template plan", () => {
   beforeEach(() => {
     plan = load("plan");
   });
-  it("HAPPY: parses as doc_type plan v1 with the two required checks", () => {
+  it("HAPPY: parses as doc_type plan v2 with the two required checks", () => {
     expect(plan.doc_type).toBe("plan");
-    expect(plan.version).toBe(1);
+    expect(plan.version).toBe(2);
     expect([...plan.checks].sort()).toEqual(["goal-has-measure", "refs-resolve"]);
   });
   it("HAPPY: carries the spec-listed fields with their markers", () => {
@@ -46,8 +46,8 @@ describe("seed template plan", () => {
     expect(p.spec_ref!["x-ref"]).toBe(true);
     expect(p.task_criteria_map!["x-ref-list"]).toBe(true);
   });
-  it("HAPPY: dimensions are ordering, criteria-coverage, close-condition, concurrency, cost; coverage needs refs", () => {
-    expect(plan.dimensions.map((d) => d.id)).toEqual(["ordering", "criteria-coverage", "close-condition", "concurrency", "cost"]);
+  it("HAPPY: dimensions are ordering, criteria-coverage, close-condition, concurrency, cost, repetition; coverage needs refs", () => {
+    expect(plan.dimensions.map((d) => d.id)).toEqual(["ordering", "criteria-coverage", "close-condition", "concurrency", "cost", "repetition"]);
     expect(plan.dimensions.find((d) => d.id === "criteria-coverage")?.needs_refs).toBe(true);
   });
   it("HAPPY: a sample document validates and renders", () => {
