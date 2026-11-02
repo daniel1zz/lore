@@ -36,6 +36,7 @@ import { FIXTURE_HOME_OUTSIDE_REPO } from "../helpers/clean-tree-repo";
 import { citeSpecViaAsyncCli } from "../helpers/cli-live-rule";
 import { patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { planFieldsArgs, templatedExtra } from "../helpers/templated-create";
 import { fileAnswerShellLines, withFilesShell } from "../helpers/ai-double-file-answers";
 import { installShippedGuard } from "../integration/support/main-guard-repo";
 
@@ -215,7 +216,7 @@ afterAll(() => {
 /** A plan under the fixture spec, approved; `requiresUat` makes its close refuse without a verdict (the plan-uat-gate refusal). */
 async function approvedPlan(title: string, requiresUat = false): Promise<string> {
   const plan = slugOf(
-    await mustSetup(["create", "plan", "--title", title, "--parent", fixture.spec, "--content", "## Plan\n\nBody.\n", "--no-ai", ...(requiresUat ? ["--requires-uat"] : [])]),
+    await mustSetup(["create", "plan", "--title", title, "--parent", fixture.spec, ...planFieldsArgs(fixture.spec), "--no-ai", ...(requiresUat ? ["--requires-uat"] : [])]),
   );
   await mustSetup(["approve", plan]);
   return plan;
@@ -266,8 +267,9 @@ async function seedLegacyCloseTask(planSlug: string, title: string): Promise<str
       ac_scope: [],
       claim: { by: "agent:legacy", at: NOW, harness_run: "cc:legacy", start_head: fixture.git(["rev-parse", "HEAD"]) },
       verification_evidence: [evidenceRow("echo Ran 1 tests first"), evidenceRow("echo Ran 1 tests second")],
+      ...templatedExtra("task", { fields: { objective: "Close the plan." } }),
     };
-    const created = await app.corpusService.create({ type: "task", title, content: "## Task\n\nClose the plan.\n", parent_id: plan.value.doc.id, extra });
+    const created = await app.corpusService.create({ type: "task", title, parent_id: plan.value.doc.id, extra });
     if (!created.ok) throw new Error(`seed: create failed: ${JSON.stringify(created.error)}`);
     const moved = await app.corpusService.writeDoc({ doc: created.value, patch: { status: "approved" }, action: "update", auditAction: "update", lock: "none" });
     if (!moved.ok) throw new Error(`seed: approve-write failed: ${JSON.stringify(moved.error)}`);

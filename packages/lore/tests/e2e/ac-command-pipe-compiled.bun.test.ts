@@ -34,6 +34,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { templatedFieldsArgs } from "../helpers/templated-create";
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up).
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -103,9 +104,9 @@ beforeAll(async () => {
   // The file `ac set` (f) names, so the D8 path-existence check passes and only the pipe check can refuse.
   writeFileSync(join(dir, "a.test.ts"), "// existence-only fixture\n");
 
-  const prd = await runLore(["create", "prd", "--title", "AC-EH-7 Root", "--content", "# PRD\n\nroot.", "--no-ai"], dir);
+  const prd = await runLore(["create", "prd", "--title", "AC-EH-7 Root", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"], dir);
   if (prd.exitCode !== 0) throw new Error(`create prd failed: ${prd.stderr}`);
-  const spec = await runLore(["create", "spec", "--title", "AC-EH-7 Spec", "--content", "## Spec\n\nbody", "--no-ai"], dir);
+  const spec = await runLore(["create", "spec", "--title", "AC-EH-7 Spec", ...templatedFieldsArgs("spec", { kind: "feature", refTarget: "problem" }), "--no-ai"], dir);
   if (spec.exitCode !== 0) throw new Error(`create spec failed: ${spec.stderr}`);
   specSlug = parseSlug(spec.stdout);
 });

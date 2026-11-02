@@ -37,6 +37,7 @@ import { DECIDED_FLAGS } from "../helpers/decision-flags";
 import { citeSpecViaAsyncCli } from "../helpers/cli-live-rule";
 import { patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { planFieldsArgs, templatedFieldsArgs } from "../helpers/templated-create";
 import { installShippedGuard } from "../integration/support/main-guard-repo";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
@@ -353,9 +354,9 @@ describe("AC-DCS2-14: the execution log is appended by lore and never rewrites t
     const world = await makeWorld();
     const { fixture } = world;
     // a second spec declaring an AC with the SAME id as the fixture spec's AC-FX-1
-    const spec2 = (await fixture.mustRun(["create", "spec", "--title", "Twin Spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] as string;
+    const spec2 = (await fixture.mustRun(["create", "spec", "--title", "Twin Spec", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: "problem" }), "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] as string;
     await fixture.mustRun(["ac", "add", spec2, "AC-FX-1", "--statement", "The twin criterion.", "--mode", "script", "--oracle", "test", "--command", "echo twin1"]);
-    const plan2 = (await fixture.mustRun(["create", "plan", "--title", "Twin plan", "--parent", spec2, "--content", "## Plan\n\nBody.\n", "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] as string;
+    const plan2 = (await fixture.mustRun(["create", "plan", "--title", "Twin plan", "--parent", spec2, ...planFieldsArgs(spec2), "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] as string;
     const plan1 = await fixture.createPlan("Fixture-spec plan");
     const bound1 = await fixture.createTask({ plan: plan1, kind: "code", title: "Bound to the fixture spec", anchors: ["tests/t1-1.test.ts"], acScope: ["AC-FX-1"] });
     const bound2 = await fixture.createTask({ plan: plan2, kind: "code", title: "Bound to the twin spec", anchors: ["tests/t2-1.test.ts"], acScope: ["AC-FX-1"] });
@@ -382,10 +383,10 @@ describe("AC-DCS2-14: the execution log is appended by lore and never rewrites t
     const world = await makeWorld();
     const { fixture } = world;
     // a draft spec with two criteria, so the supersede needs no decision record
-    const spec2 = (await fixture.mustRun(["create", "spec", "--title", "Second Spec", "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] as string;
+    const spec2 = (await fixture.mustRun(["create", "spec", "--title", "Second Spec", "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: "problem" }), "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] as string;
     await fixture.mustRun(["ac", "add", spec2, "AC-SUP-1", "--statement", "Old.", "--mode", "script", "--oracle", "test", "--command", "echo sup1"]);
     await fixture.mustRun(["ac", "add", spec2, "AC-SUP-2", "--statement", "New.", "--mode", "script", "--oracle", "test", "--command", "echo sup2"]);
-    const plan2 = (await fixture.mustRun(["create", "plan", "--title", "Supersede plan", "--parent", spec2, "--content", "## Plan\n\nBody.\n", "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] as string;
+    const plan2 = (await fixture.mustRun(["create", "plan", "--title", "Supersede plan", "--parent", spec2, ...planFieldsArgs(spec2), "--no-ai"])).match(/Slug:\s+(\S+)/)?.[1] as string;
     const holder = await fixture.createTask({ plan: plan2, kind: "code", title: "Holder", anchors: ["tests/h-1.test.ts"], acScope: ["AC-SUP-1"] });
     const bystander = await fixture.createTask({ plan: plan2, kind: "code", title: "Bystander", anchors: ["tests/by-1.test.ts"], acScope: ["AC-SUP-2"] });
     const beforeBystander = await fixture.readTask(bystander);

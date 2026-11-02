@@ -36,6 +36,7 @@ import { makeDoneContractFixture, type DoneContractFixture } from "../helpers/do
 import { FIXTURE_HOME_OUTSIDE_REPO } from "../helpers/clean-tree-repo";
 import { patchLoreConfig } from "../helpers/patch-lore-config";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { templatedFieldsArgs } from "../helpers/templated-create";
 import { installShippedGuard } from "../integration/support/main-guard-repo";
 import { landWithoutIntegrate } from "../helpers/done-contract-land";
 
@@ -557,7 +558,7 @@ describe("AC-DCS1-7: the contract is evaluated against the landed tree (the rule
 describe("AC-DCS1-7: an ac oracle resolves across the plan's parent spec and every spec it implements", () => {
   /** A second spec with one script criterion, linked to `planSlug` with `implements`. */
   async function implementedSpec(planSlug: string, acId: string, command: string): Promise<string> {
-    const spec = (await fixture.mustRun(["create", "spec", "--title", `Implemented ${acId} ${(sequence += 1)}`, "--kind", "tech", "--content", "## Overview\n\nBody.\n", "--no-ai"])).match(/Slug:\s+(\S+)/)![1]!;
+    const spec = (await fixture.mustRun(["create", "spec", "--title", `Implemented ${acId} ${(sequence += 1)}`, "--kind", "tech", ...templatedFieldsArgs("spec", { kind: "tech", refTarget: "problem" }), "--no-ai"])).match(/Slug:\s+(\S+)/)![1]!;
     await fixture.mustRun(["ac", "add", spec, acId, "--statement", "Implemented criterion.", "--mode", "script", "--oracle", "test", "--command", command]);
     await fixture.mustRun(["link", planSlug, spec, "--type", "implements"]);
     return spec;

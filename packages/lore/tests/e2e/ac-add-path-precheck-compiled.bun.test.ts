@@ -53,6 +53,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runLoreInProcess } from "../helpers/run-lore-in-process";
+import { templatedFieldsArgs } from "../helpers/templated-create";
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up),
 // mirrors every sibling compiled-binary e2e suite's own REPO_ROOT derivation.
@@ -163,7 +164,7 @@ beforeAll(async () => {
   seedRealTestFile(dir);
 
   const prd = await runLore(
-    ["create", "prd", "--title", "AC-061-21 Root", "--content", "# PRD\n\nroot.", "--no-ai"],
+    ["create", "prd", "--title", "AC-061-21 Root", ...templatedFieldsArgs("prd", { refTarget: "problem" }), "--no-ai"],
     dir,
   );
   if (prd.exitCode !== 0) throw new Error(`create prd failed: ${prd.stderr}`);
@@ -174,8 +175,7 @@ beforeAll(async () => {
       "spec",
       "--title",
       "AC-061-21 Spec",
-      "--content",
-      "## Spec\n\nbody",
+      ...templatedFieldsArgs("spec", { kind: "feature", refTarget: "problem" }),
       "--no-ai",
     ],
     dir,
