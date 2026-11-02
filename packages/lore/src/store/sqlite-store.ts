@@ -4522,6 +4522,38 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
+  async reopenRunIfEndedFor(id: RunId, expectedEndReason: string, audit: AuditEntry): Promise<Result<boolean, LoreError>> {
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      // reason: `end_reason = ?` makes the write conditional on the end the caller verified; a concurrent reopen finds no row.
+      const updated = this.db
+        .prepare("UPDATE runs SET ended_at = NULL, end_reason = NULL WHERE id = ? AND ended_at IS NOT NULL AND end_reason = ? RETURNING id")
+        .all(id, expectedEndReason);
+      if (updated.length === 0) {
+        this.db.run("ROLLBACK");
+        return ok(false);
+      }
+      const appended = this.appendAuditEntrySync(audit);
+      if (!appended.ok) {
+        this.db.run("ROLLBACK");
+        return appended;
+      }
+      this.db.run("COMMIT");
+      return ok(true);
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK");
+      } catch {
+        // reason: ROLLBACK throws only when no transaction is open; `e` is what the caller needs.
+      }
+      return wrapStoreError(e);
+    }
+  }
+
   async getRunEnd(id: RunId): Promise<Result<RunEndState | null, LoreError>> {
     try {
       const row = this.db.prepare("SELECT ended_at, end_reason FROM runs WHERE id = ?").get(id) as

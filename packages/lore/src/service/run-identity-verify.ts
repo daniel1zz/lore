@@ -20,9 +20,10 @@
 import { err, ok, type InvocationIdentity, type LoreError, type Result } from "@lore/core";
 import { refusalNamingHowToBecomeKnown, UnknownPartyError, verifyRunAncestry, type RunAncestryTable } from "@lore/core/node";
 import type { StoreInterface } from "../store/store-interface.js";
+import { reopenSubagentStoppedRun, SUBAGENT_STOP_END_REASON } from "./run-service.js";
 
 /** The store capabilities the check needs (`listRunLifecycles` only when an ancestry probe is given). */
-export type VerifiedIdentityStore = Pick<StoreInterface, "getRun" | "listRunLifecycles">;
+export type VerifiedIdentityStore = Pick<StoreInterface, "getRun" | "listRunLifecycles" | "reopenRunIfEndedFor">;
 
 /** Where the ancestry walk starts and what it reads: production passes `process.pid` and the real process table. */
 export interface RunAncestryProbe {
@@ -57,6 +58,33 @@ export async function verifyInvocationIdentity(
     const record = lifecycles.value.find((row) => row.id === claimedRun) ?? null;
     const verdict = await verifyRunAncestry({ run: claimedRun, record, table: ancestry.table, selfPid: ancestry.selfPid });
     if (verdict.ok) return ok(identity);
+    if (verdict.cause === "run-ended" && verdict.endReason === SUBAGENT_STOP_END_REASON && record !== null && record.endedAt !== null) {
+      // reason: #594 - the SubagentStop hook ends a helper at every stop, interim ones included. The helper's next call
+      // from its own harness tree (same process and start time, judged by re-running the check on the row as if open)
+      // reopens the run in ONE audited conditional write; a mismatch stays refused with the original verdict below.
+      const asOpen = await verifyRunAncestry({
+        run: claimedRun,
+        record: { ...record, endedAt: null, endReason: null },
+        table: ancestry.table,
+        selfPid: ancestry.selfPid,
+      });
+      if (asOpen.ok) {
+        const reopened = await reopenSubagentStoppedRun(store, {
+          run: claimedRun,
+          actor: identity.claimed ?? claimedRun,
+          sessionId: identity.claimed ?? claimedRun,
+          endedAt: record.endedAt,
+          now: new Date(),
+        });
+        if (!reopened.ok) return err(reopened.error);
+        // reason: ok(false) = a concurrent call reopened it first (or another end won): re-read, never assume.
+        if (reopened.value) return ok(identity);
+        const again = await store.listRunLifecycles();
+        if (!again.ok) return err(again.error);
+        const latest = again.value.find((row) => row.id === claimedRun) ?? null;
+        if (latest !== null && latest.endedAt === null) return ok(identity);
+      }
+    }
     if (verdict.cause === "unknown-run") return err(unregisteredRunRefusal(claimedRun));
     return err(new UnknownPartyError(`Run ${claimedRun} is refused: ${verdict.error}.`).loreError);
   }

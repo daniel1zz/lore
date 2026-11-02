@@ -2189,6 +2189,14 @@ export class InMemoryStore implements StoreInterface {
     return ok(this.runEnds.delete(id));
   }
 
+  async reopenRunIfEndedFor(id: RunId, expectedEndReason: string, audit: AuditEntry): Promise<Result<boolean, LoreError>> {
+    if (this.runEnds.get(id)?.endReason !== expectedEndReason) return ok(false);
+    this.runEnds.delete(id);
+    const appended = await this.appendAuditEntry(audit);
+    if (!appended.ok) return appended;
+    return ok(true);
+  }
+
   async getRunEnd(id: RunId): Promise<Result<RunEndState | null, LoreError>> {
     if (!this.runs.has(id)) return ok(null);
     return ok(this.runEnds.get(id) ?? { endedAt: null, endReason: null });
