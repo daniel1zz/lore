@@ -292,7 +292,7 @@ function buildPlanTerminalityDriftCorpus(): { plan: string; task: string } {
   // can never hold a state-bound attested pass. `deprecated` is the other terminal status (same plan-terminality
   // reading) and is not floor-gated, so the fixture reaches "every child task terminal" through it.
   for (const status of ["approved", "deprecated"]) {
-    const stepResult = runLore(["set", task, "--status", status], tmpDir);
+    const stepResult = runLore(["set", task, "--status", status, ...(status === "deprecated" ? ["--reason", "fixture: terminal without the done floors"] : [])], tmpDir);
     if (stepResult.exitCode !== 0) {
       throw new Error(`making fixture task terminal failed at ${status}: ${stepResult.stderr}`);
     }
