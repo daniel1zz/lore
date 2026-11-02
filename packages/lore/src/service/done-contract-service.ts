@@ -68,6 +68,11 @@ export interface DoneContractGitPort {
 export interface ApproveContractOpts {
   /** The reason of `--red-waiver`, trimmed and non-blank; `undefined` when not waived. */
   readonly redWaiverReason?: string;
+  /**
+   * Compile at this commit instead of the tip of the base branch (BR-1549): the migration of a task that already landed compiles it
+   * at its landing commit, so the anchored files and falsifier literals are read where the work landed. Absent for an approval.
+   */
+  readonly compileAt?: string;
 }
 
 /** The port `ReviewService` calls for a task approval. */
@@ -269,7 +274,7 @@ export class DoneContractService implements ApproveContractPort {
     }
     if (opts.redWaiverReason !== undefined && kind !== "code") return err(redWaiverNotCode(task.slug, `a ${kind} task`));
 
-    const gathered = await this.gather(task, kind, opts.redWaiverReason, true);
+    const gathered = await this.gather(task, kind, opts.redWaiverReason, true, opts.compileAt);
     if (!gathered.ok) return gathered;
     return compileDoneContract(gathered.value.input);
   }
@@ -337,7 +342,7 @@ export class DoneContractService implements ApproveContractPort {
   }
 
   /** Every input of the compile, read once (the plan, the criteria, the base tip, the falsifier files). */
-  private async gather(task: DocRecord, kind: TaskKind, redWaiverReason: string | undefined, checkAnchors: boolean): Promise<Result<{ input: DoneContractCompileInput }, LoreError>> {
+  private async gather(task: DocRecord, kind: TaskKind, redWaiverReason: string | undefined, checkAnchors: boolean, compileAt?: string): Promise<Result<{ input: DoneContractCompileInput }, LoreError>> {
     const plan = await this.resolvePlan(task);
     if (!plan.ok) return plan;
     const criteria = await this.resolveCriteria(task, plan.value);
@@ -346,7 +351,7 @@ export class DoneContractService implements ApproveContractPort {
     const integrationBranch = plan.value === null ? undefined : plan.value.extra["integration_branch"];
     const declared = kind === "code" && typeof integrationBranch === "string" && integrationBranch !== "";
     const branch = declared ? (integrationBranch as string) : MAIN_BRANCH;
-    const tip = this.git.branchTip(branch);
+    const tip = compileAt ?? this.git.branchTip(branch);
     // reason: with the base branch absent the compile still checks the falsifier literals (it must name every cause at once),
     // reading them at main, the one branch every repository has.
     const readCommit = tip ?? this.git.branchTip(MAIN_BRANCH);

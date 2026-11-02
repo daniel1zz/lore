@@ -84,6 +84,10 @@ import { printLine } from "../output.js";
 import { runMigrateSchema } from "../migrate-schema.js";
 import { findLoreProjectRoot, runFragmentsMigration } from "../migrate-fragments-wiring.js";
 import { parseDoneContractDecisions } from "../done-contract-migrate-input.js";
+import { buildLandedAttestPort } from "../done-contract-migrate-union.js";
+import { ORACLE_TIMEOUT_DEFAULT_SECONDS } from "../../../service/integrate-oracle-service.js";
+import { migrationGaps } from "../../../service/done-contract-migration-service.js";
+import { resolve as resolvePath } from "node:path";
 
 export default defineLoreCommand({
   meta: {
@@ -210,7 +214,7 @@ export default defineLoreCommand({
         inv.io.stderr.write(`Error: ${parsed}\n`);
         return 2;
       }
-      const { app } = loadLoreApp({ inv });
+      const { app, dbPath, config } = loadLoreApp({ inv });
       try {
         const service = app.doneContractMigrationService;
         if (service === undefined) {
@@ -223,7 +227,17 @@ export default defineLoreCommand({
           return 2;
         }
         const apply = args.apply === true;
-        const result = apply ? await service.apply(parsed) : await service.preview(parsed);
+        // reason: BR-1549 — landed tasks are attested with integrate's own runner and merge queue turn; assembled only for an apply.
+        const attest = apply
+          ? buildLandedAttestPort({
+              inv,
+              app,
+              projectRoot: dirname(dirname(resolvePath(dbPath))),
+              installCommand: config?.workflow?.done_contract?.install,
+              timeoutSeconds: config?.workflow?.integrate?.oracle_timeout_seconds ?? ORACLE_TIMEOUT_DEFAULT_SECONDS,
+            })
+          : undefined;
+        const result = apply ? await service.apply(parsed, attest) : await service.preview(parsed);
         if (!result.ok) {
           if (args.json) {
             printLine(inv.io.stdout, JSON.stringify({ ok: false, error: result.error }, null, 2));
@@ -253,6 +267,8 @@ export default defineLoreCommand({
                     gaps: row.gaps,
                   })),
                   written: report.written,
+                  attested: report.attested,
+                  gaps: report.gaps,
                 },
               },
               null,
@@ -274,8 +290,15 @@ export default defineLoreCommand({
             printLine(inv.io.stdout, `    fill it: ${gap.fill}`);
           }
         }
-        if (report.gaps.length > 0) printLine(inv.io.stdout, `\n${report.gaps.length} gap(s): nothing is written until every gap is filled; pass every decision in one --apply call.`);
-        else if (!apply) printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
+        if (report.attested.length > 0) printLine(inv.io.stdout, `\nattested by one union run on main: ${report.attested.join(", ")}`);
+        if (report.gaps.length > 0) {
+          if (apply) {
+            // reason: BR-1490 as amended — the compilable tasks were stored; each gapped task is listed with its fill command.
+            inv.io.stderr.write(`${formatErrorFor(inv, migrationGaps(report.gaps))}\n`);
+          } else {
+            printLine(inv.io.stdout, `\n${report.gaps.length} gap(s): a gapped task is left as it is; --apply stores every other task.`);
+          }
+        } else if (!apply) printLine(inv.io.stdout, "\nRe-run with --apply to execute.");
         return code;
       } finally {
         app.close();

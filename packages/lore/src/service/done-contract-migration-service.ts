@@ -23,6 +23,7 @@
  */
 
 import {
+  doneContractSchema,
   err,
   extractEvidence,
   extractFileAnchors,
@@ -43,6 +44,9 @@ import { claimedNamesOf } from "./branch-membership.js";
 import type { DocWritePort } from "./corpus-service.js";
 import { DONE_CONTRACT_UNCOMPILABLE } from "./done-contract-compile.js";
 import type { ApproveContractOpts } from "./done-contract-service.js";
+import type { FloorRunner } from "./integrate-service.js";
+import type { LandingTask, OracleOutcome, OracleProof, OracleRecordInput, OracleRecordSummary, OracleRunInput, OracleSettings } from "./integrate-oracle-service.js";
+import { readTaskLanding, type TaskLanding } from "./task-commit-range.js";
 import { isRunnerProducedRedRun } from "./task-workflow-service.js";
 
 /** `details.operation` of every audit row this migration writes (grep-friendly, stable). */
@@ -60,6 +64,36 @@ export interface MigrationGitPort {
   resolveCommit(ref: string): string | undefined;
   /** Tip commit of the local branch `name`, or `undefined` when no such branch exists. */
   branchTip(name: string): string | undefined;
+  /** Whether `ancestor` is an ancestor of (or equal to) `descendant`; throws when git cannot tell. */
+  isAncestor(ancestor: string, descendant: string): boolean;
+}
+
+/** The ref the landed tasks are attested on. */
+const MAIN_REF = "refs/heads/main";
+
+/** The main tree a union run executes in, held for the duration of one callback. */
+export interface MainTree {
+  readonly worktree: string;
+  /** Main's newest commit: the commit the tree is. It contains every landing commit that is on main. */
+  readonly commit: string;
+}
+
+/**
+ * What the attestation of landed tasks needs (BR-1549), all of it the integrate machinery: the merge queue turn, a worktree of main's
+ * tree, the oracle runner and the integrate row writer. Wired by the command; absent in a bare construction (then a pending landed task
+ * is refused loudly, never stored without an attestation).
+ */
+export interface LandedAttestPort {
+  /** Holds one turn of the repository's merge queue around `fn` (the turn a landing takes). */
+  inTurn<T>(fn: () => Promise<T>): Promise<T>;
+  /** Checks main's newest commit out in a detached worktree for the duration of `fn`, and removes it afterwards. */
+  withMainTree<T>(fn: (tree: MainTree) => Promise<T>): Promise<T>;
+  readonly prove: (input: OracleRunInput) => Promise<Result<OracleProof, LoreError>>;
+  readonly record: (input: OracleRecordInput) => Promise<OracleRecordSummary>;
+  readonly settings: OracleSettings;
+  readonly runCommand: FloorRunner;
+  readonly log: (line: string) => void;
+  readonly clock: () => number;
 }
 
 /** What the migration needs of `DoneContractService`: the approve compile itself, plus the kind inference input. */
@@ -81,7 +115,19 @@ export const NO_DECISIONS: MigrationDecisions = { kinds: new Map(), redWaivers: 
 /** What is missing for one task: its stable name, the words, and the command that fills it. */
 export interface MigrationGap {
   readonly slug: string;
-  readonly code: "kind-invalid" | "needs-red-waiver" | "unknown-tip" | "config-key" | "falsifier-correction" | "uncompilable" | "live-branch-claim";
+  readonly code:
+    | "kind-invalid"
+    | "needs-red-waiver"
+    | "unknown-tip"
+    | "config-key"
+    | "falsifier-correction"
+    | "uncompilable"
+    | "live-branch-claim"
+    | "anchor-absent"
+    | "landing-not-on-main"
+    | "landed-oracle-failed"
+    | "landed-oracle-excluded"
+    | "landed-evidence-not-recorded";
   readonly message: string;
   readonly fill: string;
 }
@@ -97,6 +143,8 @@ export interface MigrationRow {
   readonly alreadyCompiled: boolean;
   /** The claim that names no branch is released by `--apply`. */
   readonly releasesClaim: boolean;
+  /** The landing commit of a task that already landed: its contract is compiled there and attested by the union run; `undefined` otherwise. */
+  readonly landedAt: string | undefined;
   readonly gaps: readonly MigrationGap[];
 }
 
@@ -104,20 +152,23 @@ export interface MigrationRow {
 export interface MigrationReport {
   readonly applied: boolean;
   readonly rows: readonly MigrationRow[];
+  /** Every gap: a task's own (also on its row) and the failures of the union run (not on a row). */
   readonly gaps: readonly MigrationGap[];
   /** Tasks actually written (`apply`); empty for a preview. */
   readonly written: readonly string[];
+  /** Landed tasks whose integrate rows the union run recorded (`apply`). */
+  readonly attested: readonly string[];
 }
 
-/** The refusal an `--apply` with gaps returns: every gap, per task, with its command; nothing was written. */
+/** The text an `--apply` with gaps prints: every gapped task with the command that fills it; the other tasks were stored. */
 export function migrationGaps(gaps: readonly MigrationGap[]): LoreError {
   const lines = gaps.map((gap) => `  - ${gap.slug}: ${gap.code}: ${gap.message}\n      fill it: ${gap.fill}`);
   return {
     code: "VALIDATION_ERROR",
     field: "done_contract_migration",
     message:
-      `${DONE_CONTRACT_MIGRATION_GAPS}: ${gaps.length} gap${gaps.length === 1 ? "" : "s"} stop the migration; nothing was written. ` +
-      `Fill every gap in one call and run it again:\n${lines.join("\n")}`,
+      `${DONE_CONTRACT_MIGRATION_GAPS}: ${gaps.length} task gap${gaps.length === 1 ? "" : "s"} remain; every task without one was stored. ` +
+      `Fill each gap and run the migration again (it only touches what is still open):\n${lines.join("\n")}`,
     value: { refusal: DONE_CONTRACT_MIGRATION_GAPS, gaps },
   };
 }
@@ -160,6 +211,8 @@ interface Plan {
   readonly waiverListed: boolean;
   /** An unknown tip was found (so a `--tip` for this task is listed). */
   readonly tipListed: boolean;
+  /** The task's newest landing when it is code that already landed on main and no integrate row of that landing exists yet: the union run attests it. */
+  readonly pendingAttest: TaskLanding | undefined;
 }
 
 export class DoneContractMigrationService {
@@ -199,24 +252,137 @@ export class DoneContractMigrationService {
   async preview(decisions: MigrationDecisions = NO_DECISIONS): Promise<Result<MigrationReport, LoreError>> {
     const planned = await this.planAll(decisions);
     if (!planned.ok) return planned;
-    return ok({ applied: false, rows: planned.value.map((plan) => plan.row), gaps: planned.value.flatMap((plan) => plan.row.gaps), written: [] });
+    return ok({ applied: false, rows: planned.value.map((plan) => plan.row), gaps: planned.value.flatMap((plan) => plan.row.gaps), written: [], attested: [] });
   }
 
   /**
-   * Stores every contract in one transaction, or writes nothing.
+   * Stores the contract of every task that compiles, in one transaction, and leaves each gapped task as it is (BR-1490 as amended): a
+   * gap never blocks another task, and the migration can be run again until nothing is left open. The tasks that already landed on
+   * main are compiled at their landing commit and then attested by ONE union run of their oracles on main's tree, inside one turn of
+   * the merge queue and through integrate's runner, recorded as integrate rows of their landing (BR-1549, AC-DCF-3).
    *
    * @param decisions - the decisions given with the call
-   * @returns the report; `err(migrationGaps)` while any task has a gap (nothing written); `err` on a failed read or write
+   * @param attest - the integrate machinery that attests the landed tasks; a landed task needing it with none given is refused (nothing written)
+   * @returns the report, whose `gaps` hold every task still open; `err` on a failed read or write, or an unusable decision
    */
-  async apply(decisions: MigrationDecisions = NO_DECISIONS): Promise<Result<MigrationReport, LoreError>> {
-    const planned = await this.planAll(decisions);
-    if (!planned.ok) return planned;
-    const rows = planned.value.map((plan) => plan.row);
-    const gaps = rows.flatMap((row) => row.gaps);
-    if (gaps.length > 0) return err(migrationGaps(gaps));
+  async apply(decisions: MigrationDecisions = NO_DECISIONS, attest?: LandedAttestPort): Promise<Result<MigrationReport, LoreError>> {
+    const first = await this.planAll(decisions);
+    if (!first.ok) return first;
+    const wantsAttest = first.value.some((plan) => plan.pendingAttest !== undefined && plan.row.gaps.length === 0);
+    if (!wantsAttest) return this.applyPlans(first.value, undefined);
+    if (attest === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "done_contract_migration",
+        message: "tasks that already landed on main need the union run of their oracles (BR-1549), and this call has no integrate runner or merge queue; nothing was written",
+      });
+    }
+    // reason: the turn is taken BEFORE the plan that is acted on, so a migration that waited behind another sees the rows the first one
+    // recorded and finds nothing left to run (a concurrent migration re-runs no oracle).
+    return await attest.inTurn(async () => {
+      const planned = await this.planAll(decisions);
+      if (!planned.ok) return planned;
+      return this.applyPlans(planned.value, attest);
+    });
+  }
 
-    const writes = planned.value.filter((plan) => plan.nextExtra !== undefined);
-    if (writes.length === 0) return ok({ applied: true, rows, gaps: [], written: [] });
+  private async applyPlans(plans: readonly Plan[], attest: LandedAttestPort | undefined): Promise<Result<MigrationReport, LoreError>> {
+    const rows = plans.map((plan) => plan.row);
+    const taskGaps = rows.flatMap((row) => row.gaps);
+
+    const stored = await this.storeContracts(plans);
+    if (!stored.ok) return stored;
+    const pending = plans.filter((plan) => plan.pendingAttest !== undefined && plan.row.gaps.length === 0);
+    if (attest === undefined || pending.length === 0) {
+      return ok({ applied: true, rows, gaps: taskGaps, written: stored.value, attested: [] });
+    }
+    const union = await this.runLandedUnion(attest, pending);
+    if (!union.ok) return union;
+    return ok({ applied: true, rows, gaps: [...taskGaps, ...union.value.gaps], written: stored.value, attested: union.value.attested });
+  }
+
+  /**
+   * One run of the union of the landed tasks' oracles on main's newest commit, then the integrate rows of each task whose oracles all
+   * passed, bound to that commit and to the task's own landing (BR-1549). A failed oracle, a task left out of the run and a write that
+   * failed each become a gap naming the task, so the migration exits 4 and the other tasks stay attested.
+   */
+  private async runLandedUnion(attest: LandedAttestPort, pending: readonly Plan[]): Promise<Result<{ gaps: MigrationGap[]; attested: string[] }, LoreError>> {
+    const found = await this.store.findMany({ type: "task" });
+    if (!found.ok) return found;
+    const bySlug = new Map(found.value.map((doc) => [doc.slug, doc]));
+    const tasks: LandingTask[] = [];
+    const landingOf = new Map<string, string>();
+    for (const plan of pending) {
+      const doc = bySlug.get(plan.row.slug);
+      const contract = doneContractSchema.safeParse(doc?.extra["done_contract"]);
+      if (doc === undefined || !contract.success || plan.pendingAttest === undefined) {
+        return err({ code: "VALIDATION_ERROR", field: "done_contract", message: `${plan.row.slug}: its stored contract cannot be read back, so it cannot be attested`, value: plan.row.slug });
+      }
+      tasks.push({ slug: doc.slug, doc, contract: contract.data, via: "claimed" });
+      landingOf.set(doc.slug, plan.pendingAttest.landing_commit);
+    }
+    const main = this.git.resolveCommit(MAIN_REF);
+    if (main === undefined) return err({ code: "VALIDATION_ERROR", field: "main", message: `git cannot resolve ${MAIN_REF}, so the landed tasks cannot be attested` });
+    return await attest.withMainTree(async (tree) => {
+      const nowIso = new Date(attest.clock()).toISOString();
+      attest.log(`migrate: running the union of the oracles of ${tasks.map((task) => task.slug).join(", ")} on ${tree.commit.slice(0, 12)} (one run per distinct oracle)`);
+      const proof = await attest.prove({
+        branch: "landed tasks",
+        // reason: the tasks landed through different branches; the deleted-file check reads the claim start of each task to main's tip.
+        tip: tree.commit,
+        tasks,
+        worktree: tree.worktree,
+        commit: tree.commit,
+        base: tree.commit,
+        floor: undefined,
+        settings: attest.settings,
+        runCommand: attest.runCommand,
+        log: attest.log,
+        clock: attest.clock,
+        nowIso,
+        keepFailures: true,
+      });
+      if (!proof.ok) return proof;
+      const gaps: MigrationGap[] = [];
+      const failedBy = new Map<string, OracleOutcome[]>();
+      for (const outcome of proof.value.outcomes) {
+        if (outcome.passed) continue;
+        for (const slug of outcome.oracle.tasks) failedBy.set(slug, [...(failedBy.get(slug) ?? []), outcome]);
+      }
+      for (const [slug, outcomes] of failedBy) {
+        for (const outcome of outcomes) {
+          gaps.push({ slug, code: "landed-oracle-failed", message: `oracle ${outcome.oracle.id} failed on main ${tree.commit.slice(0, 12)}: ${outcome.cause}`, fill: `fix it on main, then run lore migrate done-contract --apply again (the task keeps its contract and is attested by the next run)` });
+        }
+      }
+      for (const left of proof.value.excluded) {
+        gaps.push({ slug: left.task, code: "landed-oracle-excluded", message: left.message, fill: `lore done ${left.task} names the floor; fix it, then run lore migrate done-contract --apply again` });
+      }
+      const ready = proof.value.tasks.filter((task) => !failedBy.has(task.slug));
+      const attested: string[] = [];
+      // reason: one record call per landing commit, because an integrate row names the landing it belongs to (recorded_at_landing).
+      for (const landing of new Set(ready.map((task) => landingOf.get(task.slug) as string))) {
+        const recorded = await attest.record({
+          tasks: ready.filter((task) => landingOf.get(task.slug) === landing),
+          commit: tree.commit,
+          landingCommit: landing,
+          outcomes: proof.value.outcomes,
+          by: attest.settings.by,
+          nowIso,
+          log: attest.log,
+        });
+        attested.push(...recorded.recorded);
+        for (const slug of recorded.failed) {
+          gaps.push({ slug, code: "landed-evidence-not-recorded", message: "the rows of the union run could not be written to the task", fill: "run lore migrate done-contract --apply again" });
+        }
+      }
+      return ok({ gaps, attested });
+    });
+  }
+
+  /** Writes every compilable plan in ONE store transaction; returns the slugs written. */
+  private async storeContracts(planned: readonly Plan[]): Promise<Result<string[], LoreError>> {
+    const writes = planned.filter((plan) => plan.nextExtra !== undefined);
+    if (writes.length === 0) return ok([]);
 
     const now = new Date().toISOString();
     const actor = resolveWriteActorFor(this.store);
@@ -225,7 +391,7 @@ export class DoneContractMigrationService {
     );
     const companions = writes.slice(1).map((plan) => companionWrite(plan, actor, now));
     const [primary] = writes;
-    if (primary === undefined || primary.nextExtra === undefined) return ok({ applied: true, rows, gaps: [], written: [] });
+    if (primary === undefined || primary.nextExtra === undefined) return ok([]);
     const written = await this.writer.writeDoc({
       doc: primary.task,
       patch: { extra: primary.nextExtra },
@@ -239,7 +405,7 @@ export class DoneContractMigrationService {
       extras: { ...(companions.length > 0 ? { also_update: companions } : {}), ...(audits.length > 0 ? { also_audit: audits } : {}) },
     });
     if (!written.ok) return written;
-    return ok({ applied: true, rows, gaps: [], written: writes.map((plan) => plan.task.slug) });
+    return ok(writes.map((plan) => plan.task.slug));
   }
 
   private async planAll(decisions: MigrationDecisions): Promise<Result<Plan[], LoreError>> {
@@ -267,6 +433,8 @@ export class DoneContractMigrationService {
     const held = extractHeldClaim(task);
     const namesBranch = claimedNamesOf(claimRows.value, task).length > 0;
     const holdsNoBranchClaim = held !== undefined && held.branch === undefined && held.worktree === undefined;
+    // reason: BR-1549 — a task whose work already landed on main is judged at its landing, never at the migration commit.
+    const landing = readTaskLanding(task.extra);
     const gaps: MigrationGap[] = [];
     const gap = (code: MigrationGap["code"], message: string, fill: string): void => {
       gaps.push({ slug: task.slug, code, message, fill });
@@ -290,7 +458,7 @@ export class DoneContractMigrationService {
     } else {
       const scripted = await this.contracts.hasLiveScriptAc(task);
       if (!scripted.ok) return scripted;
-      kind = inferKind(extractFileAnchors(task).length > 0 || namesBranch, scripted.value);
+      kind = inferKind(extractFileAnchors(task).length > 0 || namesBranch || landing !== undefined, scripted.value);
       kindSource = "inferred";
     }
 
@@ -343,10 +511,17 @@ export class DoneContractMigrationService {
     // contract: the same compile approve runs.
     let contract: DoneContract | undefined;
     let nextExtra: Record<string, unknown> | undefined;
-    if (!hasContract && kind !== undefined) {
+    const landedOnMain = landing !== undefined && this.git.isAncestor(landing.landing_commit, MAIN_REF);
+    if (!hasContract && landing !== undefined && !landedOnMain) {
+      gap(
+        "landing-not-on-main",
+        `its landing record names ${landing.landing_commit.slice(0, 12)}, which main does not contain, so the task cannot be compiled at its landing`,
+        `lore integrate ${landing.branch} (lands it again), or correct the landing record`,
+      );
+    } else if (!hasContract && kind !== undefined) {
       const compiled = await this.contracts.compileForApprove(
         { ...task, extra: { ...task.extra, kind } },
-        needsWaiver && waiver !== undefined ? { redWaiverReason: waiver.trim() } : {},
+        { ...(needsWaiver && waiver !== undefined ? { redWaiverReason: waiver.trim() } : {}), ...(landing !== undefined ? { compileAt: landing.landing_commit } : {}) },
       );
       if (compiled.ok) {
         contract = compiled.value;
@@ -383,7 +558,13 @@ export class DoneContractMigrationService {
     const parts: string[] = [];
     if (contract !== undefined) parts.push(`done contract stored (kind ${kind})`);
     if (releases) parts.push("no-branch claim released");
-    const row: MigrationRow = { slug: task.slug, status: task.status, kind, kindSource, contract, alreadyCompiled: hasContract, releasesClaim: releases, gaps };
+    const row: MigrationRow = { slug: task.slug, status: task.status, kind, kindSource, contract, alreadyCompiled: hasContract, releasesClaim: releases, landedAt: landing?.landing_commit, gaps };
+    // reason: BR-1549 — the union run attests a code task that landed on main and holds no integrate row of that landing yet; a task
+    // already attested (by integrate or by an earlier migration) is not run again.
+    const storedContract = hasContract ? doneContractSchema.safeParse(task.extra["done_contract"]) : undefined;
+    const contractKind = storedContract?.success === true ? storedContract.data.kind : contract?.kind;
+    const attested = landing !== undefined && evidence.some((entry) => entry.attestation?.recorded_at_landing === landing.landing_commit && entry.result === "pass");
+    const pendingAttest = landing !== undefined && landedOnMain && contractKind === "code" && gaps.length === 0 && !attested ? landing : undefined;
     return ok({
       row,
       task,
@@ -392,6 +573,7 @@ export class DoneContractMigrationService {
       summary: `done-contract migration: ${parts.join("; ") || "tip recorded"}`,
       waiverListed: !hasContract && needsWaiver,
       tipListed,
+      pendingAttest,
     });
   }
 }
@@ -411,6 +593,11 @@ function addCauseGap(gap: (code: MigrationGap["code"], message: string, fill: st
   if (cause.code === "falsifier-literal-absent") {
     const ac = /^(\S+) declares/.exec(cause.message)?.[1] ?? "<AC-id>";
     gap("falsifier-correction", cause.message, `lore ac set <spec> ${ac} --correction "<reason>" (with the corrected --falsifier-* flags)`);
+    return;
+  }
+  if (cause.code === "anchor-absent") {
+    const path = /^the test file (\S+) is anchored/.exec(cause.message)?.[1] ?? "<path>";
+    gap("anchor-absent", `${cause.code}: ${cause.message}`, `lore anchor rm ${slug} ${path}, or lore anchor add ${slug} ${path} --creates`);
     return;
   }
   gap("uncompilable", `${cause.code}: ${cause.message}`, `lore set ${slug} --correction "<reason>" (returns the task to draft), then lore approve ${slug}`);

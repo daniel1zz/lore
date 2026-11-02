@@ -438,7 +438,7 @@ function refuseClaim(taskSlug: string, name: "work-needs-branch" | "worktree-wit
  * Refuses a claim under a name of the done-contract spec (AC-DCS1-14); nothing is written. The name opens the message so a
  * caller and a test match it without parsing `details`.
  */
-function refuseClaimByKind(name: "kind-has-no-claim" | "kind-missing" | "shared-branch", message: string): Result<never, LoreError> {
+function refuseClaimByKind(name: "kind-has-no-claim" | "kind-missing" | "contract-missing" | "shared-branch", message: string): Result<never, LoreError> {
   return err({ code: "VALIDATION_ERROR", field: "claim", message: `${name}: ${message}`, value: { refusal: name } });
 }
 
@@ -3415,6 +3415,16 @@ export class TaskWorkflowService {
       );
     }
 
+    // reason: BR-1490 as amended — a task the migration left gapped holds no contract; its claim is refused by name, naming the migration.
+    // reason: only a task past draft is judged: approve compiles the contract, so an approved or active task without one is exactly the
+    // state the migration left (a draft is not yet approved and has none by design).
+    if (task.status !== "draft" && !doneContractSchema.safeParse(task.extra["done_contract"]).success) {
+      return refuseClaimByKind(
+        "contract-missing",
+        `${task.slug} holds no done contract. Run \`lore migrate done-contract\` to list what is missing for it and the command that fills each gap.`,
+      );
+    }
+
     // reason: BR-1468 as modified by AC-DCS1-14 — a code task changes files, so its claim needs its own branch: a no-branch
     // claim has no tip to measure. A refresh that already holds a branch is fine.
     if (opts.worktree === undefined && readClaimRecord(task)?.worktree === undefined) {
@@ -4665,7 +4675,7 @@ export class TaskWorkflowService {
       field: "done_contract",
       message:
         stored === undefined
-          ? `Task "${task.slug}" holds no done contract: the contract is compiled when the task is approved (\`lore approve ${task.slug}\`), and lore done judges only by the stored contract.`
+          ? `contract-missing: Task "${task.slug}" holds no done contract: the contract is compiled when the task is approved (\`lore approve ${task.slug}\`), or for a task approved earlier by \`lore migrate done-contract --apply\` (run \`lore migrate done-contract\` to list what is still missing for it), and lore done judges only by the stored contract.`
           : `Task "${task.slug}" holds a done contract that does not parse (${parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}).`,
       value: stored,
     });
