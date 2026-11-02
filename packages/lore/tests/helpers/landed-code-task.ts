@@ -17,6 +17,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { landWithoutIntegrate } from "./done-contract-land";
+import { templatedFieldsArgs } from "./templated-create";
 
 /**
  * The `workflow.done_contract` keys a fixture seeds so approve can compile a contract: each command prints a runner summary, so a
@@ -83,7 +84,7 @@ export async function landCodeTask(world: LandingWorld, options: LandedCodeTaskO
   const { branch, worktree, session } = options;
   const createArgs = [
     "create", "task", "--adhoc", "--spec", options.spec, "--title", options.title, "--kind", "code",
-    "--content", "Throwaway task.", "--no-ai", "--ac-scope", "", "--json",
+    "--no-ai", "--ac-scope", "", "--json", ...templatedFieldsArgs("task"),
   ];
   const created = JSON.parse(await mustLore(world, createArgs, session)) as { data: { slug: string } };
   const slug = created.data.slug;
